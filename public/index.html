@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>LinenTrack</title>
+<style>
+  :root {
+    --teal: #1D9E75; --teal-light: #E1F5EE; --teal-dark: #0F6E56; --teal-mid: #5DCAA5;
+    --blue: #185FA5; --blue-light: #E6F1FB; --blue-mid: #378ADD;
+    --coral: #D85A30; --coral-light: #FAECE7; --coral-dark: #993C1D;
+    --amber: #854F0B; --amber-light: #FAEEDA;
+    --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
+    --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
+    --radius: 10px; --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+
+  /* ── Login ── */
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; background: var(--gray-50); }
+  .login-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 2.5rem 2rem; width: 100%; max-width: 360px; text-align: center; }
+  .login-logo { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .login-logo span { color: var(--teal); }
+  .login-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 2rem; }
+  .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 1.5rem; }
+  .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--gray-200); transition: all 0.15s; }
+  .pin-dot.filled { background: var(--teal); border-color: var(--teal); }
+  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .num-btn { padding: 14px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); background: #fff; font-size: 18px; font-weight: 500; cursor: pointer; transition: all 0.1s; }
+  .num-btn:hover { background: var(--gray-50); }
+  .num-btn:active { background: var(--gray-100); transform: scale(0.97); }
+  .num-btn.del { font-size: 14px; color: var(--gray-400); }
+  .login-err { color: var(--coral); font-size: 13px; margin-top: 1rem; min-height: 20px; }
+
+  /* ── App shell ── */
+  #app { display: none; }
+  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; justify-content: space-between; height: 52px; position: sticky; top: 0; z-index: 100; }
+  .topbar-logo { font-size: 16px; font-weight: 600; }
+  .topbar-logo span { color: var(--teal); }
+  .topbar-role { font-size: 12px; color: var(--gray-400); display: flex; align-items: center; gap: 8px; }
+  .topbar-role button { font-size: 12px; color: var(--coral); background: none; border: none; cursor: pointer; padding: 4px 8px; }
+  .tab-bar { background: #fff; border-bottom: 0.5px solid var(--gray-200); display: flex; padding: 0 1rem; overflow-x: auto; gap: 0; }
+  .tab-btn { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--gray-400); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.15s; }
+  .tab-btn.active { color: var(--teal); border-bottom-color: var(--teal); }
+  .content { padding: 1.25rem; max-width: 760px; margin: 0 auto; }
+
+  /* ── Components ── */
+  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-400); margin-bottom: 1rem; }
+  .scan-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius); padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.15s; margin-bottom: 1rem; }
+  .scan-zone:hover { border-color: var(--teal-mid); background: var(--teal-light); }
+  .scan-zone svg { width: 36px; height: 36px; stroke: var(--teal); margin-bottom: 8px; }
+  .scan-zone p { font-size: 13px; color: var(--gray-400); }
+  .scan-zone .hint { font-size: 11px; color: var(--teal); margin-top: 4px; }
+  label { font-size: 12px; color: var(--gray-400); display: block; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 9px 12px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); background: #fff; color: var(--gray-900); margin-bottom: 10px; outline: none; transition: border 0.15s; }
+  input:focus, select:focus { border-color: var(--teal); }
+  .btn { padding: 10px 20px; border-radius: var(--radius-sm); border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-full { width: 100%; justify-content: center; }
+  .btn-primary { background: var(--teal); color: #fff; }
+  .btn-primary:hover { background: var(--teal-dark); }
+  .btn-blue { background: var(--blue-light); color: var(--blue); }
+  .btn-blue:hover { background: #B5D4F4; }
+  .btn-danger { background: var(--coral-light); color: var(--coral-dark); }
+  .btn-danger:hover { background: #F5C4B3; }
+  .btn-ghost { background: var(--gray-100); color: var(--gray-700); }
+  .btn-ghost:hover { background: var(--gray-200); }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 1rem; }
+  .stat { background: var(--gray-50); border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; }
+  .stat-num { font-size: 26px; font-weight: 600; line-height: 1; }
+  .stat-lbl { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+  .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge-out { background: var(--coral-light); color: var(--coral-dark); }
+  .badge-in { background: var(--teal-light); color: var(--teal-dark); }
+  .badge-count { background: var(--blue-light); color: var(--blue); }
+  .row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); }
+  .row:last-child { border-bottom: none; }
+  .row-main { flex: 1; min-width: 0; }
+  .row-title { font-size: 13px; font-weight: 500; }
+  .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+  .result-box { border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .result-success { background: var(--teal-light); border: 0.5px solid var(--teal-mid); }
+  .result-return { background: var(--blue-light); border: 0.5px solid var(--blue-mid); }
+  .result-error { background: var(--coral-light); border: 0.5px solid var(--coral); }
+  .result-box .r-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .result-box .r-sub { font-size: 12px; color: var(--gray-700); }
+  .search-row { display: flex; gap: 8px; margin-bottom: 1rem; }
+  .search-row input, .search-row select { margin-bottom: 0; }
+  .empty { text-align: center; padding: 2.5rem; color: var(--gray-400); font-size: 13px; }
+  .divider { height: 0.5px; background: var(--gray-100); margin: 12px 0; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .section-header h2 { font-size: 15px; font-weight: 600; }
+  .tag { display: inline-block; padding: 2px 8px; background: var(--gray-100); border-radius: 20px; font-size: 11px; color: var(--gray-700); font-family: monospace; }
+  .cleaner-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 1rem; }
+  .cleaner-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .cleaner-card .c-name { font-size: 13px; font-weight: 500; }
+  .cleaner-card .c-count { font-size: 11px; color: var(--gray-400); }
+
+  /* ── Scan result animated entry ── */
+  @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .anim { animation: slideIn 0.2s ease; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════ LOGIN ══════════════ -->
+<div class="login-wrap" id="login">
+  <div class="login-card">
+    <div class="login-logo"><span>Linen</span>Track</div>
+    <div class="login-sub">Enter your PIN to continue</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="d0"></div>
+      <div class="pin-dot" id="d1"></div>
+      <div class="pin-dot" id="d2"></div>
+      <div class="pin-dot" id="d3"></div>
+    </div>
+    <div class="numpad">
+      <button class="num-btn" onclick="pinPress('1')">1</button>
+      <button class="num-btn" onclick="pinPress('2')">2</button>
+      <button class="num-btn" onclick="pinPress('3')">3</button>
+      <button class="num-btn" onclick="pinPress('4')">4</button>
+      <button class="num-btn" onclick="pinPress('5')">5</button>
+      <button class="num-btn" onclick="pinPress('6')">6</button>
+      <button class="num-btn" onclick="pinPress('7')">7</button>
+      <button class="num-btn" onclick="pinPress('8')">8</button>
+      <button class="num-btn" onclick="pinPress('9')">9</button>
+      <button class="num-btn del" onclick="pinClear()">Clear</button>
+      <button class="num-btn" onclick="pinPress('0')">0</button>
+      <button class="num-btn del" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- ══════════════ APP ══════════════ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo"><span>Linen</span>Track</div>
+    <div class="topbar-role">
+      <span id="role-label"></span>
+      <button onclick="logout()">Sign out</button>
+    </div>
+  </div>
+  <div class="tab-bar" id="tab-bar"></div>
+  <div class="content" id="main-content"></div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let role = null;
+let pinVal = '';
+const TABS = {
+  warehouse: ['scan', 'status', 'homes', 'log'],
+  admin: ['scan', 'status', 'homes', 'log', 'cleaners', 'settings']
+};
+const TAB_LABELS = { scan: 'Scan Bag', status: 'Who Has What', homes: 'By Home', log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings' };
+let currentTab = 'scan';
+
+// ── PIN ────────────────────────────────────────────────────────────────────────
+function pinPress(d) {
+  if (pinVal.length >= 4) return;
+  pinVal += d;
+  updateDots();
+  if (pinVal.length === 4) setTimeout(submitPin, 80);
+}
+function pinDel() { pinVal = pinVal.slice(0, -1); updateDots(); }
+function pinClear() { pinVal = ''; updateDots(); }
+function updateDots() {
+  for (let i = 0; i < 4; i++) {
+    document.getElementById('d' + i).classList.toggle('filled', i < pinVal.length);
+  }
+}
+async function submitPin() {
+  document.getElementById('login-err').textContent = '';
+  try {
+    const r = await fetch('/api/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ pin: pinVal }) });
+    const data = await r.json();
+    if (!r.ok) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
+    role = data.role;
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('role-label').textContent = role === 'admin' ? '🔑 Admin' : '📦 Warehouse';
+    buildTabs();
+    showTab('scan');
+  } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
+}
+function logout() { role = null; pinVal = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+function buildTabs() {
+  const tabs = TABS[role];
+  document.getElementById('tab-bar').innerHTML = tabs.map(t =>
+    `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
+  ).join('');
+}
+function showTab(t) {
+  currentTab = t;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const el = document.getElementById('tab-' + t);
+  if (el) el.classList.add('active');
+  const fns = { scan: renderScan, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings };
+  if (fns[t]) fns[t]();
+}
+
+// ── Scan Tab ───────────────────────────────────────────────────────────────────
+let scanState = { bag: null, cleaners: [] };
+function renderScan() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="card">
+      <div class="card-title">Step 1 — scan or type bag ID</div>
+      <div class="scan-zone" onclick="focusScanInput()" id="scan-zone">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
+          <rect x="3" y="16" width="5" height="5" rx="1"/><line x1="16" y1="16" x2="21" y2="16"/>
+          <line x1="16" y1="16" x2="16" y2="21"/><line x1="21" y1="21" x2="21" y2="21"/>
+          <line x1="8" y1="12" x2="3" y2="12"/><line x1="12" y1="3" x2="12" y2="8"/>
+          <line x1="12" y1="16" x2="12" y2="21"/>
+        </svg>
+        <p>Tap here then scan with your Bluetooth scanner</p>
+        <p class="hint">Scanner types the bag ID automatically</p>
+      </div>
+      <label>Bag ID</label>
+      <input type="text" id="scan-input" placeholder="e.g. HOME-01-A" autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')lookupBag()" />
+      <button class="btn btn-ghost btn-full" onclick="lookupBag()">Look up bag →</button>
+    </div>
+    <div id="scan-result"></div>
+  `;
+}
+function focusScanInput() { document.getElementById('scan-input')?.focus(); }
+async function lookupBag() {
+  const id = (document.getElementById('scan-input')?.value || '').trim().toUpperCase();
+  if (!id) return;
+  const res = document.getElementById('scan-result');
+  res.innerHTML = '<div class="card" style="color:var(--gray-400);font-size:13px">Looking up...</div>';
+  try {
+    const r = await fetch('/api/bag/' + encodeURIComponent(id));
+    const bag = await r.json();
+    if (!r.ok) {
+      res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">⚠ Bag not found: ${id}</div><div class="r-sub">Check the tag or add this bag in Admin → Bags.</div></div>`;
+      return;
+    }
+    scanState.bag = bag;
+    if (bag.status === 'in') {
+      // Fetch cleaners for dropdown
+      const cr = await fetch('/api/cleaners');
+      scanState.cleaners = await cr.json();
+      const opts = scanState.cleaners.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      res.innerHTML = `
+        <div class="result-box result-success anim">
+          <div class="r-title">✓ ${bag.home_name}</div>
+          <div class="r-sub">Bag <strong>${bag.id}</strong> · At warehouse — ready to send out</div>
+        </div>
+        <div class="card anim">
+          <div class="card-title">Assign to cleaner</div>
+          <label>Cleaner taking this bag</label>
+          <select id="cleaner-sel"><option value="">Select cleaner...</option>${opts}</select>
+          <button class="btn btn-primary btn-full" onclick="doCheckout()">Send out with cleaner →</button>
+        </div>`;
+    } else {
+      const since = bag.checked_out ? new Date(bag.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      res.innerHTML = `
+        <div class="result-box result-return anim">
+          <div class="r-title">${bag.home_name}</div>
+          <div class="r-sub">Bag <strong>${bag.id}</strong> · With <strong>${bag.cleaner_name}</strong>${since ? ' since ' + since : ''}</div>
+        </div>
+        <div class="card anim">
+          <div class="card-title">Check in return</div>
+          <label>Condition notes (optional)</label>
+          <input type="text" id="return-notes" placeholder="e.g. stain on corner, missing bag, needs rewash" />
+          <button class="btn btn-blue btn-full" onclick="doCheckin()">← Confirm return — check bag in</button>
+        </div>`;
+    }
+  } catch (e) { res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Connection error</div><div class="r-sub">Check server connection.</div></div>`; }
+}
+async function doCheckout() {
+  const cleaner_id = document.getElementById('cleaner-sel')?.value;
+  if (!cleaner_id) { alert('Please select a cleaner'); return; }
+  const bag = scanState.bag;
+  const r = await fetch(`/api/bag/${bag.id}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cleaner_id: parseInt(cleaner_id) }) });
+  const data = await r.json();
+  const res = document.getElementById('scan-result');
+  if (r.ok) {
+    res.innerHTML = `<div class="result-box result-success anim"><div class="r-title">✓ Sent out successfully</div><div class="r-sub">${data.home} (${data.bag_id}) assigned to <strong>${data.cleaner}</strong></div></div>`;
+    document.getElementById('scan-input').value = '';
+    scanState.bag = null;
+  } else {
+    res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Error</div><div class="r-sub">${data.error}</div></div>`;
+  }
+}
+async function doCheckin() {
+  const notes = document.getElementById('return-notes')?.value || '';
+  const bag = scanState.bag;
+  const r = await fetch(`/api/bag/${bag.id}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ notes }) });
+  const data = await r.json();
+  const res = document.getElementById('scan-result');
+  if (r.ok) {
+    res.innerHTML = `<div class="result-box result-return anim"><div class="r-title">✓ Checked back in</div><div class="r-sub">${data.home} (${data.bag_id}) returned by <strong>${data.cleaner}</strong>${notes ? ' · Notes: ' + notes : ''}</div></div>`;
+    document.getElementById('scan-input').value = '';
+    scanState.bag = null;
+  } else {
+    res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Error</div><div class="r-sub">${data.error}</div></div>`;
+  }
+}
+
+// ── Status Tab ─────────────────────────────────────────────────────────────────
+async function renderStatus() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const [inv, stats] = await Promise.all([fetch('/api/inventory').then(r=>r.json()), fetch('/api/stats').then(r=>r.json())]);
+  // Group by cleaner
+  const byCleaner = {};
+  const inWarehouse = [];
+  inv.forEach(b => {
+    if (b.status === 'out') {
+      if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name] = [];
+      byCleaner[b.cleaner_name].push(b);
+    } else { inWarehouse.push(b); }
+  });
+
+  let html = `
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total bags</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--coral)">${stats.out}</div><div class="stat-lbl">With cleaners</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--teal)">${stats['in']}</div><div class="stat-lbl">At warehouse</div></div>
+    </div>
+    <div class="search-row">
+      <input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" />
+      <select id="status-f" onchange="filterStatus()" style="width:150px">
+        <option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option>
+      </select>
+    </div>
+    <div id="status-body">`;
+
+  // With cleaners section
+  Object.entries(byCleaner).sort().forEach(([name, bags]) => {
+    html += `<div class="card" data-section="out">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600">${name}</div>
+        <span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span>
+      </div>`;
+    bags.forEach(b => {
+      const since = b.checked_out ? new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+      html += `<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}">
+        <div class="row-main">
+          <div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>
+          ${since ? `<div class="row-sub">Since ${since}</div>` : ''}
+        </div>
+        <span class="badge badge-out">Out</span>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+
+  if (inWarehouse.length) {
+    html += `<div class="card" data-section="in">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600">At warehouse</div>
+        <span class="badge badge-in">${inWarehouse.length} bags</span>
+      </div>`;
+    inWarehouse.forEach(b => {
+      html += `<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}">
+        <div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div>
+        <span class="badge badge-in">In</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+function filterStatus() {
+  const q = (document.getElementById('status-q')?.value || '').toLowerCase();
+  const f = document.getElementById('status-f')?.value || '';
+  document.querySelectorAll('[data-section]').forEach(sec => {
+    const section = sec.dataset.section;
+    if (f && section !== f) { sec.style.display = 'none'; return; }
+    sec.style.display = '';
+    if (q) {
+      let any = false;
+      sec.querySelectorAll('[data-search]').forEach(r => {
+        const match = r.dataset.search.includes(q);
+        r.style.display = match ? '' : 'none';
+        if (match) any = true;
+      });
+      sec.style.display = any ? '' : 'none';
+    } else {
+      sec.querySelectorAll('[data-search]').forEach(r => r.style.display = '');
+    }
+  });
+}
+
+// ── Homes Tab ──────────────────────────────────────────────────────────────────
+async function renderHomes() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const inv = await fetch('/api/inventory').then(r => r.json());
+  const homeMap = {};
+  inv.forEach(b => {
+    if (!homeMap[b.home_name]) homeMap[b.home_name] = { code: b.home_code, bags: [] };
+    homeMap[b.home_name].bags.push(b);
+  });
+  let html = `<div class="search-row"><input type="text" id="home-q" placeholder="Search home..." oninput="filterHomes()" /></div><div id="homes-body">`;
+  Object.entries(homeMap).sort((a,b)=>a[1].code.localeCompare(b[1].code)).forEach(([name, {code, bags}]) => {
+    const out = bags.filter(b=>b.status==='out');
+    const inW = bags.filter(b=>b.status==='in');
+    html += `<div class="card home-card" data-home="${name.toLowerCase()}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <div style="font-size:14px;font-weight:600">${name}</div>
+          <div style="font-size:11px;color:var(--gray-400)">${code}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          ${out.length ? `<span class="badge badge-out">${out.length} out</span>` : ''}
+          ${inW.length ? `<span class="badge badge-in">${inW.length} in</span>` : ''}
+        </div>
+      </div>`;
+    bags.forEach(b => {
+      const since = b.checked_out ? new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
+        <span class="tag">${b.id}</span>
+        <span style="flex:1;color:var(--gray-400)">${b.status==='out' ? '→ '+b.cleaner_name+(since?' ('+since+')':'') : 'At warehouse'}</span>
+        <span class="badge ${b.status==='out'?'badge-out':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':'In'}</span>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+  html += `</div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+function filterHomes() {
+  const q = (document.getElementById('home-q')?.value || '').toLowerCase();
+  document.querySelectorAll('.home-card').forEach(c => { c.style.display = !q || c.dataset.home.includes(q) ? '' : 'none'; });
+}
+
+// ── Log Tab ────────────────────────────────────────────────────────────────────
+async function renderLog() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const log = await fetch('/api/activity').then(r => r.json());
+  if (!log.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No activity yet</div>'; return; }
+  let html = '<div class="card" style="padding:0.75rem 1.25rem">';
+  log.forEach(e => {
+    const isReturn = e.action === 'Returned';
+    const dt = new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title">
+          <span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span>
+          <span class="tag">${e.bag_id}</span> · ${e.home_name}
+        </div>
+        <div class="row-sub">${dt} · ${e.cleaner_name}${e.notes ? ' · <em>'+e.notes+'</em>' : ''}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('main-content').innerHTML = html;
+}
+
+// ── Cleaners Tab (admin) ───────────────────────────────────────────────────────
+async function renderCleaners() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const cleaners = await fetch('/api/cleaners').then(r => r.json());
+  let html = `
+    <div class="section-header"><h2>Cleaners</h2></div>
+    <div class="card">
+      <div class="card-title">Add cleaner</div>
+      <div class="form-row">
+        <div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="margin-bottom:10px;width:100%" onclick="addCleaner()">Add cleaner</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Active cleaners</div>`;
+  if (cleaners.length) {
+    cleaners.forEach(c => {
+      html += `<div class="row">
+        <div class="row-main">
+          <div class="row-title">${c.name}</div>
+          <div class="row-sub">${c.bags_out} bag${c.bags_out!==1?'s':''} currently out</div>
+        </div>
+        ${c.bags_out === 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name}')">Remove</button>` : '<span class="badge badge-out">Has bags</span>'}
+      </div>`;
+    });
+  } else { html += '<div class="empty">No cleaners yet</div>'; }
+  html += `</div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+async function addCleaner() {
+  const name = document.getElementById('new-cleaner')?.value?.trim();
+  if (!name) return;
+  await fetch('/api/cleaners', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+  renderCleaners();
+}
+async function deleteCleaner(id, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  const r = await fetch('/api/cleaners/' + id, { method:'DELETE' });
+  const d = await r.json();
+  if (!r.ok) alert(d.error);
+  renderCleaners();
+}
+
+// ── Settings Tab (admin) ───────────────────────────────────────────────────────
+async function renderSettings() {
+  const homes = await fetch('/api/homes').then(r => r.json());
+  let html = `
+    <div class="card">
+      <div class="card-title">PINs</div>
+      <div class="form-row">
+        <div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
+        <div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
+      </div>
+      <button class="btn btn-primary" onclick="savePins()">Save PINs</button>
+      <div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div>
+    </div>
+
+    <div class="section-header"><h2>Homes & Bags</h2></div>
+    <div class="card">
+      <div class="card-title">Add home</div>
+      <div class="form-row">
+        <div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div>
+        <div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div>
+      </div>
+      <button class="btn btn-primary" onclick="addHome()">Add home</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Add bag to home</div>
+      <div class="form-row">
+        <div><label>Home</label>
+          <select id="bag-home-sel">
+            <option value="">Select home...</option>
+            ${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div>
+      </div>
+      <button class="btn btn-primary" onclick="addBag()">Add bag</button>
+      <div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">All homes</div>`;
+  homes.forEach(h => {
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title">${h.name} <span class="tag">${h.code}</span></div>
+        <div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div>
+      </div>
+      ${h.bag_count === 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>` : ''}
+    </div>`;
+  });
+  html += `</div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+async function savePins() {
+  const w = document.getElementById('wpin')?.value;
+  const a = document.getElementById('apin')?.value;
+  if ((w && w.length !== 4) || (a && a.length !== 4)) { alert('PINs must be exactly 4 digits'); return; }
+  await fetch('/api/settings/pins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ warehouse_pin: w||undefined, admin_pin: a||undefined }) });
+  document.getElementById('pin-msg').textContent = 'PINs updated!';
+  setTimeout(() => { if(document.getElementById('pin-msg')) document.getElementById('pin-msg').textContent=''; }, 2000);
+}
+async function addHome() {
+  const name = document.getElementById('new-home-name')?.value?.trim();
+  const code = document.getElementById('new-home-code')?.value?.trim().toUpperCase();
+  if (!name || !code) { alert('Name and code are required'); return; }
+  const r = await fetch('/api/homes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, code }) });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error); return; }
+  renderSettings();
+}
+async function deleteHome(id, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  const r = await fetch('/api/homes/' + id, { method:'DELETE' });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error); return; }
+  renderSettings();
+}
+async function addBag() {
+  const home_id = document.getElementById('bag-home-sel')?.value;
+  const bag_id = document.getElementById('new-bag-id')?.value?.trim().toUpperCase();
+  if (!home_id || !bag_id) { alert('Select a home and enter a bag ID'); return; }
+  const r = await fetch('/api/bags', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bag_id, home_id: parseInt(home_id) }) });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error); return; }
+  document.getElementById('bag-msg').textContent = `✓ Bag ${d.id} added`;
+  document.getElementById('new-bag-id').value = '';
+  setTimeout(() => { if(document.getElementById('bag-msg')) document.getElementById('bag-msg').textContent=''; }, 2000);
+  renderSettings();
+}
+
+// Auto-focus scan input when scan zone is visible
+document.addEventListener('click', e => {
+  if (currentTab === 'scan' && !e.target.closest('input, select, button')) {
+    document.getElementById('scan-input')?.focus();
+  }
+});
+</script>
+</body>
+</html>
