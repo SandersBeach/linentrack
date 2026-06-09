@@ -187,6 +187,7 @@ async function submitPin() {
     document.getElementById('role-label').textContent = role === 'admin' ? '🔑 Admin' : '📦 Warehouse';
     buildTabs();
     showTab('scan');
+    checkPendingQrScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
 function logout() { role = null; pinVal = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
@@ -693,31 +694,29 @@ document.addEventListener('click', e => {
 
 // ── QR code auto-lookup on page load ──────────────────────────────────────────
 // If someone scans a bag QR code, URL will be ?bag=HOME-01-A
-// Show PIN screen first, then auto-look up the bag after login
+// Store bag ID in sessionStorage so it survives the PIN login
 const QR_BAG_ID = new URLSearchParams(window.location.search).get('bag');
 if (QR_BAG_ID) {
-  // Store it so we can use it after PIN entry
-  window._qrBagId = QR_BAG_ID.toUpperCase();
+  sessionStorage.setItem('pendingBagScan', QR_BAG_ID.toUpperCase());
   // Add a hint on the login screen
   const sub = document.querySelector('.login-sub');
-  if (sub) sub.textContent = `Scanning bag ${window._qrBagId} — enter your PIN to continue`;
+  if (sub) sub.textContent = `Bag ${QR_BAG_ID.toUpperCase()} ready to scan — enter your PIN to continue`;
 }
 
-// Override showTab to handle QR auto-lookup after login
-const _origShowTab = showTab;
-window.showTab = function(t) {
-  _origShowTab(t);
-  if (t === 'scan' && window._qrBagId) {
-    setTimeout(() => {
-      const input = document.getElementById('scan-input');
-      if (input) {
-        input.value = window._qrBagId;
-        window._qrBagId = null; // clear so it doesn't repeat
-        lookupBag();
-      }
-    }, 100);
-  }
-};
+// After login, check for a pending QR scan and auto-process it
+function checkPendingQrScan() {
+  const pending = sessionStorage.getItem('pendingBagScan');
+  if (!pending) return;
+  sessionStorage.removeItem('pendingBagScan');
+  // Wait for scan tab to fully render then auto-fill and process
+  setTimeout(async () => {
+    const input = document.getElementById('scan-input');
+    if (input) {
+      input.value = pending;
+      await processScan();
+    }
+  }, 400);
+}
 </script>
 </body>
 </html>
