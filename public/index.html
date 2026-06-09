@@ -225,10 +225,14 @@ async function renderScan() {
         <button class="btn ${scanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setMode('in')">Checking bags back in</button>
       </div>
       <div id="cleaner-row" style="${scanState.mode==='out'?'':' display:none'}">
-        <label>Cleaner for this session</label>
-        <select id="cleaner-sel" onchange="scanState.selectedCleaner=this.value" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <label style="margin-bottom:0">Cleaner for this batch</label>
+          ${scanState.selectedCleaner ? `<button class="btn btn-ghost btn-sm" onclick="clearCleaner()" style="font-size:11px;padding:3px 10px">Change cleaner</button>` : ''}
+        </div>
+        <select id="cleaner-sel" onchange="onCleanerChange(this.value)" style="margin-bottom:12px">
           <option value="">Select cleaner...</option>${opts}
         </select>
+        ${scanState.selectedCleaner ? `<div style="font-size:11px;color:var(--teal-dark);margin-top:-8px;margin-bottom:8px">✓ Scanning for: <strong>${scanState.cleaners.find(c=>c.id==scanState.selectedCleaner)?.name||''}</strong></div>` : ''}
       </div>
       <label>Scan bag tag</label>
       <input type="text" id="scan-input" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="characters"
@@ -244,6 +248,40 @@ async function renderScan() {
 
 function setMode(m) {
   scanState.mode = m;
+  scanState.sessionLog = [];
+  renderScan();
+}
+
+function onCleanerChange(val) {
+  scanState.selectedCleaner = val;
+  // Re-render just the cleaner row to show confirmation
+  const cr = document.getElementById('cleaner-row');
+  if (!cr || !val) return;
+  const name = scanState.cleaners.find(c=>c.id==val)?.name||'';
+  // Update the confirmation line
+  let conf = cr.querySelector('.cleaner-confirm');
+  if (!conf) {
+    conf = document.createElement('div');
+    conf.className = 'cleaner-confirm';
+    conf.style.cssText = 'font-size:11px;color:var(--teal-dark);margin-top:-8px;margin-bottom:8px';
+    cr.appendChild(conf);
+  }
+  conf.innerHTML = `✓ Scanning for: <strong>${name}</strong>`;
+  // Show change button
+  let btn = cr.querySelector('.change-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm change-btn';
+    btn.style.cssText = 'font-size:11px;padding:3px 10px';
+    btn.textContent = 'Change cleaner';
+    btn.onclick = clearCleaner;
+    cr.querySelector('label').parentNode.appendChild(btn);
+  }
+  focusScanInput();
+}
+
+function clearCleaner() {
+  scanState.selectedCleaner = null;
   scanState.sessionLog = [];
   renderScan();
 }
@@ -708,12 +746,42 @@ function checkPendingQrScan() {
   const pending = sessionStorage.getItem('pendingBagScan');
   if (!pending) return;
   sessionStorage.removeItem('pendingBagScan');
-  // Wait for scan tab to fully render then auto-fill and process
   setTimeout(async () => {
     const input = document.getElementById('scan-input');
-    if (input) {
-      input.value = pending;
+    if (!input) return;
+    input.value = pending;
+    // If checking bags in, go straight to process — no cleaner needed
+    if (scanState.mode === 'in') {
       await processScan();
+      return;
+    }
+    // If sending out, check if cleaner already selected
+    const cleanerSel = document.getElementById('cleaner-sel');
+    const cleaner_id = cleanerSel?.value || scanState.selectedCleaner;
+    if (cleaner_id) {
+      // Cleaner already chosen — process immediately
+      await processScan();
+    } else {
+      // No cleaner yet — highlight the dropdown and wait for them to pick
+      if (cleanerSel) {
+        cleanerSel.style.border = '2px solid var(--coral)';
+        cleanerSel.style.borderRadius = 'var(--radius-sm)';
+        cleanerSel.focus();
+        // Add a hint message
+        const hint = document.createElement('div');
+        hint.id = 'qr-hint';
+        hint.style.cssText = 'font-size:12px;color:var(--coral-dark);margin-top:-6px;margin-bottom:8px;font-weight:500';
+        hint.textContent = '← Select a cleaner, then scan again or press Enter';
+        cleanerSel.parentNode.insertBefore(hint, cleanerSel.nextSibling);
+        // When cleaner is picked, auto-process
+        cleanerSel.onchange = async function() {
+          scanState.selectedCleaner = this.value;
+          this.style.border = '';
+          const h = document.getElementById('qr-hint');
+          if (h) h.remove();
+          if (this.value) await processScan();
+        };
+      }
     }
   }, 400);
 }
