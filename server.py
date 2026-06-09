@@ -51,38 +51,102 @@ def init_db():
     for key, val in [('warehouse_pin','1234'),('admin_pin','9999')]:
         db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, val))
     db.commit()
-    # Seed if empty
+
+    # Seed real homes and cleaners if empty
     count = db.execute("SELECT COUNT(*) FROM homes").fetchone()[0]
     if count == 0:
-        import random, string
         homes = [
-            ('Pelican Cottage','HOME-01'),('Dune House','HOME-02'),('Sandpiper Suite','HOME-03'),
-            ('Breeze Villa','HOME-04'),('Tide Escape','HOME-05'),('Sea Glass Cabin','HOME-06'),
-            ('Coral Reef Retreat','HOME-07'),('Sunset Bungalow','HOME-08'),('Palm View','HOME-09'),
-            ('The Starfish','HOME-10'),('Blue Horizon','HOME-11'),('Sandy Toes','HOME-12'),
-            ('Ocean Mist','HOME-13'),('Lighthouse Loft','HOME-14'),('Shore Thing','HOME-15'),
-            ('Wave Break','HOME-16'),('Hammock House','HOME-17'),('Gulf Breeze','HOME-18'),
-            ('Salty Air','HOME-19'),('Beachcomber','HOME-20'),
+            ("44 Thicket Circle", "HOME-01"),
+            ("93 Needlerush Drive", "HOME-02"),
+            ("295 Salt Box Lane", "HOME-03"),
+            ("428 Red Cedar Way", "HOME-04"),
+            ("65 Pond Cypress Circle", "HOME-05"),
+            ("91 Bluejack Street", "HOME-06"),
+            ("12 Viridian Park Drive", "HOME-07"),
+            ("20 Tall Timber Court", "HOME-08"),
+            ("49 Bluejack Street", "HOME-09"),
+            ("369 Spartina Circle", "HOME-10"),
+            ("349 Needlerush Drive", "HOME-11"),
+            ("202 East Royal Fern Way", "HOME-12"),
+            ("134 Royal Fern Way", "HOME-13"),
+            ("75 East Summersweet Lane", "HOME-14"),
+            ("25 Rain Lily Lane", "HOME-15"),
+            ("21 Chanel Court", "HOME-16"),
+            ("262 Garfield Street", "HOME-17"),
+            ("379 East Royal Fern Way", "HOME-18"),
+            ("51 Mistflower Lane", "HOME-19"),
+            ("1352 Western Lake Drive", "HOME-20"),
+            ("442 East Royal Fern Way", "HOME-21"),
+            ("73 Holly Street", "HOME-22"),
+            ("43 Sand Hill Circle", "HOME-23"),
+            ("446 Western Lake Drive", "HOME-24"),
+            ("1735 East Co Hwy 30A #203", "HOME-25"),
+            ("410 Pine Needle Way", "HOME-26"),
+            ("672 Western Lake Drive", "HOME-27"),
+            ("25 Lake District Lane", "HOME-28"),
+            ("9 Running Oak Circle", "HOME-29"),
+            ("179 Pine Needle Way", "HOME-30"),
+            ("422 Pine Needle Way", "HOME-31"),
+            ("31 Bluejack Street", "HOME-32"),
+            ("406 Red Cedar Way", "HOME-33"),
+            ("70 Scrub Oak Circle", "HOME-34"),
+            ("2743 E Co Hwy 30A, Unit 303", "HOME-35"),
+            ("271 Red Cedar Way", "HOME-36"),
+            ("19 Muhly Circle", "HOME-37"),
+            ("97 East Summersweet Lane", "HOME-38"),
+            ("728 Western Lake Drive", "HOME-39"),
+            ("90 Flatwood Street", "HOME-40"),
+            ("22 Flatwood Street", "HOME-41"),
+            ("109 Dandelion Drive", "HOME-42"),
+            ("255 Garfield Street", "HOME-43"),
+            ("176 Red Cedar Way", "HOME-44"),
+            ("184 East Royal Fern Way", "HOME-45"),
+            ("70 Sunset Ridge Lane", "HOME-46"),
+            ("2912 E. Co Hwy 30A", "HOME-47"),
+            ("46 Pine Needle Way", "HOME-48"),
+            ("124 Sunset Ridge Lane", "HOME-49"),
+            ("263 Magnolia Street", "HOME-50"),
+            ("73 Pond Cypress Circle", "HOME-51"),
+            ("433 Pine Needle Way", "HOME-52"),
+            ("254 Spartina Circle", "HOME-53"),
+            ("157 Sunflower Street", "HOME-54"),
+            ("100 Tumblehome Way", "HOME-55"),
+            ("260 Needlerush Drive", "HOME-56"),
+            ("80 Scrub Oak Circle", "HOME-57"),
+            ("394 Western Lake Drive", "HOME-58"),
+            ("37 Red Cedar Way", "HOME-59"),
+            ("5 Pond Cypress Way", "HOME-60"),
+            ("35 Suzanne Drive", "HOME-61"),
+            ("2060 E Co Hwy 30A", "HOME-62"),
+            ("194 Spartina Circle", "HOME-63"),
+            ("142 Mystic Cobalt Street", "HOME-64"),
+            ("209 Western Lake Drive", "HOME-65"),
+            ("37 Compass Point II, Unit 106", "HOME-66"),
+            ("138 East Royal Fern Way", "HOME-67"),
+            ("1217 Western Lake Drive", "HOME-68"),
+            ("72 Needlerush Drive", "HOME-69"),
+            ("86 Sunset Ridge Lane", "HOME-70"),
+            ("53 Muhly Circle", "HOME-71"),
+            ("29 Royal Fern Way", "HOME-72"),
+            ("99 Pond Cypress Way", "HOME-73"),
         ]
         for name, code in homes:
             db.execute("INSERT INTO homes(name,code) VALUES(?,?)", (name, code))
         db.commit()
-        cleaners = ['Maria G.','Rosa L.','James T.','Deb H.','Carlos M.','Linda F.','Tony R.']
+
+        cleaners = [
+            "A&D Cleaning",
+            "Dream Clean",
+            "Elizabeth Varo",
+            "Gesiane Barbosa",
+            "Jennifer Hawkins",
+            "Juan Carlos Rocha",
+            "Mario Cruz",
+            "Miranda Edney",
+            "Monserrat Guzman",
+        ]
         for c in cleaners:
             db.execute("INSERT INTO cleaners(name) VALUES(?)", (c,))
-        db.commit()
-        all_homes = db.execute("SELECT * FROM homes").fetchall()
-        all_cleaners = db.execute("SELECT * FROM cleaners").fetchall()
-        for home in all_homes:
-            count = random.randint(4,6)
-            for b in range(1, count+1):
-                bag_id = f"{home['code']}-{chr(64+b)}"
-                if random.random() > 0.45:
-                    c = random.choice(all_cleaners)
-                    db.execute("INSERT INTO bags(id,home_id,status,cleaner_id,checked_out) VALUES(?,?,?,?,?)",
-                        (bag_id, home['id'], 'out', c['id'], datetime.now().isoformat()))
-                else:
-                    db.execute("INSERT INTO bags(id,home_id,status) VALUES(?,?,?)", (bag_id, home['id'], 'in'))
         db.commit()
     db.close()
 
