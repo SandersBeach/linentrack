@@ -155,10 +155,10 @@
 let role = null;
 let pinVal = '';
 const TABS = {
-  warehouse: ['scan', 'status', 'homes', 'log'],
-  admin: ['scan', 'status', 'homes', 'log', 'cleaners', 'settings']
+  warehouse: ['scan', 'overdue', 'status', 'homes', 'log'],
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'settings']
 };
-const TAB_LABELS = { scan: 'Scan Bag', status: 'Who Has What', homes: 'By Home', log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings' };
+const TAB_LABELS = { scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home', log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings' };
 let currentTab = 'scan';
 
 // ── PIN ────────────────────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ function showTab(t) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
-  const fns = { scan: renderScan, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings };
+  const fns = { scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings };
   if (fns[t]) fns[t]();
 }
 
@@ -333,6 +333,71 @@ async function processScan() {
 
 // Keep old lookupBag for QR URL auto-lookup compatibility
 async function lookupBag() { await processScan(); }
+
+
+// ── Overdue Tab ────────────────────────────────────────────────────────────────
+async function renderOverdue() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Checking for overdue bags...</div>';
+  const inv = await fetch('/api/inventory').then(r => r.json());
+  const now = new Date();
+  const overdue = inv.filter(b => {
+    if (b.status !== 'out' || !b.checked_out) return false;
+    const out = new Date(b.checked_out);
+    const hours = (now - out) / (1000 * 60 * 60);
+    return hours >= 24;
+  });
+
+  if (!overdue.length) {
+    document.getElementById('main-content').innerHTML = `
+      <div class="card" style="text-align:center;padding:2.5rem">
+        <div style="font-size:32px;margin-bottom:8px">✓</div>
+        <div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div>
+        <div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div>
+      </div>`;
+    return;
+  }
+
+  // Group by cleaner
+  const byCleaner = {};
+  overdue.forEach(b => {
+    if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name] = [];
+    byCleaner[b.cleaner_name].push(b);
+  });
+
+  let html = `
+    <div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px">
+      <div style="font-size:28px">🚨</div>
+      <div>
+        <div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div>
+        <div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours — follow up needed</div>
+      </div>
+    </div>`;
+
+  Object.entries(byCleaner).sort().forEach(([name, bags]) => {
+    html += `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600;color:var(--coral-dark)">⚠ ${name}</div>
+        <span class="badge badge-out">${bags.length} overdue</span>
+      </div>`;
+    bags.forEach(b => {
+      const out = new Date(b.checked_out);
+      const hours = Math.floor((now - out) / (1000 * 60 * 60));
+      const days = Math.floor(hours / 24);
+      const timeStr = days > 0 ? `${days} day${days!==1?'s':''} ${hours%24}hr` : `${hours} hours`;
+      const since = out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      html += `<div class="row">
+        <div class="row-main">
+          <div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>
+          <div class="row-sub">Out since ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div>
+        </div>
+        <span class="badge badge-out">Overdue</span>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+
+  document.getElementById('main-content').innerHTML = html;
+}
 
 // ── Status Tab ─────────────────────────────────────────────────────────────────
 async function renderStatus() {
