@@ -208,104 +208,131 @@ function showTab(t) {
 }
 
 // ── Scan Tab ───────────────────────────────────────────────────────────────────
-let scanState = { bag: null, cleaners: [] };
-function renderScan() {
+let scanState = { bag: null, cleaners: [], selectedCleaner: null, sessionLog: [], mode: 'out' };
+
+async function renderScan() {
+  // Load cleaners once
+  const cr = await fetch('/api/cleaners');
+  scanState.cleaners = await cr.json();
+  const opts = scanState.cleaners.map(c => `<option value="${c.id}" ${scanState.selectedCleaner==c.id?'selected':''}>${c.name}</option>`).join('');
+
   document.getElementById('main-content').innerHTML = `
     <div class="card">
-      <div class="card-title">Step 1 — scan or type bag ID</div>
-      <div class="scan-zone" onclick="focusScanInput()" id="scan-zone">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
-          <rect x="3" y="16" width="5" height="5" rx="1"/><line x1="16" y1="16" x2="21" y2="16"/>
-          <line x1="16" y1="16" x2="16" y2="21"/><line x1="21" y1="21" x2="21" y2="21"/>
-          <line x1="8" y1="12" x2="3" y2="12"/><line x1="12" y1="3" x2="12" y2="8"/>
-          <line x1="12" y1="16" x2="12" y2="21"/>
-        </svg>
-        <p>Tap here then scan with your Bluetooth scanner</p>
-        <p class="hint">Scanner types the bag ID automatically</p>
+      <div class="card-title">Session mode</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn ${scanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setMode('out')">Sending bags out</button>
+        <button class="btn ${scanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setMode('in')">Checking bags back in</button>
       </div>
-      <label>Bag ID</label>
-      <input type="text" id="scan-input" placeholder="e.g. HOME-01-A" autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')lookupBag()" />
-      <button class="btn btn-ghost btn-full" onclick="lookupBag()">Look up bag →</button>
+      <div id="cleaner-row" style="${scanState.mode==='out'?'':' display:none'}">
+        <label>Cleaner for this session</label>
+        <select id="cleaner-sel" onchange="scanState.selectedCleaner=this.value" style="margin-bottom:12px">
+          <option value="">Select cleaner...</option>${opts}
+        </select>
+      </div>
+      <label>Scan bag tag</label>
+      <input type="text" id="scan-input" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="characters"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')processScan()" />
+      <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
     </div>
-    <div id="scan-result"></div>
+    <div id="session-log"></div>
   `;
+  focusScanInput();
+  renderSessionLog();
 }
-function focusScanInput() { document.getElementById('scan-input')?.focus(); }
-async function lookupBag() {
-  const id = (document.getElementById('scan-input')?.value || '').trim().toUpperCase();
+
+function setMode(m) {
+  scanState.mode = m;
+  scanState.sessionLog = [];
+  renderScan();
+}
+
+function focusScanInput() {
+  setTimeout(() => document.getElementById('scan-input')?.focus(), 50);
+}
+
+function renderSessionLog() {
+  const log = scanState.sessionLog;
+  if (!log.length) return;
+  const count = log.length;
+  const errors = log.filter(l=>l.error).length;
+  let html = `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="card-title" style="margin-bottom:0">This session</div>
+      <div style="display:flex;gap:6px">
+        <span class="badge badge-count">${count} scanned</span>
+        ${errors?`<span class="badge badge-out">${errors} errors</span>`:''}
+      </div>
+    </div>`;
+  [...log].reverse().forEach(l => {
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div>
+        <div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div>
+      </div>
+      <span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span>
+    </div>`;
+  });
+  html += '</div>';
+  const el = document.getElementById('session-log');
+  if (el) el.innerHTML = html;
+}
+
+async function processScan() {
+  const input = document.getElementById('scan-input');
+  const id = (input?.value || '').trim().toUpperCase();
   if (!id) return;
-  const res = document.getElementById('scan-result');
-  res.innerHTML = '<div class="card" style="color:var(--gray-400);font-size:13px">Looking up...</div>';
-  try {
-    const r = await fetch('/api/bag/' + encodeURIComponent(id));
-    const bag = await r.json();
-    if (!r.ok) {
-      res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">⚠ Bag not found: ${id}</div><div class="r-sub">Check the tag or add this bag in Admin → Bags.</div></div>`;
-      return;
+  input.value = '';
+
+  if (scanState.mode === 'out') {
+    const cleaner_id = document.getElementById('cleaner-sel')?.value || scanState.selectedCleaner;
+    if (!cleaner_id) {
+      scanState.sessionLog.push({id, home:'—', msg:'Select a cleaner first', error:true, action:'out'});
+      renderSessionLog(); focusScanInput(); return;
     }
-    scanState.bag = bag;
-    if (bag.status === 'in') {
-      // Fetch cleaners for dropdown
-      const cr = await fetch('/api/cleaners');
-      scanState.cleaners = await cr.json();
-      const opts = scanState.cleaners.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-      res.innerHTML = `
-        <div class="result-box result-success anim">
-          <div class="r-title">✓ ${bag.home_name}</div>
-          <div class="r-sub">Bag <strong>${bag.id}</strong> · At warehouse — ready to send out</div>
-        </div>
-        <div class="card anim">
-          <div class="card-title">Assign to cleaner</div>
-          <label>Cleaner taking this bag</label>
-          <select id="cleaner-sel"><option value="">Select cleaner...</option>${opts}</select>
-          <button class="btn btn-primary btn-full" onclick="doCheckout()">Send out with cleaner →</button>
-        </div>`;
-    } else {
-      const since = bag.checked_out ? new Date(bag.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-      res.innerHTML = `
-        <div class="result-box result-return anim">
-          <div class="r-title">${bag.home_name}</div>
-          <div class="r-sub">Bag <strong>${bag.id}</strong> · With <strong>${bag.cleaner_name}</strong>${since ? ' since ' + since : ''}</div>
-        </div>
-        <div class="card anim">
-          <div class="card-title">Check in return</div>
-          <label>Condition notes (optional)</label>
-          <input type="text" id="return-notes" placeholder="e.g. stain on corner, missing bag, needs rewash" />
-          <button class="btn btn-blue btn-full" onclick="doCheckin()">← Confirm return — check bag in</button>
-        </div>`;
+    scanState.selectedCleaner = cleaner_id;
+    try {
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({cleaner_id: parseInt(cleaner_id)})
+      });
+      const data = await r.json();
+      if (r.ok) {
+        const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name || '';
+        scanState.sessionLog.push({id, home:data.home, msg:`Sent out with ${cname}`, error:false, action:'out'});
+      } else {
+        // Try to get bag info for better error
+        const br = await fetch('/api/bag/'+encodeURIComponent(id));
+        const bag = await br.json();
+        scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'});
+      }
+    } catch(e) {
+      scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'});
     }
-  } catch (e) { res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Connection error</div><div class="r-sub">Check server connection.</div></div>`; }
-}
-async function doCheckout() {
-  const cleaner_id = document.getElementById('cleaner-sel')?.value;
-  if (!cleaner_id) { alert('Please select a cleaner'); return; }
-  const bag = scanState.bag;
-  const r = await fetch(`/api/bag/${bag.id}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cleaner_id: parseInt(cleaner_id) }) });
-  const data = await r.json();
-  const res = document.getElementById('scan-result');
-  if (r.ok) {
-    res.innerHTML = `<div class="result-box result-success anim"><div class="r-title">✓ Sent out successfully</div><div class="r-sub">${data.home} (${data.bag_id}) assigned to <strong>${data.cleaner}</strong></div></div>`;
-    document.getElementById('scan-input').value = '';
-    scanState.bag = null;
   } else {
-    res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Error</div><div class="r-sub">${data.error}</div></div>`;
+    // Check in mode
+    try {
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''})
+      });
+      const data = await r.json();
+      if (r.ok) {
+        scanState.sessionLog.push({id, home:data.home, msg:`Returned by ${data.cleaner}`, error:false, action:'in'});
+      } else {
+        const br = await fetch('/api/bag/'+encodeURIComponent(id));
+        const bag = await br.json();
+        scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'in'});
+      }
+    } catch(e) {
+      scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'in'});
+    }
   }
+  renderSessionLog();
+  focusScanInput();
 }
-async function doCheckin() {
-  const notes = document.getElementById('return-notes')?.value || '';
-  const bag = scanState.bag;
-  const r = await fetch(`/api/bag/${bag.id}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ notes }) });
-  const data = await r.json();
-  const res = document.getElementById('scan-result');
-  if (r.ok) {
-    res.innerHTML = `<div class="result-box result-return anim"><div class="r-title">✓ Checked back in</div><div class="r-sub">${data.home} (${data.bag_id}) returned by <strong>${data.cleaner}</strong>${notes ? ' · Notes: ' + notes : ''}</div></div>`;
-    document.getElementById('scan-input').value = '';
-    scanState.bag = null;
-  } else {
-    res.innerHTML = `<div class="result-box result-error anim"><div class="r-title">Error</div><div class="r-sub">${data.error}</div></div>`;
-  }
-}
+
+// Keep old lookupBag for QR URL auto-lookup compatibility
+async function lookupBag() { await processScan(); }
 
 // ── Status Tab ─────────────────────────────────────────────────────────────────
 async function renderStatus() {
