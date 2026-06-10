@@ -44,6 +44,11 @@ def init_db():
             checked_out TEXT,
             notes TEXT
         );
+        CREATE TABLE IF NOT EXISTS maintenance_staff (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            active INTEGER DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS loaners (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -53,11 +58,6 @@ def init_db():
             staff_id INTEGER REFERENCES maintenance_staff(id),
             deployed_at TEXT,
             notes TEXT
-        );
-        CREATE TABLE IF NOT EXISTS maintenance_staff (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            active INTEGER DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS activity (
             id SERIAL PRIMARY KEY,
