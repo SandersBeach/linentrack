@@ -325,7 +325,15 @@ function renderSessionLog() {
 
 async function processScan() {
   const input = document.getElementById('scan-input');
-  const id = (input?.value || '').trim().toUpperCase();
+  let id = (input?.value || '').trim();
+  // Handle full URLs from QR codes (uppercase or lowercase)
+  // e.g. HTTPS://SBRLINENS.UP.RAILWAY.APP?BAG=HOME-02-C
+  if (id.includes('BAG=') || id.includes('bag=')) {
+    const match = id.match(/[Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
+    if (match) id = match[1].toUpperCase();
+  } else {
+    id = id.toUpperCase();
+  }
   if (!id) return;
   input.value = '';
 
@@ -755,7 +763,13 @@ function checkPendingQrScan() {
   setTimeout(async () => {
     const input = document.getElementById('scan-input');
     if (!input) return;
-    input.value = pending;
+    // Extract bag ID if full URL was stored
+    let bagId = pending;
+    if (bagId.includes('BAG=') || bagId.includes('bag=')) {
+      const match = bagId.match(/[Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
+      if (match) bagId = match[1].toUpperCase();
+    }
+    input.value = bagId;
     // If checking bags in, go straight to process — no cleaner needed
     if (scanState.mode === 'in') {
       await processScan();
