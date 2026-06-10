@@ -13,7 +13,11 @@ def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
 def get_db():
-    conn = psycopg2.connect(DATABASE_URL)
+    db_url = os.environ.get('DATABASE_URL', DATABASE_URL)
+    # Railway uses postgres:// but psycopg2 needs postgresql://
+    if db_url and db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    conn = psycopg2.connect(db_url, sslmode='require')
     return conn
 
 def init_db():
