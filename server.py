@@ -11,11 +11,13 @@ CENTRAL = pytz.timezone('America/Chicago')
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
+# Try environment variable first, fall back to direct URL
+_DB_URL = (os.environ.get('DATABASE_URL') or 
+           os.environ.get('DATABASE_PUBLIC_URL') or
+           'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
+
 def get_db():
-    db_url = os.environ.get('DATABASE_URL')
-    if not db_url:
-        raise Exception('DATABASE_URL environment variable not set')
-    # Railway uses postgres:// but psycopg2 needs postgresql://
+    db_url = _DB_URL
     if db_url.startswith('postgres://'):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
     conn = psycopg2.connect(db_url, sslmode='require')
