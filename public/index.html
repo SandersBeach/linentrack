@@ -118,7 +118,7 @@
 <div class="login-wrap" id="login">
   <div class="login-card">
     <div class="login-logo"><span>Linen</span>Track</div>
-    <div class="login-sub">Enter your PIN to continue</div>
+    <div class="login-sub">Warehouse · Admin · Maintenance</div>
     <div class="pin-dots" id="pin-dots">
       <div class="pin-dot" id="d0"></div>
       <div class="pin-dot" id="d1"></div>
@@ -162,9 +162,14 @@ let role = null;
 let pinVal = '';
 const TABS = {
   warehouse: ['scan', 'overdue', 'status', 'homes', 'log'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'settings']
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log'],
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'cleaners', 'settings']
 };
-const TAB_LABELS = { scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home', log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings' };
+const TAB_LABELS = { 
+  scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home', 
+  log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
+  loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log'
+};
 let currentTab = 'scan';
 
 // ── PIN ────────────────────────────────────────────────────────────────────────
@@ -192,7 +197,13 @@ async function submitPin() {
     document.getElementById('app').style.display = 'block';
     document.getElementById('role-label').textContent = role === 'admin' ? '🔑 Admin' : '📦 Warehouse';
     buildTabs();
-    showTab('scan');
+    const defaultView = sessionStorage.getItem('defaultView');
+    if (defaultView === 'loaners' && (role === 'maintenance' || role === 'admin')) {
+      sessionStorage.removeItem('defaultView');
+      showTab('loaner_scan');
+    } else {
+      showTab(role === 'maintenance' ? 'loaner_scan' : 'scan');
+    }
     checkPendingQrScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
@@ -210,7 +221,7 @@ function showTab(t) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
-  const fns = { scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings };
+  const fns = { scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings, loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog };
   if (fns[t]) fns[t]();
 }
 
@@ -657,6 +668,10 @@ async function renderSettings() {
         <div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
         <div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
       </div>
+      <div class="form-row">
+        <div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
+        <div></div>
+      </div>
       <button class="btn btn-primary" onclick="savePins()">Save PINs</button>
       <div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div>
     </div>
@@ -703,8 +718,9 @@ async function renderSettings() {
 async function savePins() {
   const w = document.getElementById('wpin')?.value;
   const a = document.getElementById('apin')?.value;
-  if ((w && w.length !== 4) || (a && a.length !== 4)) { alert('PINs must be exactly 4 digits'); return; }
-  await fetch('/api/settings/pins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ warehouse_pin: w||undefined, admin_pin: a||undefined }) });
+  const m = document.getElementById('mpin')?.value;
+  if ((w && w.length !== 4) || (a && a.length !== 4) || (m && m.length !== 4)) { alert('PINs must be exactly 4 digits'); return; }
+  await fetch('/api/settings/pins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ warehouse_pin: w||undefined, admin_pin: a||undefined, maintenance_pin: m||undefined }) });
   document.getElementById('pin-msg').textContent = 'PINs updated!';
   setTimeout(() => { if(document.getElementById('pin-msg')) document.getElementById('pin-msg').textContent=''; }, 2000);
 }
@@ -753,6 +769,12 @@ if (QR_BAG_ID) {
   // Add a hint on the login screen
   const sub = document.querySelector('.login-sub');
   if (sub) sub.textContent = `Bag ${QR_BAG_ID.toUpperCase()} ready to scan — enter your PIN to continue`;
+}
+
+// Check if opened via LoanerTrack icon (?view=loaners)
+const VIEW_PARAM = new URLSearchParams(window.location.search).get('view');
+if (VIEW_PARAM === 'loaners') {
+  sessionStorage.setItem('defaultView', 'loaners');
 }
 
 // After login, check for a pending QR scan and auto-process it
@@ -804,6 +826,182 @@ function checkPendingQrScan() {
       }
     }
   }, 400);
+}
+
+// ── LoanerTrack Tab ────────────────────────────────────────────────────────────
+let loanerScanState = { loaner: null, staff: [], homes: [], selectedStaff: null, sessionLog: [], mode: 'out' };
+
+async function renderLoanerScan() {
+  const [sr, hr] = await Promise.all([fetch('/api/maintenance_staff').then(r=>r.json()), fetch('/api/homes').then(r=>r.json())]);
+  loanerScanState.staff = sr;
+  loanerScanState.homes = hr;
+  const staffOpts = sr.map(s => `<option value="${s.id}" ${loanerScanState.selectedStaff==s.id?'selected':''}>${s.name}</option>`).join('');
+  const homeOpts = hr.map(h => `<option value="${h.id}">${h.name}</option>`).join('');
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="card">
+      <div class="card-title">Session mode</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'#E2B04A':''};border-color:${loanerScanState.mode==='out'?'#E2B04A':''}" onclick="setLoanerMode('out')">Deploying to home</button>
+        <button class="btn ${loanerScanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setLoanerMode('in')">Retrieving from home</button>
+      </div>
+      <div id="loaner-staff-row" style="${loanerScanState.mode==='out'?'':'display:none'}">
+        <label>Staff member for this trip</label>
+        <select id="loaner-staff-sel" onchange="loanerScanState.selectedStaff=this.value" style="margin-bottom:8px">
+          <option value="">Select staff...</option>${staffOpts}
+        </select>
+        <label>Delivering to home</label>
+        <select id="loaner-home-sel" style="margin-bottom:12px">
+          <option value="">Select home...</option>${homeOpts}
+        </select>
+      </div>
+      <label>Scan loaner item tag</label>
+      <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')processLoanerScan()" />
+      <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
+    </div>
+    <div id="loaner-session-log"></div>
+  `;
+  document.getElementById('loaner-scan-input')?.focus();
+}
+
+function setLoanerMode(m) {
+  loanerScanState.mode = m;
+  loanerScanState.sessionLog = [];
+  renderLoanerScan();
+}
+
+async function processLoanerScan() {
+  const input = document.getElementById('loaner-scan-input');
+  let id = (input?.value || '').trim();
+  if (id.includes('LOANER=') || id.includes('loaner=')) {
+    const match = id.match(/[Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);
+    if (match) id = match[1].toUpperCase();
+  } else { id = id.toUpperCase(); }
+  if (!id) return;
+  input.value = '';
+
+  if (loanerScanState.mode === 'out') {
+    const staff_id = document.getElementById('loaner-staff-sel')?.value || loanerScanState.selectedStaff;
+    const home_id = document.getElementById('loaner-home-sel')?.value;
+    if (!staff_id) { loanerScanState.sessionLog.push({id, name:'—', msg:'Select a staff member first', error:true}); renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus(); return; }
+    if (!home_id) { loanerScanState.sessionLog.push({id, name:'—', msg:'Select a home first', error:true}); renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus(); return; }
+    loanerScanState.selectedStaff = staff_id;
+    try {
+      const r = await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({staff_id: parseInt(staff_id), home_id: parseInt(home_id)})
+      });
+      const data = await r.json();
+      if (r.ok) loanerScanState.sessionLog.push({id, name:data.item, msg:`Deployed to ${data.home} by ${data.staff}`, error:false});
+      else loanerScanState.sessionLog.push({id, name:'—', msg:data.error, error:true});
+    } catch(e) { loanerScanState.sessionLog.push({id, name:'—', msg:'Connection error', error:true}); }
+  } else {
+    try {
+      const r = await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''})
+      });
+      const data = await r.json();
+      if (r.ok) loanerScanState.sessionLog.push({id, name:data.item, msg:`Retrieved from ${data.home}`, error:false});
+      else loanerScanState.sessionLog.push({id, name:'—', msg:data.error, error:true});
+    } catch(e) { loanerScanState.sessionLog.push({id, name:'—', msg:'Connection error', error:true}); }
+  }
+  renderLoanerSessionLog();
+  document.getElementById('loaner-scan-input')?.focus();
+}
+
+function renderLoanerSessionLog() {
+  const log = loanerScanState.sessionLog;
+  if (!log.length) return;
+  const errors = log.filter(l=>l.error).length;
+  let html = `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="card-title" style="margin-bottom:0">This session</div>
+      <div style="display:flex;gap:6px">
+        <span class="badge badge-count">${log.length} scanned</span>
+        ${errors?`<span class="badge badge-out">${errors} errors</span>`:''}
+      </div>
+    </div>`;
+  [...log].reverse().forEach(l => {
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div>
+        <div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div>
+      </div>
+      <span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span>
+    </div>`;
+  });
+  html += '</div>';
+  const el = document.getElementById('loaner-session-log');
+  if (el) el.innerHTML = html;
+}
+
+async function renderLoanerStatus() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const loaners = await fetch('/api/loaners').then(r=>r.json());
+  const out = loaners.filter(l=>l.status==='out');
+  const inW = loaners.filter(l=>l.status==='in');
+
+  let html = `
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div>
+    </div>`;
+
+  if (out.length) {
+    html += '<div class="card"><div class="card-title">Currently deployed</div>';
+    out.forEach(l => {
+      const since = l.deployed_at ? new Date(l.deployed_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+      html += `<div class="row">
+        <div class="row-main">
+          <div class="row-title">${l.name} <span class="tag">${l.id}</span></div>
+          <div class="row-sub">${l.home_name}${l.staff_name?' · '+l.staff_name:''}${since?' · since '+since:''}</div>
+        </div>
+        <span class="badge badge-out">Out</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (inW.length) {
+    html += '<div class="card"><div class="card-title">At warehouse</div>';
+    // Group by category
+    const cats = {};
+    inW.forEach(l => { if(!cats[l.category]) cats[l.category]=[]; cats[l.category].push(l); });
+    Object.entries(cats).sort().forEach(([cat, items]) => {
+      html += `<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;
+      items.forEach(l => {
+        html += `<div class="row">
+          <div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div>
+          <span class="badge badge-in">In</span>
+        </div>`;
+      });
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('main-content').innerHTML = html;
+}
+
+async function renderLoanerLog() {
+  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
+  const log = await fetch('/api/activity').then(r=>r.json());
+  const loanerLog = log.filter(e=>e.activity_type==='loaner');
+  if (!loanerLog.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No loaner activity yet</div>'; return; }
+  let html = '<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
+  loanerLog.forEach(e => {
+    const isReturn = e.action === 'Retrieved';
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div>
+        <div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('main-content').innerHTML = html;
 }
 </script>
 </body>
