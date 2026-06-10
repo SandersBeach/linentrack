@@ -6,16 +6,17 @@ import psycopg2.extras
 import pytz
 
 app = Flask(__name__, static_folder='public', static_url_path='')
-DATABASE_URL = os.environ.get('DATABASE_URL')
 CENTRAL = pytz.timezone('America/Chicago')
 
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
 def get_db():
-    db_url = os.environ.get('DATABASE_URL', DATABASE_URL)
+    db_url = os.environ.get('DATABASE_URL')
+    if not db_url:
+        raise Exception('DATABASE_URL environment variable not set')
     # Railway uses postgres:// but psycopg2 needs postgresql://
-    if db_url and db_url.startswith('postgres://'):
+    if db_url.startswith('postgres://'):
         db_url = db_url.replace('postgres://', 'postgresql://', 1)
     conn = psycopg2.connect(db_url, sslmode='require')
     return conn
