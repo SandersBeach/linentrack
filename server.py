@@ -1,6 +1,11 @@
 import sqlite3, json, os
 from flask import Flask, request, jsonify, send_from_directory
 from datetime import datetime
+import pytz
+
+CENTRAL = pytz.timezone('America/Chicago')
+def now_central():
+    return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 DB_PATH = os.path.join(os.path.dirname(__file__), 'db', 'linentrack.db')
@@ -197,7 +202,7 @@ def checkout(bag_id):
     cleaner = db.execute("SELECT * FROM cleaners WHERE id=?", (data['cleaner_id'],)).fetchone()
     home = db.execute("SELECT * FROM homes WHERE id=?", (bag['home_id'],)).fetchone()
     db.execute("UPDATE bags SET status='out', cleaner_id=?, checked_out=? WHERE id=?",
-        (data['cleaner_id'], datetime.now().isoformat(), bid))
+        (data['cleaner_id'], now_central(), bid))
     db.execute("INSERT INTO activity(action,bag_id,home_name,cleaner_name) VALUES(?,?,?,?)",
         ('Sent out', bid, home['name'], cleaner['name']))
     db.commit(); db.close()
