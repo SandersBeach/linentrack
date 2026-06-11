@@ -80,6 +80,13 @@ def init_db():
         cur.execute("INSERT INTO settings(key,value) VALUES(%s,%s) ON CONFLICT(key) DO NOTHING", (key, val))
     conn.commit()
 
+    # Migrations — add columns if they don't exist yet
+    try:
+        cur.execute("ALTER TABLE activity ADD COLUMN IF NOT EXISTS activity_type TEXT DEFAULT 'linen'")
+        conn.commit()
+    except:
+        conn.rollback()
+
     # Seed homes if empty
     cur.execute("SELECT COUNT(*) FROM homes")
     if cur.fetchone()[0] == 0:
