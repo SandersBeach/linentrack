@@ -252,8 +252,7 @@ async function renderScan() {
         ${scanState.selectedCleaner ? `<div style="font-size:11px;color:var(--teal-dark);margin-top:-8px;margin-bottom:8px">✓ Scanning for: <strong>${scanState.cleaners.find(c=>c.id==scanState.selectedCleaner)?.name||''}</strong></div>` : ''}
       </div>
       <label>Scan bag tag</label>
-      <input type="text" id="scan-input" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="characters"
-        oninput="this.value=this.value.toUpperCase()"
+      <input type="text" id="scan-input" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="off"
         onkeydown="if(event.key==='Enter')processScan()" />
       <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
     </div>
@@ -336,14 +335,18 @@ function renderSessionLog() {
 
 async function processScan() {
   const input = document.getElementById('scan-input');
-  let id = (input?.value || '').trim();
-  // Handle full URLs from QR codes (uppercase or lowercase)
-  // e.g. HTTPS://SBRLINENS.UP.RAILWAY.APP?BAG=HOME-02-C
-  if (id.includes('BAG=') || id.includes('bag=')) {
-    const match = id.match(/[Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
-    if (match) id = match[1].toUpperCase();
+  let raw = (input?.value || '').trim();
+  let id = raw;
+  // Handle full URLs typed by scanner e.g. https://sbrlinens.up.railway.app?bag=HOME-01-A
+  if (raw.includes('?') || raw.includes('=')) {
+    // Try to extract bag ID from URL parameter
+    const bagMatch = raw.match(/[?&][Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
+    const loanerMatch = raw.match(/[?&][Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);
+    if (bagMatch) id = bagMatch[1].toUpperCase();
+    else if (loanerMatch) id = loanerMatch[1].toUpperCase();
+    else id = raw.toUpperCase();
   } else {
-    id = id.toUpperCase();
+    id = raw.toUpperCase();
   }
   if (!id) return;
   input.value = '';
