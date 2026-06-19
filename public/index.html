@@ -16,6 +16,7 @@
     --blue: #185FA5; --blue-light: #E6F1FB; --blue-mid: #378ADD;
     --coral: #D85A30; --coral-light: #FAECE7; --coral-dark: #993C1D;
     --amber: #854F0B; --amber-light: #FAEEDA;
+    --green: #3B6D11; --green-light: #EAF3DE;
     --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
     --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
     --radius: 10px; --radius-sm: 6px;
@@ -83,6 +84,8 @@
   .badge-out { background: var(--coral-light); color: var(--coral-dark); }
   .badge-in { background: var(--teal-light); color: var(--teal-dark); }
   .badge-count { background: var(--blue-light); color: var(--blue); }
+  .badge-warn { background: var(--amber-light); color: var(--amber); }
+  .badge-ok { background: var(--green-light); color: var(--green); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); }
   .row:last-child { border-bottom: none; }
   .row-main { flex: 1; min-width: 0; }
@@ -106,6 +109,50 @@
   .cleaner-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; display: flex; align-items: center; justify-content: space-between; }
   .cleaner-card .c-name { font-size: 13px; font-weight: 500; }
   .cleaner-card .c-count { font-size: 11px; color: var(--gray-400); }
+
+  /* ── Supply cards grid ── */
+  .supply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 1rem; }
+  .supply-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1rem; }
+  .supply-card.low-stock { border-color: var(--coral); border-width: 1.5px; }
+  .supply-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  .supply-name { font-size: 14px; font-weight: 600; }
+  .supply-cat { font-size: 11px; color: var(--gray-400); margin-bottom: 10px; }
+  .supply-qty { font-size: 28px; font-weight: 700; line-height: 1; }
+  .supply-unit { font-size: 11px; color: var(--gray-400); }
+  .supply-threshold { font-size: 11px; color: var(--gray-400); margin-top: 2px; margin-bottom: 10px; }
+  .supply-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .supply-actions .btn { font-size: 12px; padding: 6px 12px; }
+
+  /* ── Sub-tabs ── */
+  .subtab-bar { display: flex; gap: 0; border-bottom: 0.5px solid var(--gray-200); margin-bottom: 1rem; }
+  .subtab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--gray-400); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .subtab.active { color: var(--teal); border-bottom-color: var(--teal); }
+
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 1rem; }
+  .modal-box { background: #fff; border-radius: var(--radius); padding: 1.5rem; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; }
+  .modal-box h3 { font-size: 16px; font-weight: 600; margin-bottom: 1.25rem; color: var(--teal-dark); }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1rem; }
+
+  /* ── Inventory count ── */
+  .count-area-card { border: 1.5px solid var(--gray-200); border-radius: var(--radius); padding: 1rem; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 12px; }
+  .count-area-card.selected { border-color: var(--teal); background: var(--teal-light); }
+  .count-area-card input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--teal); flex-shrink: 0; }
+  .count-progress { height: 6px; background: var(--gray-200); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+  .count-progress-bar { height: 100%; background: var(--teal); border-radius: 4px; transition: width 0.3s; }
+  .count-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); gap: 10px; }
+  .count-row:last-child { border-bottom: none; }
+  .count-row-left { flex: 1; min-width: 0; }
+  .count-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .count-input { width: 70px; padding: 6px 8px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; text-align: center; margin-bottom: 0; }
+  .count-input:focus { border-color: var(--teal); }
+  .variance-pos { color: var(--amber); font-weight: 600; font-size: 12px; }
+  .variance-neg { color: var(--coral-dark); font-weight: 600; font-size: 12px; }
+  .variance-ok { color: var(--green); font-weight: 600; font-size: 12px; }
+  .report-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1rem; }
+  .report-stat { border-radius: var(--radius-sm); padding: 0.75rem 1rem; text-align: center; }
+  .report-stat .rnum { font-size: 22px; font-weight: 700; line-height: 1; }
+  .report-stat .rlbl { font-size: 11px; margin-top: 4px; }
 
   /* ── Scan result animated entry ── */
   @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -156,19 +203,84 @@
   <div class="content" id="main-content"></div>
 </div>
 
+<!-- ══════════════ SUPPLY MODALS ══════════════ -->
+<div id="modal-supply-item" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSupplyItemModal()">
+  <div class="modal-box">
+    <h3 id="supply-modal-title">Add Supply Item</h3>
+    <input type="hidden" id="supply-edit-id">
+    <label>Item name</label>
+    <input id="supply-name" type="text" placeholder="e.g. AA Batteries">
+    <label>Category</label>
+    <input id="supply-category" type="text" placeholder="e.g. Electrical" list="supply-cat-list">
+    <datalist id="supply-cat-list"></datalist>
+    <label>Unit (what you count in)</label>
+    <input id="supply-unit" type="text" placeholder="e.g. packs, bulbs, rolls">
+    <label>Low-stock alert below</label>
+    <input id="supply-threshold" type="number" min="0" value="5">
+    <div id="supply-qty-row">
+      <label>Starting quantity</label>
+      <input id="supply-init-qty" type="number" min="0" value="0">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeSupplyItemModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSupplyItem()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-supply-tx" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSupplyTxModal()">
+  <div class="modal-box">
+    <h3 id="tx-modal-title">Take Supplies</h3>
+    <input type="hidden" id="tx-supply-id">
+    <input type="hidden" id="tx-action">
+    <p id="tx-item-info" style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:1rem;padding:10px;background:var(--gray-50);border-radius:var(--radius-sm)"></p>
+    <label>Quantity</label>
+    <input id="tx-qty" type="number" min="1" value="1">
+    <label>Your name</label>
+    <select id="tx-performer">
+      <option value="">Select your name...</option>
+    </select>
+    <label>Notes (optional)</label>
+    <input id="tx-notes" type="text" placeholder="e.g. used at HOME-12">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeSupplyTxModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitSupplyTx()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-supply-qr" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box" style="text-align:center">
+    <h3 id="qr-item-name" style="text-align:center"></h3>
+    <img id="qr-img" src="" style="width:200px;height:200px;border:0.5px solid var(--gray-200);border-radius:var(--radius);margin:12px auto;display:block">
+    <p style="font-size:12px;color:var(--gray-400);margin-bottom:1rem">Scan to take or restock</p>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-supply-qr').style.display='none'">Close</button>
+      <button class="btn btn-primary" onclick="printSupplyQR()">🖨 Print</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
 let role = null;
 let pinVal = '';
+let _currentPin = '';
+let _supplies = [];
+let _loanerStaff = [];
+
 const TABS = {
   warehouse: ['scan', 'overdue', 'status', 'homes', 'log'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'cleaners', 'settings']
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status'],
+  coordinator: ['inventory_count'],
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'inventory_count', 'cleaners', 'settings']
 };
-const TAB_LABELS = { 
-  scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home', 
+const TAB_LABELS = {
+  scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
-  loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log'
+  loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
+  supply_scan: '🧰 Supplies', supply_status: 'Supply Inventory',
+  inventory_count: '📋 Inventory Count'
 };
 let currentTab = 'scan';
 
@@ -193,25 +305,38 @@ async function submitPin() {
     const data = await r.json();
     if (!r.ok) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
     role = data.role;
+    _currentPin = pinVal;
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    document.getElementById('role-label').textContent = role === 'admin' ? '🔑 Admin' : '📦 Warehouse';
+    document.getElementById('role-label').textContent =
+      role === 'admin' ? '🔑 Admin' :
+      role === 'maintenance' ? '🔧 Maintenance' :
+      role === 'coordinator' ? '📋 Coordinator' : '📦 Warehouse';
     buildTabs();
+
+    // Pre-load loaner staff for supply modals
+    fetch('/api/maintenance_staff').then(r=>r.json()).then(d => { _loanerStaff = d; });
+
     const defaultView = sessionStorage.getItem('defaultView');
     if (defaultView === 'loaners' && (role === 'maintenance' || role === 'admin')) {
       sessionStorage.removeItem('defaultView');
       showTab('loaner_scan');
+    } else if (role === 'coordinator') {
+      showTab('inventory_count');
+    } else if (role === 'maintenance') {
+      showTab('loaner_scan');
     } else {
-      showTab(role === 'maintenance' ? 'loaner_scan' : 'scan');
+      showTab('scan');
     }
     checkPendingQrScan();
+    checkPendingSupplyScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
-function logout() { role = null; pinVal = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+function logout() { role = null; pinVal = ''; _currentPin = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
-  const tabs = TABS[role];
+  const tabs = TABS[role] || [];
   document.getElementById('tab-bar').innerHTML = tabs.map(t =>
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
   ).join('');
@@ -221,7 +346,13 @@ function showTab(t) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
-  const fns = { scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes, log: renderLog, cleaners: renderCleaners, settings: renderSettings, loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog };
+  const fns = {
+    scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes,
+    log: renderLog, cleaners: renderCleaners, settings: renderSettings,
+    loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog,
+    supply_scan: renderSupplyScan, supply_status: renderSupplyStatus,
+    inventory_count: renderInventoryCount
+  };
   if (fns[t]) fns[t]();
 }
 
@@ -229,11 +360,9 @@ function showTab(t) {
 let scanState = { bag: null, cleaners: [], selectedCleaner: null, sessionLog: [], mode: 'out' };
 
 async function renderScan() {
-  // Load cleaners once
   const cr = await fetch('/api/cleaners');
   scanState.cleaners = await cr.json();
   const opts = scanState.cleaners.map(c => `<option value="${c.id}" ${scanState.selectedCleaner==c.id?'selected':''}>${c.name}</option>`).join('');
-
   document.getElementById('main-content').innerHTML = `
     <div class="card">
       <div class="card-title">Session mode</div>
@@ -241,7 +370,7 @@ async function renderScan() {
         <button class="btn ${scanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setMode('out')">Sending bags out</button>
         <button class="btn ${scanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setMode('in')">Checking bags back in</button>
       </div>
-      <div id="cleaner-row" style="${scanState.mode==='out'?'':' display:none'}">
+      <div id="cleaner-row" style="${scanState.mode==='out'?'':'display:none'}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <label style="margin-bottom:0">Cleaner for this batch</label>
           ${scanState.selectedCleaner ? `<button class="btn btn-ghost btn-sm" onclick="clearCleaner()" style="font-size:11px;padding:3px 10px">Change cleaner</button>` : ''}
@@ -261,208 +390,81 @@ async function renderScan() {
   focusScanInput();
   renderSessionLog();
 }
-
-function setMode(m) {
-  scanState.mode = m;
-  scanState.sessionLog = [];
-  renderScan();
-}
-
+function setMode(m) { scanState.mode = m; scanState.sessionLog = []; renderScan(); }
 function onCleanerChange(val) {
   scanState.selectedCleaner = val;
-  // Re-render just the cleaner row to show confirmation
   const cr = document.getElementById('cleaner-row');
   if (!cr || !val) return;
   const name = scanState.cleaners.find(c=>c.id==val)?.name||'';
-  // Update the confirmation line
   let conf = cr.querySelector('.cleaner-confirm');
-  if (!conf) {
-    conf = document.createElement('div');
-    conf.className = 'cleaner-confirm';
-    conf.style.cssText = 'font-size:11px;color:var(--teal-dark);margin-top:-8px;margin-bottom:8px';
-    cr.appendChild(conf);
-  }
+  if (!conf) { conf = document.createElement('div'); conf.className = 'cleaner-confirm'; conf.style.cssText = 'font-size:11px;color:var(--teal-dark);margin-top:-8px;margin-bottom:8px'; cr.appendChild(conf); }
   conf.innerHTML = `✓ Scanning for: <strong>${name}</strong>`;
-  // Show change button
-  let btn = cr.querySelector('.change-btn');
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm change-btn';
-    btn.style.cssText = 'font-size:11px;padding:3px 10px';
-    btn.textContent = 'Change cleaner';
-    btn.onclick = clearCleaner;
-    cr.querySelector('label').parentNode.appendChild(btn);
-  }
   focusScanInput();
 }
-
-function clearCleaner() {
-  scanState.selectedCleaner = null;
-  scanState.sessionLog = [];
-  renderScan();
-}
-
-function focusScanInput() {
-  setTimeout(() => document.getElementById('scan-input')?.focus(), 50);
-}
-
+function clearCleaner() { scanState.selectedCleaner = null; scanState.sessionLog = []; renderScan(); }
+function focusScanInput() { setTimeout(() => document.getElementById('scan-input')?.focus(), 50); }
 function renderSessionLog() {
   const log = scanState.sessionLog;
   if (!log.length) return;
-  const count = log.length;
   const errors = log.filter(l=>l.error).length;
-  let html = `<div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <div class="card-title" style="margin-bottom:0">This session</div>
-      <div style="display:flex;gap:6px">
-        <span class="badge badge-count">${count} scanned</span>
-        ${errors?`<span class="badge badge-out">${errors} errors</span>`:''}
-      </div>
-    </div>`;
+  let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
   [...log].reverse().forEach(l => {
-    html += `<div class="row">
-      <div class="row-main">
-        <div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div>
-        <div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div>
-      </div>
-      <span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span>
-    </div>`;
+    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span></div>`;
   });
   html += '</div>';
   const el = document.getElementById('session-log');
   if (el) el.innerHTML = html;
 }
-
 async function processScan() {
   const input = document.getElementById('scan-input');
   let raw = (input?.value || '').trim();
   let id = raw;
-  // Handle full URLs typed by scanner e.g. https://sbrlinens.up.railway.app?bag=HOME-01-A
   if (raw.includes('?') || raw.includes('=')) {
-    // Try to extract bag ID from URL parameter
     const bagMatch = raw.match(/[?&][Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
     const loanerMatch = raw.match(/[?&][Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);
     if (bagMatch) id = bagMatch[1].toUpperCase();
     else if (loanerMatch) id = loanerMatch[1].toUpperCase();
     else id = raw.toUpperCase();
-  } else {
-    id = raw.toUpperCase();
-  }
+  } else { id = raw.toUpperCase(); }
   if (!id) return;
   input.value = '';
-
   if (scanState.mode === 'out') {
     const cleaner_id = document.getElementById('cleaner-sel')?.value || scanState.selectedCleaner;
-    if (!cleaner_id) {
-      scanState.sessionLog.push({id, home:'—', msg:'Select a cleaner first', error:true, action:'out'});
-      renderSessionLog(); focusScanInput(); return;
-    }
+    if (!cleaner_id) { scanState.sessionLog.push({id, home:'—', msg:'Select a cleaner first', error:true, action:'out'}); renderSessionLog(); focusScanInput(); return; }
     scanState.selectedCleaner = cleaner_id;
     try {
-      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({cleaner_id: parseInt(cleaner_id)})
-      });
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cleaner_id: parseInt(cleaner_id)}) });
       const data = await r.json();
-      if (r.ok) {
-        const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name || '';
-        scanState.sessionLog.push({id, home:data.home, msg:`Sent out with ${cname}`, error:false, action:'out'});
-      } else {
-        // Try to get bag info for better error
-        const br = await fetch('/api/bag/'+encodeURIComponent(id));
-        const bag = await br.json();
-        scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'});
-      }
-    } catch(e) {
-      scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'});
-    }
+      if (r.ok) { const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name||''; scanState.sessionLog.push({id, home:data.home, msg:`Sent out with ${cname}`, error:false, action:'out'}); }
+      else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'}); }
+    } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'}); }
   } else {
-    // Check in mode
     try {
-      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''})
-      });
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''}) });
       const data = await r.json();
-      if (r.ok) {
-        scanState.sessionLog.push({id, home:data.home, msg:`Returned by ${data.cleaner}`, error:false, action:'in'});
-      } else {
-        const br = await fetch('/api/bag/'+encodeURIComponent(id));
-        const bag = await br.json();
-        scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'in'});
-      }
-    } catch(e) {
-      scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'in'});
-    }
+      if (r.ok) { scanState.sessionLog.push({id, home:data.home, msg:`Returned by ${data.cleaner}`, error:false, action:'in'}); }
+      else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'in'}); }
+    } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'in'}); }
   }
-  renderSessionLog();
-  focusScanInput();
+  renderSessionLog(); focusScanInput();
 }
-
-// Keep old lookupBag for QR URL auto-lookup compatibility
 async function lookupBag() { await processScan(); }
-
 
 // ── Overdue Tab ────────────────────────────────────────────────────────────────
 async function renderOverdue() {
   document.getElementById('main-content').innerHTML = '<div class="card">Checking for overdue bags...</div>';
   const inv = await fetch('/api/inventory').then(r => r.json());
   const now = new Date();
-  const overdue = inv.filter(b => {
-    if (b.status !== 'out' || !b.checked_out) return false;
-    const out = new Date(b.checked_out);
-    const hours = (now - out) / (1000 * 60 * 60);
-    return hours >= 24;
-  });
-
-  if (!overdue.length) {
-    document.getElementById('main-content').innerHTML = `
-      <div class="card" style="text-align:center;padding:2.5rem">
-        <div style="font-size:32px;margin-bottom:8px">✓</div>
-        <div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div>
-        <div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div>
-      </div>`;
-    return;
-  }
-
-  // Group by cleaner
+  const overdue = inv.filter(b => { if (b.status !== 'out' || !b.checked_out) return false; return (now - new Date(b.checked_out)) / 3600000 >= 24; });
+  if (!overdue.length) { document.getElementById('main-content').innerHTML = `<div class="card" style="text-align:center;padding:2.5rem"><div style="font-size:32px;margin-bottom:8px">✓</div><div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div><div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div></div>`; return; }
   const byCleaner = {};
-  overdue.forEach(b => {
-    if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name] = [];
-    byCleaner[b.cleaner_name].push(b);
-  });
-
-  let html = `
-    <div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px">
-      <div style="font-size:28px">🚨</div>
-      <div>
-        <div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div>
-        <div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours — follow up needed</div>
-      </div>
-    </div>`;
-
+  overdue.forEach(b => { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); });
+  let html = `<div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">🚨</div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div><div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours</div></div></div>`;
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
-    html += `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:14px;font-weight:600;color:var(--coral-dark)">⚠ ${name}</div>
-        <span class="badge badge-out">${bags.length} overdue</span>
-      </div>`;
-    bags.forEach(b => {
-      const out = new Date(b.checked_out);
-      const hours = Math.floor((now - out) / (1000 * 60 * 60));
-      const days = Math.floor(hours / 24);
-      const timeStr = days > 0 ? `${days} day${days!==1?'s':''} ${hours%24}hr` : `${hours} hours`;
-      const since = out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-      html += `<div class="row">
-        <div class="row-main">
-          <div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>
-          <div class="row-sub">Out since ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div>
-        </div>
-        <span class="badge badge-out">Overdue</span>
-      </div>`;
-    });
+    html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600;color:var(--coral-dark)">⚠ ${name}</div><span class="badge badge-out">${bags.length} overdue</span></div>`;
+    bags.forEach(b => { const out=new Date(b.checked_out); const hours=Math.floor((now-out)/3600000); const days=Math.floor(hours/24); const timeStr=days>0?`${days}d ${hours%24}hr`:`${hours}hr`; const since=out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">Out since ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div></div><span class="badge badge-out">Overdue</span></div>`; });
     html += `</div>`;
   });
-
   document.getElementById('main-content').innerHTML = html;
 }
 
@@ -470,87 +472,22 @@ async function renderOverdue() {
 async function renderStatus() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const [inv, stats] = await Promise.all([fetch('/api/inventory').then(r=>r.json()), fetch('/api/stats').then(r=>r.json())]);
-  // Group by cleaner
-  const byCleaner = {};
-  const inWarehouse = [];
-  inv.forEach(b => {
-    if (b.status === 'out') {
-      if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name] = [];
-      byCleaner[b.cleaner_name].push(b);
-    } else { inWarehouse.push(b); }
-  });
-
-  let html = `
-    <div class="stat-grid">
-      <div class="stat"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total bags</div></div>
-      <div class="stat"><div class="stat-num" style="color:var(--coral)">${stats.out}</div><div class="stat-lbl">With cleaners</div></div>
-      <div class="stat"><div class="stat-num" style="color:var(--teal)">${stats['in']}</div><div class="stat-lbl">At warehouse</div></div>
-    </div>
-    <div class="search-row">
-      <input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" />
-      <select id="status-f" onchange="filterStatus()" style="width:150px">
-        <option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option>
-      </select>
-    </div>
-    <div id="status-body">`;
-
-  // With cleaners section
+  const byCleaner = {}; const inWarehouse = [];
+  inv.forEach(b => { if (b.status==='out') { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); } else inWarehouse.push(b); });
+  let html = `<div class="stat-grid"><div class="stat"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total bags</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${stats.out}</div><div class="stat-lbl">With cleaners</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${stats['in']}</div><div class="stat-lbl">At warehouse</div></div></div>
+    <div class="search-row"><input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" /><select id="status-f" onchange="filterStatus()" style="width:150px"><option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option></select></div><div id="status-body">`;
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
-    html += `<div class="card" data-section="out">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:14px;font-weight:600">${name}</div>
-        <span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span>
-      </div>`;
-    bags.forEach(b => {
-      const since = b.checked_out ? new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-      html += `<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}">
-        <div class="row-main">
-          <div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>
-          ${since ? `<div class="row-sub">Since ${since}</div>` : ''}
-        </div>
-        <span class="badge badge-out">Out</span>
-      </div>`;
-    });
+    html += `<div class="card" data-section="out"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span></div>`;
+    bags.forEach(b => { const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Since ${since}</div>`:''}</div><span class="badge badge-out">Out</span></div>`; });
     html += `</div>`;
   });
-
-  if (inWarehouse.length) {
-    html += `<div class="card" data-section="in">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:14px;font-weight:600">At warehouse</div>
-        <span class="badge badge-in">${inWarehouse.length} bags</span>
-      </div>`;
-    inWarehouse.forEach(b => {
-      html += `<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}">
-        <div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div>
-        <span class="badge badge-in">In</span>
-      </div>`;
-    });
-    html += `</div>`;
-  }
-
+  if (inWarehouse.length) { html+=`<div class="card" data-section="in"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">At warehouse</div><span class="badge badge-in">${inWarehouse.length} bags</span></div>`; inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;}); html+=`</div>`; }
   html += `</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 function filterStatus() {
-  const q = (document.getElementById('status-q')?.value || '').toLowerCase();
-  const f = document.getElementById('status-f')?.value || '';
-  document.querySelectorAll('[data-section]').forEach(sec => {
-    const section = sec.dataset.section;
-    if (f && section !== f) { sec.style.display = 'none'; return; }
-    sec.style.display = '';
-    if (q) {
-      let any = false;
-      sec.querySelectorAll('[data-search]').forEach(r => {
-        const match = r.dataset.search.includes(q);
-        r.style.display = match ? '' : 'none';
-        if (match) any = true;
-      });
-      sec.style.display = any ? '' : 'none';
-    } else {
-      sec.querySelectorAll('[data-search]').forEach(r => r.style.display = '');
-    }
-  });
+  const q=(document.getElementById('status-q')?.value||'').toLowerCase(); const f=document.getElementById('status-f')?.value||'';
+  document.querySelectorAll('[data-section]').forEach(sec => { const section=sec.dataset.section; if(f&&section!==f){sec.style.display='none';return;} sec.style.display=''; if(q){let any=false;sec.querySelectorAll('[data-search]').forEach(r=>{const match=r.dataset.search.includes(q);r.style.display=match?'':'none';if(match)any=true;});sec.style.display=any?'':'none';}else{sec.querySelectorAll('[data-search]').forEach(r=>r.style.display='');} });
 }
 
 // ── Homes Tab ──────────────────────────────────────────────────────────────────
@@ -558,42 +495,18 @@ async function renderHomes() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const inv = await fetch('/api/inventory').then(r => r.json());
   const homeMap = {};
-  inv.forEach(b => {
-    if (!homeMap[b.home_name]) homeMap[b.home_name] = { code: b.home_code, bags: [] };
-    homeMap[b.home_name].bags.push(b);
-  });
+  inv.forEach(b => { if (!homeMap[b.home_name]) homeMap[b.home_name]={code:b.home_code,bags:[]}; homeMap[b.home_name].bags.push(b); });
   let html = `<div class="search-row"><input type="text" id="home-q" placeholder="Search home..." oninput="filterHomes()" /></div><div id="homes-body">`;
-  Object.entries(homeMap).sort((a,b)=>a[1].code.localeCompare(b[1].code)).forEach(([name, {code, bags}]) => {
-    const out = bags.filter(b=>b.status==='out');
-    const inW = bags.filter(b=>b.status==='in');
-    html += `<div class="card home-card" data-home="${name.toLowerCase()}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div>
-          <div style="font-size:14px;font-weight:600">${name}</div>
-          <div style="font-size:11px;color:var(--gray-400)">${code}</div>
-        </div>
-        <div style="display:flex;gap:6px">
-          ${out.length ? `<span class="badge badge-out">${out.length} out</span>` : ''}
-          ${inW.length ? `<span class="badge badge-in">${inW.length} in</span>` : ''}
-        </div>
-      </div>`;
-    bags.forEach(b => {
-      const since = b.checked_out ? new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-      html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
-        <span class="tag">${b.id}</span>
-        <span style="flex:1;color:var(--gray-400)">${b.status==='out' ? '→ '+b.cleaner_name+(since?' ('+since+')':'') : 'At warehouse'}</span>
-        <span class="badge ${b.status==='out'?'badge-out':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':'In'}</span>
-      </div>`;
-    });
-    html += `</div>`;
+  Object.entries(homeMap).sort((a,b)=>a[1].code.localeCompare(b[1].code)).forEach(([name,{code,bags}]) => {
+    const out=bags.filter(b=>b.status==='out'); const inW=bags.filter(b=>b.status==='in');
+    html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code}</div></div><div style="display:flex;gap:6px">${out.length?`<span class="badge badge-out">${out.length} out</span>`:''}${inW.length?`<span class="badge badge-in">${inW.length} in</span>`:''}</div></div>`;
+    bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':'In'}</span></div>`;});
+    html+=`</div>`;
   });
-  html += `</div>`;
+  html+=`</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
-function filterHomes() {
-  const q = (document.getElementById('home-q')?.value || '').toLowerCase();
-  document.querySelectorAll('.home-card').forEach(c => { c.style.display = !q || c.dataset.home.includes(q) ? '' : 'none'; });
-}
+function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{c.style.display=!q||c.dataset.home.includes(q)?'':'none';}); }
 
 // ── Log Tab ────────────────────────────────────────────────────────────────────
 async function renderLog() {
@@ -601,186 +514,56 @@ async function renderLog() {
   const log = await fetch('/api/activity').then(r => r.json());
   if (!log.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No activity yet</div>'; return; }
   let html = '<div class="card" style="padding:0.75rem 1.25rem">';
-  log.forEach(e => {
-    const isReturn = e.action === 'Returned';
-    const dt = new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    html += `<div class="row">
-      <div class="row-main">
-        <div class="row-title">
-          <span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span>
-          <span class="tag">${e.bag_id}</span> · ${e.home_name}
-        </div>
-        <div class="row-sub">${dt} · ${e.cleaner_name}${e.notes ? ' · <em>'+e.notes+'</em>' : ''}</div>
-      </div>
-    </div>`;
-  });
+  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
   html += '</div>';
   document.getElementById('main-content').innerHTML = html;
 }
 
-// ── Cleaners Tab (admin) ───────────────────────────────────────────────────────
+// ── Cleaners Tab ───────────────────────────────────────────────────────────────
 async function renderCleaners() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const cleaners = await fetch('/api/cleaners').then(r => r.json());
-  let html = `
-    <div class="section-header"><h2>Cleaners</h2></div>
-    <div class="card">
-      <div class="card-title">Add cleaner</div>
-      <div class="form-row">
-        <div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="margin-bottom:10px;width:100%" onclick="addCleaner()">Add cleaner</button></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">Active cleaners</div>`;
-  if (cleaners.length) {
-    cleaners.forEach(c => {
-      html += `<div class="row">
-        <div class="row-main">
-          <div class="row-title">${c.name}</div>
-          <div class="row-sub">${c.bags_out} bag${c.bags_out!==1?'s':''} currently out</div>
-        </div>
-        ${c.bags_out === 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name}')">Remove</button>` : '<span class="badge badge-out">Has bags</span>'}
-      </div>`;
-    });
-  } else { html += '<div class="empty">No cleaners yet</div>'; }
-  html += `</div>`;
+  let html = `<div class="section-header"><h2>Cleaners</h2></div><div class="card"><div class="card-title">Add cleaner</div><div class="form-row"><div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div><div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="margin-bottom:10px;width:100%" onclick="addCleaner()">Add cleaner</button></div></div></div><div class="card"><div class="card-title">Active cleaners</div>`;
+  if (cleaners.length) { cleaners.forEach(c=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${c.name}</div><div class="row-sub">${c.bags_out} bag${c.bags_out!==1?'s':''} currently out</div></div>${c.bags_out===0?`<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name}')">Remove</button>`:'<span class="badge badge-out">Has bags</span>'}</div>`;}); }
+  else { html+='<div class="empty">No cleaners yet</div>'; }
+  html+=`</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
-async function addCleaner() {
-  const name = document.getElementById('new-cleaner')?.value?.trim();
-  if (!name) return;
-  await fetch('/api/cleaners', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
-  renderCleaners();
-}
-async function deleteCleaner(id, name) {
-  if (!confirm(`Remove ${name}?`)) return;
-  const r = await fetch('/api/cleaners/' + id, { method:'DELETE' });
-  const d = await r.json();
-  if (!r.ok) alert(d.error);
-  renderCleaners();
-}
+async function addCleaner() { const name=document.getElementById('new-cleaner')?.value?.trim(); if(!name)return; await fetch('/api/cleaners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); renderCleaners(); }
+async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/cleaners/'+id,{method:'DELETE'}); const d=await r.json(); if(!r.ok)alert(d.error); renderCleaners(); }
 
-// ── Settings Tab (admin) ───────────────────────────────────────────────────────
+// ── Settings Tab ───────────────────────────────────────────────────────────────
 async function renderSettings() {
   const homes = await fetch('/api/homes').then(r => r.json());
-  let html = `
-    <div class="card">
-      <div class="card-title">PINs</div>
-      <div class="form-row">
-        <div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
-        <div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
-      </div>
-      <div class="form-row">
-        <div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div>
-        <div></div>
-      </div>
-      <button class="btn btn-primary" onclick="savePins()">Save PINs</button>
-      <div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div>
-    </div>
-
+  let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
-    <div class="card">
-      <div class="card-title">Add home</div>
-      <div class="form-row">
-        <div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div>
-        <div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div>
-      </div>
-      <button class="btn btn-primary" onclick="addHome()">Add home</button>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Add bag to home</div>
-      <div class="form-row">
-        <div><label>Home</label>
-          <select id="bag-home-sel">
-            <option value="">Select home...</option>
-            ${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}
-          </select>
-        </div>
-        <div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div>
-      </div>
-      <button class="btn btn-primary" onclick="addBag()">Add bag</button>
-      <div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">All homes</div>`;
-  homes.forEach(h => {
-    html += `<div class="row">
-      <div class="row-main">
-        <div class="row-title">${h.name} <span class="tag">${h.code}</span></div>
-        <div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div>
-      </div>
-      ${h.bag_count === 0 ? `<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>` : ''}
-    </div>`;
-  });
-  html += `</div>`;
+    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
+    <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
+    <div class="card"><div class="card-title">All homes</div>`;
+  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>`:''}</div>`;});
+  html+=`</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 async function savePins() {
-  const w = document.getElementById('wpin')?.value;
-  const a = document.getElementById('apin')?.value;
-  const m = document.getElementById('mpin')?.value;
-  if ((w && w.length !== 4) || (a && a.length !== 4) || (m && m.length !== 4)) { alert('PINs must be exactly 4 digits'); return; }
-  await fetch('/api/settings/pins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ warehouse_pin: w||undefined, admin_pin: a||undefined, maintenance_pin: m||undefined }) });
-  document.getElementById('pin-msg').textContent = 'PINs updated!';
-  setTimeout(() => { if(document.getElementById('pin-msg')) document.getElementById('pin-msg').textContent=''; }, 2000);
+  const w=document.getElementById('wpin')?.value; const a=document.getElementById('apin')?.value; const m=document.getElementById('mpin')?.value; const c=document.getElementById('cpin')?.value;
+  if((w&&w.length!==4)||(a&&a.length!==4)||(m&&m.length!==4)||(c&&c.length!==4)){alert('PINs must be exactly 4 digits');return;}
+  await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined})});
+  document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
-async function addHome() {
-  const name = document.getElementById('new-home-name')?.value?.trim();
-  const code = document.getElementById('new-home-code')?.value?.trim().toUpperCase();
-  if (!name || !code) { alert('Name and code are required'); return; }
-  const r = await fetch('/api/homes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, code }) });
-  const d = await r.json();
-  if (!r.ok) { alert(d.error); return; }
-  renderSettings();
-}
-async function deleteHome(id, name) {
-  if (!confirm(`Remove ${name}?`)) return;
-  const r = await fetch('/api/homes/' + id, { method:'DELETE' });
-  const d = await r.json();
-  if (!r.ok) { alert(d.error); return; }
-  renderSettings();
-}
-async function addBag() {
-  const home_id = document.getElementById('bag-home-sel')?.value;
-  const bag_id = document.getElementById('new-bag-id')?.value?.trim().toUpperCase();
-  if (!home_id || !bag_id) { alert('Select a home and enter a bag ID'); return; }
-  const r = await fetch('/api/bags', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ bag_id, home_id: parseInt(home_id) }) });
-  const d = await r.json();
-  if (!r.ok) { alert(d.error); return; }
-  document.getElementById('bag-msg').textContent = `✓ Bag ${d.id} added`;
-  document.getElementById('new-bag-id').value = '';
-  setTimeout(() => { if(document.getElementById('bag-msg')) document.getElementById('bag-msg').textContent=''; }, 2000);
-  renderSettings();
-}
+async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+async function deleteHome(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/homes/'+id,{method:'DELETE'}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){alert('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id)})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} document.getElementById('bag-msg').textContent=`✓ Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
 
-// Auto-focus scan input when scan zone is visible
-document.addEventListener('click', e => {
-  if (currentTab === 'scan' && !e.target.closest('input, select, button')) {
-    document.getElementById('scan-input')?.focus();
-  }
-});
+document.addEventListener('click', e => { if(currentTab==='scan'&&!e.target.closest('input, select, button'))document.getElementById('scan-input')?.focus(); });
 
-// ── QR code auto-lookup on page load ──────────────────────────────────────────
-// If someone scans a bag QR code, URL will be ?bag=HOME-01-A
-// Store bag ID in sessionStorage so it survives the PIN login
+// ── QR scan helpers ────────────────────────────────────────────────────────────
 const QR_BAG_ID = new URLSearchParams(window.location.search).get('bag');
-if (QR_BAG_ID) {
-  sessionStorage.setItem('pendingBagScan', QR_BAG_ID.toUpperCase());
-  // Add a hint on the login screen
-  const sub = document.querySelector('.login-sub');
-  if (sub) sub.textContent = `Bag ${QR_BAG_ID.toUpperCase()} ready to scan — enter your PIN to continue`;
-}
-
-// Check if opened via LoanerTrack icon (?view=loaners)
+if (QR_BAG_ID) { sessionStorage.setItem('pendingBagScan', QR_BAG_ID.toUpperCase()); const sub=document.querySelector('.login-sub'); if(sub)sub.textContent=`Bag ${QR_BAG_ID.toUpperCase()} ready — enter PIN to continue`; }
 const VIEW_PARAM = new URLSearchParams(window.location.search).get('view');
-if (VIEW_PARAM === 'loaners') {
-  sessionStorage.setItem('defaultView', 'loaners');
-}
+if (VIEW_PARAM==='loaners') sessionStorage.setItem('defaultView','loaners');
+const SUPPLY_PARAM = new URLSearchParams(window.location.search).get('supply') || new URLSearchParams(window.location.search).get('SUPPLY');
+if (SUPPLY_PARAM) sessionStorage.setItem('pendingSupplyScan', SUPPLY_PARAM);
 
-// After login, check for a pending QR scan and auto-process it
 function checkPendingQrScan() {
   const pending = sessionStorage.getItem('pendingBagScan');
   if (!pending) return;
@@ -788,224 +571,592 @@ function checkPendingQrScan() {
   setTimeout(async () => {
     const input = document.getElementById('scan-input');
     if (!input) return;
-    // Extract bag ID if full URL was stored
     let bagId = pending;
-    if (bagId.includes('BAG=') || bagId.includes('bag=')) {
-      const match = bagId.match(/[Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
-      if (match) bagId = match[1].toUpperCase();
-    }
+    if (bagId.includes('BAG=') || bagId.includes('bag=')) { const match=bagId.match(/[Bb][Aa][Gg]=([A-Za-z0-9-]+)/); if(match)bagId=match[1].toUpperCase(); }
     input.value = bagId;
-    // If checking bags in, go straight to process — no cleaner needed
-    if (scanState.mode === 'in') {
-      await processScan();
-      return;
-    }
-    // If sending out, check if cleaner already selected
+    if (scanState.mode==='in') { await processScan(); return; }
     const cleanerSel = document.getElementById('cleaner-sel');
     const cleaner_id = cleanerSel?.value || scanState.selectedCleaner;
-    if (cleaner_id) {
-      // Cleaner already chosen — process immediately
-      await processScan();
-    } else {
-      // No cleaner yet — highlight the dropdown and wait for them to pick
-      if (cleanerSel) {
-        cleanerSel.style.border = '2px solid var(--coral)';
-        cleanerSel.style.borderRadius = 'var(--radius-sm)';
-        cleanerSel.focus();
-        // Add a hint message
-        const hint = document.createElement('div');
-        hint.id = 'qr-hint';
-        hint.style.cssText = 'font-size:12px;color:var(--coral-dark);margin-top:-6px;margin-bottom:8px;font-weight:500';
-        hint.textContent = '← Select a cleaner, then scan again or press Enter';
-        cleanerSel.parentNode.insertBefore(hint, cleanerSel.nextSibling);
-        // When cleaner is picked, auto-process
-        cleanerSel.onchange = async function() {
-          scanState.selectedCleaner = this.value;
-          this.style.border = '';
-          const h = document.getElementById('qr-hint');
-          if (h) h.remove();
-          if (this.value) await processScan();
-        };
-      }
-    }
+    if (cleaner_id) { await processScan(); }
+    else if (cleanerSel) { cleanerSel.style.border='2px solid var(--coral)'; cleanerSel.focus(); }
   }, 400);
 }
 
-// ── LoanerTrack Tab ────────────────────────────────────────────────────────────
-let loanerScanState = { loaner: null, staff: [], homes: [], selectedStaff: null, sessionLog: [], mode: 'out' };
+function checkPendingSupplyScan() {
+  const pending = sessionStorage.getItem('pendingSupplyScan');
+  if (!pending) return;
+  sessionStorage.removeItem('pendingSupplyScan');
+  if (role !== 'maintenance' && role !== 'admin') return;
+  setTimeout(() => { showTab('supply_scan'); setTimeout(() => { const id = parseInt(pending); if (id) openSupplyTxFromScan(id); }, 300); }, 300);
+}
+
+// ── LoanerTrack ────────────────────────────────────────────────────────────────
+let loanerScanState = { staff: [], homes: [], selectedStaff: null, sessionLog: [], mode: 'out' };
 
 async function renderLoanerScan() {
   const [sr, hr] = await Promise.all([fetch('/api/maintenance_staff').then(r=>r.json()), fetch('/api/homes').then(r=>r.json())]);
-  loanerScanState.staff = sr;
-  loanerScanState.homes = hr;
-  const staffOpts = sr.map(s => `<option value="${s.id}" ${loanerScanState.selectedStaff==s.id?'selected':''}>${s.name}</option>`).join('');
-  const homeOpts = hr.map(h => `<option value="${h.id}">${h.name}</option>`).join('');
-
+  loanerScanState.staff = sr; loanerScanState.homes = hr;
+  const staffOpts = sr.map(s=>`<option value="${s.id}" ${loanerScanState.selectedStaff==s.id?'selected':''}>${s.name}</option>`).join('');
+  const homeOpts = hr.map(h=>`<option value="${h.id}">${h.name}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
-    <div class="card">
-      <div class="card-title">Session mode</div>
+    <div class="card"><div class="card-title">Session mode</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'#E2B04A':''};border-color:${loanerScanState.mode==='out'?'#E2B04A':''}" onclick="setLoanerMode('out')">Deploying to home</button>
         <button class="btn ${loanerScanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setLoanerMode('in')">Retrieving from home</button>
       </div>
       <div id="loaner-staff-row" style="${loanerScanState.mode==='out'?'':'display:none'}">
         <label>Staff member for this trip</label>
-        <select id="loaner-staff-sel" onchange="loanerScanState.selectedStaff=this.value" style="margin-bottom:8px">
-          <option value="">Select staff...</option>${staffOpts}
-        </select>
+        <select id="loaner-staff-sel" onchange="loanerScanState.selectedStaff=this.value" style="margin-bottom:8px"><option value="">Select staff...</option>${staffOpts}</select>
         <label>Delivering to home</label>
-        <select id="loaner-home-sel" style="margin-bottom:12px">
-          <option value="">Select home...</option>${homeOpts}
-        </select>
+        <select id="loaner-home-sel" style="margin-bottom:12px"><option value="">Select home...</option>${homeOpts}</select>
       </div>
       <label>Scan loaner item tag</label>
-      <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters"
-        oninput="this.value=this.value.toUpperCase()"
-        onkeydown="if(event.key==='Enter')processLoanerScan()" />
+      <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" />
       <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
     </div>
-    <div id="loaner-session-log"></div>
-  `;
+    <div id="loaner-session-log"></div>`;
   document.getElementById('loaner-scan-input')?.focus();
 }
-
-function setLoanerMode(m) {
-  loanerScanState.mode = m;
-  loanerScanState.sessionLog = [];
-  renderLoanerScan();
-}
-
+function setLoanerMode(m) { loanerScanState.mode=m; loanerScanState.sessionLog=[]; renderLoanerScan(); }
 async function processLoanerScan() {
-  const input = document.getElementById('loaner-scan-input');
-  let id = (input?.value || '').trim();
-  if (id.includes('LOANER=') || id.includes('loaner=')) {
-    const match = id.match(/[Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);
-    if (match) id = match[1].toUpperCase();
-  } else { id = id.toUpperCase(); }
-  if (!id) return;
-  input.value = '';
-
-  if (loanerScanState.mode === 'out') {
-    const staff_id = document.getElementById('loaner-staff-sel')?.value || loanerScanState.selectedStaff;
-    const home_id = document.getElementById('loaner-home-sel')?.value;
-    if (!staff_id) { loanerScanState.sessionLog.push({id, name:'—', msg:'Select a staff member first', error:true}); renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus(); return; }
-    if (!home_id) { loanerScanState.sessionLog.push({id, name:'—', msg:'Select a home first', error:true}); renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus(); return; }
-    loanerScanState.selectedStaff = staff_id;
-    try {
-      const r = await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({staff_id: parseInt(staff_id), home_id: parseInt(home_id)})
-      });
-      const data = await r.json();
-      if (r.ok) loanerScanState.sessionLog.push({id, name:data.item, msg:`Deployed to ${data.home} by ${data.staff}`, error:false});
-      else loanerScanState.sessionLog.push({id, name:'—', msg:data.error, error:true});
-    } catch(e) { loanerScanState.sessionLog.push({id, name:'—', msg:'Connection error', error:true}); }
-  } else {
-    try {
-      const r = await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''})
-      });
-      const data = await r.json();
-      if (r.ok) loanerScanState.sessionLog.push({id, name:data.item, msg:`Retrieved from ${data.home}`, error:false});
-      else loanerScanState.sessionLog.push({id, name:'—', msg:data.error, error:true});
-    } catch(e) { loanerScanState.sessionLog.push({id, name:'—', msg:'Connection error', error:true}); }
+  const input=document.getElementById('loaner-scan-input'); let id=(input?.value||'').trim();
+  if(id.includes('LOANER=')||id.includes('loaner=')){const match=id.match(/[Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);if(match)id=match[1].toUpperCase();}else{id=id.toUpperCase();}
+  if(!id)return; input.value='';
+  if(loanerScanState.mode==='out'){
+    const staff_id=document.getElementById('loaner-staff-sel')?.value||loanerScanState.selectedStaff; const home_id=document.getElementById('loaner-home-sel')?.value;
+    if(!staff_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a staff member first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
+    if(!home_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a home first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
+    loanerScanState.selectedStaff=staff_id;
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_id:parseInt(staff_id),home_id:parseInt(home_id)})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Deployed to ${data.home} by ${data.staff}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
+  }else{
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:''})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Retrieved from ${data.home}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
   }
-  renderLoanerSessionLog();
-  document.getElementById('loaner-scan-input')?.focus();
+  renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus();
 }
-
 function renderLoanerSessionLog() {
-  const log = loanerScanState.sessionLog;
-  if (!log.length) return;
-  const errors = log.filter(l=>l.error).length;
-  let html = `<div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <div class="card-title" style="margin-bottom:0">This session</div>
-      <div style="display:flex;gap:6px">
-        <span class="badge badge-count">${log.length} scanned</span>
-        ${errors?`<span class="badge badge-out">${errors} errors</span>`:''}
-      </div>
-    </div>`;
-  [...log].reverse().forEach(l => {
-    html += `<div class="row">
-      <div class="row-main">
-        <div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div>
-        <div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div>
-      </div>
-      <span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span>
-    </div>`;
-  });
-  html += '</div>';
-  const el = document.getElementById('loaner-session-log');
-  if (el) el.innerHTML = html;
+  const log=loanerScanState.sessionLog; if(!log.length)return; const errors=log.filter(l=>l.error).length;
+  let html=`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
+  [...log].reverse().forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span></div>`;});
+  html+='</div>'; const el=document.getElementById('loaner-session-log'); if(el)el.innerHTML=html;
+}
+async function renderLoanerStatus() {
+  document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
+  const loaners=await fetch('/api/loaners').then(r=>r.json());
+  const out=loaners.filter(l=>l.status==='out'); const inW=loaners.filter(l=>l.status==='in');
+  let html=`<div class="stat-grid"><div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div></div>`;
+  if(out.length){html+='<div class="card"><div class="card-title">Currently deployed</div>';out.forEach(l=>{const since=l.deployed_at?new Date(l.deployed_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${l.staff_name?' · '+l.staff_name:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
+  if(inW.length){html+='<div class="card"><div class="card-title">At warehouse</div>';const cats={};inW.forEach(l=>{if(!cats[l.category])cats[l.category]=[];cats[l.category].push(l);});Object.entries(cats).sort().forEach(([cat,items])=>{html+=`<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;items.forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><span class="badge badge-in">In</span></div>`;});});html+='</div>';}
+  document.getElementById('main-content').innerHTML=html;
+}
+async function renderLoanerLog() {
+  document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
+  const log=await fetch('/api/activity').then(r=>r.json());
+  const loanerLog=log.filter(e=>e.activity_type==='loaner');
+  if(!loanerLog.length){document.getElementById('main-content').innerHTML='<div class="empty">No loaner activity yet</div>';return;}
+  let html='<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
+  loanerLog.forEach(e=>{const isReturn=e.action==='Retrieved';html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div><div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}</div></div></div>`;});
+  html+='</div>'; document.getElementById('main-content').innerHTML=html;
 }
 
-async function renderLoanerStatus() {
-  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
-  const loaners = await fetch('/api/loaners').then(r=>r.json());
-  const out = loaners.filter(l=>l.status==='out');
-  const inW = loaners.filter(l=>l.status==='in');
+// ══════════════════════════════════════════════════════════════
+// ── SupplyTrack ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function loadSupplies() {
+  const res = await fetch('/api/supplies');
+  _supplies = await res.json();
+}
+
+async function renderSupplyScan() {
+  await loadSupplies();
+  const cats = [...new Set(_supplies.map(s=>s.category))].sort();
+  const catFilter = `<select id="supply-cat-filter" onchange="renderSupplyCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
+  document.getElementById('main-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-size:15px;font-weight:600">🧰 Supplies</div>
+      ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="showAddSupplyModal()">+ Add Item</button>`:''}
+    </div>
+    <div class="subtab-bar">
+      <button class="subtab active" id="st-inventory" onclick="supplySubtab('inventory')">Inventory</button>
+      <button class="subtab" id="st-log" onclick="supplySubtab('log')">Activity Log</button>
+      <button class="subtab" id="st-lowstock" onclick="supplySubtab('lowstock')">⚠️ Low Stock</button>
+    </div>
+    <div id="sv-inventory">${catFilter}<div id="supply-cards" class="supply-grid"></div></div>
+    <div id="sv-log" style="display:none"><div id="supply-log-table"></div></div>
+    <div id="sv-lowstock" style="display:none"><div id="supply-lowstock-cards" class="supply-grid"></div></div>`;
+  renderSupplyCards();
+}
+
+function supplySubtab(tab) {
+  ['inventory','log','lowstock'].forEach(t => {
+    document.getElementById('sv-'+t).style.display = t===tab?'block':'none';
+    document.getElementById('st-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab==='log') loadSupplyLog();
+  if (tab==='lowstock') renderLowStockCards();
+}
+
+function renderSupplyCards() {
+  const filter = document.getElementById('supply-cat-filter')?.value || '';
+  const items = filter ? _supplies.filter(s=>s.category===filter) : _supplies;
+  const grid = document.getElementById('supply-cards');
+  if (!grid) return;
+  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(role==='admin'?'Add one above.':'')+'</p>'; return; }
+  grid.innerHTML = items.map(item => {
+    const low = item.quantity <= item.low_stock_threshold;
+    return `<div class="supply-card ${low?'low-stock':''}">
+      <div class="supply-card-top">
+        <div class="supply-name">${item.name}</div>
+        ${low?'<span class="badge badge-out" style="font-size:10px">LOW</span>':''}
+      </div>
+      <div class="supply-cat">${item.category}</div>
+      <div class="supply-qty" style="color:${low?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
+      <div class="supply-unit">${item.unit}</div>
+      <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
+      <div class="supply-actions">
+        <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">📤 Take</button>
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button>
+        <button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">🔲</button>
+        ${role==='admin'?`<button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderLowStockCards() {
+  const low = _supplies.filter(s=>s.quantity<=s.low_stock_threshold);
+  const grid = document.getElementById('supply-lowstock-cards');
+  if (!grid) return;
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--green);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
+    <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
+    <div class="supply-cat">${item.category}</div>
+    <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
+    <div class="supply-unit">${item.unit}</div>
+    <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
+    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button></div>
+  </div>`).join('');
+}
+
+async function loadSupplyLog() {
+  const res = await fetch('/api/supply-log?limit=200');
+  const rows = await res.json();
+  const el = document.getElementById('supply-log-table');
+  if (!el) return;
+  if (!rows.length) { el.innerHTML='<div class="empty">No transactions yet</div>'; return; }
+  el.innerHTML = `<div class="card" style="padding:0.75rem 1.25rem">` + rows.map(r=>{
+    const isOut=r.action==='take';
+    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'📤 Took':'📥 Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
+  }).join('') + '</div>';
+}
+
+async function renderSupplyStatus() {
+  await loadSupplies();
+  renderSupplyScan();
+}
+
+// Supply modals
+function showAddSupplyModal() {
+  document.getElementById('supply-modal-title').textContent = 'Add Supply Item';
+  document.getElementById('supply-edit-id').value = '';
+  document.getElementById('supply-name').value = '';
+  document.getElementById('supply-category').value = '';
+  document.getElementById('supply-unit').value = 'units';
+  document.getElementById('supply-threshold').value = 5;
+  document.getElementById('supply-init-qty').value = 0;
+  document.getElementById('supply-qty-row').style.display = 'block';
+  // Populate category datalist
+  const cats = [...new Set(_supplies.map(s=>s.category))].sort();
+  document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
+  document.getElementById('modal-supply-item').style.display = 'flex';
+}
+function showEditSupplyModal(id) {
+  const item = _supplies.find(s=>s.id===id); if(!item)return;
+  document.getElementById('supply-modal-title').textContent = 'Edit Supply Item';
+  document.getElementById('supply-edit-id').value = id;
+  document.getElementById('supply-name').value = item.name;
+  document.getElementById('supply-category').value = item.category;
+  document.getElementById('supply-unit').value = item.unit;
+  document.getElementById('supply-threshold').value = item.low_stock_threshold;
+  document.getElementById('supply-qty-row').style.display = 'none';
+  document.getElementById('modal-supply-item').style.display = 'flex';
+}
+function closeSupplyItemModal() { document.getElementById('modal-supply-item').style.display='none'; }
+async function saveSupplyItem() {
+  const editId = document.getElementById('supply-edit-id').value;
+  const body = { pin:_currentPin, name:document.getElementById('supply-name').value.trim(), category:document.getElementById('supply-category').value.trim()||'General', unit:document.getElementById('supply-unit').value.trim()||'units', low_stock_threshold:parseInt(document.getElementById('supply-threshold').value), quantity:parseInt(document.getElementById('supply-init-qty').value||'0') };
+  if (!body.name) { alert('Please enter an item name.'); return; }
+  const res = editId
+    ? await fetch(`/api/supplies/${editId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    : await fetch('/api/supplies', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  closeSupplyItemModal();
+  await loadSupplies();
+  renderSupplyCards();
+}
+
+function showSupplyTxModal(supplyId, action) {
+  const item = _supplies.find(s=>s.id===supplyId); if(!item)return;
+  document.getElementById('tx-supply-id').value = supplyId;
+  document.getElementById('tx-action').value = action;
+  document.getElementById('tx-modal-title').textContent = action==='take'?'📤 Take Supplies':'📥 Restock Supplies';
+  document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
+  document.getElementById('tx-qty').value = 1;
+  document.getElementById('tx-notes').value = '';
+  const sel = document.getElementById('tx-performer');
+  sel.innerHTML = '<option value="">Select your name...</option>';
+  _loanerStaff.forEach(s=>{ sel.innerHTML+=`<option value="${s.name}">${s.name}</option>`; });
+  if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
+  document.getElementById('modal-supply-tx').style.display = 'flex';
+}
+function openSupplyTxFromScan(supplyId) { showSupplyTxModal(supplyId, 'take'); }
+function closeSupplyTxModal() { document.getElementById('modal-supply-tx').style.display='none'; }
+async function submitSupplyTx() {
+  const supplyId = document.getElementById('tx-supply-id').value;
+  const action = document.getElementById('tx-action').value;
+  const qty = parseInt(document.getElementById('tx-qty').value);
+  const performedBy = document.getElementById('tx-performer').value;
+  const notes = document.getElementById('tx-notes').value;
+  if (!performedBy) { alert('Please select your name.'); return; }
+  if (!qty||qty<1) { alert('Please enter a valid quantity.'); return; }
+  const res = await fetch(`/api/supplies/${supplyId}/transaction`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, action, quantity:qty, performed_by:performedBy, notes}) });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  closeSupplyTxModal();
+  const itemName = _supplies.find(s=>s.id==supplyId)?.name||'Item';
+  await loadSupplies();
+  renderSupplyCards();
+  if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+}
+
+async function showSupplyQR(supplyId) {
+  const res = await fetch(`/api/supplies/${supplyId}/qr`);
+  const data = await res.json();
+  document.getElementById('qr-item-name').textContent = data.name;
+  document.getElementById('qr-img').src = data.qr_code;
+  document.getElementById('modal-supply-qr').style.display = 'flex';
+}
+function printSupplyQR() {
+  const name=document.getElementById('qr-item-name').textContent; const src=document.getElementById('qr-img').src;
+  const win=window.open('','_blank'); win.document.write(`<html><head><title>QR - ${name}</title><style>body{font-family:sans-serif;text-align:center;padding:40px}img{width:250px;height:250px}</style></head><body><h2>${name}</h2><p>Scan to Take or Restock</p><img src="${src}"><script>window.onload=()=>window.print()<\/script></body></html>`); win.document.close();
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── InventoryCount ────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+let _countSession = null; // { areas, items, startedAt, counts:{id:qty} }
+let _countScanBuffer = '';
+
+async function renderInventoryCount() {
+  const pastRes = await fetch('/api/inventory-counts');
+  const pastCounts = await pastRes.json();
+
+  if (_countSession) {
+    renderCountInProgress();
+    return;
+  }
+
+  let pastHtml = '';
+  if (pastCounts.length) {
+    pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
+      pastCounts.slice(0,10).map(c=>{
+        const variances = c.variances || 0;
+        return `<div class="row">
+          <div class="row-main">
+            <div class="row-title">${c.started_at} — ${c.areas}</div>
+            <div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button>
+        </div>`;
+      }).join('') + '</div>';
+  }
+
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📋 Inventory Count</div>
+    <div class="card">
+      <div class="card-title">Start new count</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Select which areas to count, then scan each item and enter the quantity you physically find.</p>
+      <label style="margin-bottom:8px">Areas to count</label>
+      <div id="count-area-loaners" class="count-area-card selected" onclick="toggleCountArea('loaners')">
+        <input type="checkbox" checked id="chk-loaners">
+        <div>
+          <div style="font-size:14px;font-weight:600">📦 Loaner items</div>
+          <div style="font-size:12px;color:var(--gray-400)">Scan each item to confirm it's physically present</div>
+        </div>
+      </div>
+      <div id="count-area-supplies" class="count-area-card selected" onclick="toggleCountArea('supplies')">
+        <input type="checkbox" checked id="chk-supplies">
+        <div>
+          <div style="font-size:14px;font-weight:600">🧰 Supplies</div>
+          <div style="font-size:12px;color:var(--gray-400)">Scan item QR, enter quantity on shelf</div>
+        </div>
+      </div>
+      <div style="margin-top:1rem">
+        <button class="btn btn-primary btn-full" onclick="startCount()">Begin count</button>
+      </div>
+    </div>
+    ${pastHtml}`;
+}
+
+function toggleCountArea(area) {
+  const card = document.getElementById('count-area-'+area);
+  const chk = document.getElementById('chk-'+area);
+  chk.checked = !chk.checked;
+  card.classList.toggle('selected', chk.checked);
+}
+
+async function startCount() {
+  const areas = [];
+  if (document.getElementById('chk-loaners')?.checked) areas.push('loaners');
+  if (document.getElementById('chk-supplies')?.checked) areas.push('supplies');
+  if (!areas.length) { alert('Please select at least one area to count.'); return; }
+
+  // Load items for selected areas
+  let items = [];
+  if (areas.includes('loaners')) {
+    const loaners = await fetch('/api/loaners').then(r=>r.json());
+    // Only count items that should be in (not deployed)
+    loaners.forEach(l => items.push({ id:'L-'+l.id, label:l.name, tag:l.id, type:'loaner', expected: l.status==='in'?1:0, expectedLabel: l.status==='in'?'In warehouse':'Deployed out', category:l.category }));
+  }
+  if (areas.includes('supplies')) {
+    const supplies = await fetch('/api/supplies').then(r=>r.json());
+    supplies.forEach(s => items.push({ id:'S-'+s.id, label:s.name, tag:'supply-'+s.id, type:'supply', expected:s.quantity, expectedLabel:`${s.quantity} ${s.unit}`, unit:s.unit, category:s.category, supplyId:s.id }));
+  }
+
+  _countSession = { areas, items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
+  renderCountInProgress();
+}
+
+function renderCountInProgress() {
+  const s = _countSession;
+  const total = s.items.length;
+  const counted = Object.keys(s.counts).length;
+  const pct = total ? Math.round(counted/total*100) : 0;
+
+  let loanerItems = s.items.filter(i=>i.type==='loaner');
+  let supplyItems = s.items.filter(i=>i.type==='supply');
+
+  function itemRow(item) {
+    const done = s.counts.hasOwnProperty(item.id);
+    const countedQty = s.counts[item.id];
+    let varianceHtml = '';
+    if (done) {
+      if (item.type==='loaner') {
+        varianceHtml = countedQty===1 ? '<span class="variance-ok">✓ Found</span>' : '<span class="variance-neg">✗ Missing</span>';
+      } else {
+        const diff = countedQty - item.expected;
+        if (diff===0) varianceHtml = '<span class="variance-ok">✓ Match</span>';
+        else if (diff>0) varianceHtml = `<span class="variance-pos">+${diff} over</span>`;
+        else varianceHtml = `<span class="variance-neg">${diff} short</span>`;
+      }
+    }
+    const inputVal = done ? countedQty : '';
+    return `<div class="count-row" id="crow-${item.id}">
+      <div class="count-row-left">
+        <div style="font-size:13px;font-weight:500">${item.label}</div>
+        <div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel} · <span class="tag" style="font-size:10px">${item.tag}</span></div>
+      </div>
+      <div class="count-row-right">
+        ${varianceHtml}
+        ${item.type==='loaner'
+          ? `<button class="btn btn-sm ${done&&countedQty===1?'btn-primary':'btn-ghost'}" onclick="countLoaner('${item.id}',1)" style="${done&&countedQty===1?'background:var(--green)':''}">Found</button>
+             <button class="btn btn-sm ${done&&countedQty===0?'btn-danger':'btn-ghost'}" onclick="countLoaner('${item.id}',0)">Missing</button>`
+          : `<input class="count-input" type="number" min="0" value="${inputVal}" placeholder="—" onchange="countSupply('${item.id}',this.value)" oninput="countSupply('${item.id}',this.value)">`
+        }
+      </div>
+    </div>`;
+  }
 
   let html = `
-    <div class="stat-grid">
-      <div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div>
-      <div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div>
-      <div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div>
-    </div>`;
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-size:15px;font-weight:600">📋 Count in progress</div>
+      <span class="badge badge-count">${counted}/${total} done</span>
+    </div>
+    <div class="card">
+      <div class="count-progress"><div class="count-progress-bar" style="width:${pct}%"></div></div>
+      <div style="font-size:12px;color:var(--gray-400);margin-bottom:1rem">${pct}% complete · Started ${s.startedAt}</div>
 
-  if (out.length) {
-    html += '<div class="card"><div class="card-title">Currently deployed</div>';
-    out.forEach(l => {
-      const since = l.deployed_at ? new Date(l.deployed_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-      html += `<div class="row">
-        <div class="row-main">
-          <div class="row-title">${l.name} <span class="tag">${l.id}</span></div>
-          <div class="row-sub">${l.home_name}${l.staff_name?' · '+l.staff_name:''}${since?' · since '+since:''}</div>
-        </div>
-        <span class="badge badge-out">Out</span>
+      <div style="background:var(--gray-50);border:0.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem">
+        <label style="margin-bottom:4px">Quick scan — scan a QR code to jump to that item</label>
+        <input type="text" id="count-scan-input" placeholder="Scan QR code here..." autocomplete="off" autocapitalize="off"
+          onkeydown="if(event.key==='Enter')processCountScan()" style="margin-bottom:0">
       </div>`;
-    });
-    html += '</div>';
+
+  if (loanerItems.length) {
+    html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px">📦 Loaner Items</div>`;
+    html += loanerItems.map(itemRow).join('');
+  }
+  if (supplyItems.length) {
+    html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px">🧰 Supplies</div>`;
+    html += supplyItems.map(itemRow).join('');
   }
 
-  if (inW.length) {
-    html += '<div class="card"><div class="card-title">At warehouse</div>';
-    // Group by category
-    const cats = {};
-    inW.forEach(l => { if(!cats[l.category]) cats[l.category]=[]; cats[l.category].push(l); });
-    Object.entries(cats).sort().forEach(([cat, items]) => {
-      html += `<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;
-      items.forEach(l => {
-        html += `<div class="row">
-          <div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div>
-          <span class="badge badge-in">In</span>
-        </div>`;
-      });
-    });
-    html += '</div>';
-  }
+  html += `<div style="display:flex;gap:8px;margin-top:1.25rem">
+    <button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button>
+    <button class="btn btn-primary btn-full" onclick="finalizeCount()" ${counted===0?'disabled':''}>Finalize & generate report</button>
+  </div></div>`;
 
   document.getElementById('main-content').innerHTML = html;
+  document.getElementById('count-scan-input')?.focus();
 }
 
-async function renderLoanerLog() {
-  document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
-  const log = await fetch('/api/activity').then(r=>r.json());
-  const loanerLog = log.filter(e=>e.activity_type==='loaner');
-  if (!loanerLog.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No loaner activity yet</div>'; return; }
-  let html = '<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
-  loanerLog.forEach(e => {
-    const isReturn = e.action === 'Retrieved';
-    html += `<div class="row">
-      <div class="row-main">
-        <div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div>
-        <div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}</div>
+function countLoaner(itemId, found) {
+  _countSession.counts[itemId] = found;
+  renderCountInProgress();
+  document.getElementById('count-scan-input')?.focus();
+}
+function countSupply(itemId, val) {
+  const qty = parseInt(val);
+  if (!isNaN(qty) && qty >= 0) _countSession.counts[itemId] = qty;
+  else delete _countSession.counts[itemId];
+}
+
+function processCountScan() {
+  const input = document.getElementById('count-scan-input');
+  let raw = (input?.value||'').trim();
+  input.value = '';
+
+  // Extract supply ID from URL param
+  const supplyMatch = raw.match(/[?&][Ss][Uu][Pp][Pp][Ll][Yy]=(\d+)/);
+  const loanerMatch = raw.match(/[?&][Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/i);
+
+  let found = false;
+  if (supplyMatch) {
+    const sid = 'S-'+supplyMatch[1];
+    const el = document.getElementById('crow-'+sid);
+    if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--teal-light)'; setTimeout(()=>el.style.background='',1500); found=true; el.querySelector('.count-input')?.focus(); }
+  } else if (loanerMatch) {
+    const lid = 'L-'+loanerMatch[1].toUpperCase();
+    const el = document.getElementById('crow-'+lid);
+    if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--teal-light)'; setTimeout(()=>el.style.background='',1500); found=true; }
+  } else if (raw) {
+    // Try matching raw as loaner tag
+    const item = _countSession.items.find(i=>i.tag.toUpperCase()===raw.toUpperCase());
+    if (item) { const el=document.getElementById('crow-'+item.id); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.background='var(--teal-light)';setTimeout(()=>el.style.background='',1500);found=true;if(item.type==='loaner')countLoaner(item.id,1);} }
+  }
+  if (!found && raw) {
+    const flash = document.createElement('div');
+    flash.style.cssText='position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--coral-light);color:var(--coral-dark);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;z-index:999';
+    flash.textContent='Item not found in this count';
+    document.body.appendChild(flash); setTimeout(()=>flash.remove(),2000);
+  }
+  setTimeout(()=>document.getElementById('count-scan-input')?.focus(), 100);
+}
+
+function cancelCount() {
+  if (!confirm('Cancel this count? Progress will be lost.')) return;
+  _countSession = null;
+  renderInventoryCount();
+}
+
+async function finalizeCount() {
+  const s = _countSession;
+  const variances = [];
+  let matchCount = 0;
+
+  s.items.forEach(item => {
+    const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : null;
+    if (counted === null) return; // skip uncounted
+    if (item.type === 'loaner') {
+      if (counted !== item.expected) variances.push({ label:item.label, type:'loaner', expected:item.expectedLabel, counted:counted===1?'Found':'Missing' });
+      else matchCount++;
+    } else {
+      const diff = counted - item.expected;
+      if (diff !== 0) variances.push({ label:item.label, type:'supply', expected:item.expected, counted, diff, unit:item.unit });
+      else matchCount++;
+    }
+  });
+
+  const totalCounted = Object.keys(s.counts).length;
+  const payload = {
+    areas: s.areas.join(', '),
+    started_at: s.startedAt,
+    item_count: totalCounted,
+    variances: variances.length,
+    details: JSON.stringify({ counts: s.counts, items: s.items, variances })
+  };
+
+  const res = await fetch('/api/inventory-counts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  const saved = await res.json();
+
+  _countSession = null;
+  renderCountReport({ ...payload, variances_list: variances, matchCount, totalCounted, id: saved.id });
+}
+
+function renderCountReport(data) {
+  const v = data.variances_list || [];
+  const shorts = v.filter(x=>x.diff<0||x.counted==='Missing');
+  const overs = v.filter(x=>x.diff>0);
+
+  let html = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+      <div style="font-size:15px;font-weight:600">📋 Count Report — ${data.started_at}</div>
+      <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})">📧 Email to accounting</button>
+    </div>
+    <div class="report-stat-grid">
+      <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)">
+        <div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div>
+      </div>
+      <div class="report-stat" style="background:var(--green-light)">
+        <div class="rnum" style="color:var(--green)">${data.matchCount}</div><div class="rlbl" style="color:var(--green)">Match</div>
+      </div>
+      <div class="report-stat" style="background:var(--coral-light)">
+        <div class="rnum" style="color:var(--coral-dark)">${shorts.length}</div><div class="rlbl" style="color:var(--coral-dark)">Short/missing</div>
+      </div>
+      <div class="report-stat" style="background:var(--amber-light)">
+        <div class="rnum" style="color:var(--amber)">${overs.length}</div><div class="rlbl" style="color:var(--amber)">Over count</div>
       </div>
     </div>`;
+
+  if (v.length) {
+    html += `<div class="card"><div class="card-title" style="color:var(--coral-dark)">⚠️ Variances (${v.length})</div>`;
+    v.forEach(item => {
+      const isShort = item.diff<0||item.counted==='Missing';
+      const isOver = item.diff>0;
+      let detail = '';
+      if (item.type==='loaner') detail = item.counted==='Found'?'✓ Found':'✗ Missing — expected in warehouse';
+      else { const diff=item.counted-item.expected; detail=`Found ${item.counted} ${item.unit||''} · expected ${item.expected} · <strong style="color:${diff<0?'var(--coral-dark)':'var(--amber)'}">${diff>0?'+':''}${diff}</strong>`; }
+      html+=`<div class="row"><div class="row-main"><div class="row-title">${item.label} <span class="tag" style="font-size:10px">${item.type}</span></div><div class="row-sub">${detail}</div></div><span class="badge ${isShort?'badge-out':isOver?'badge-warn':'badge-ok'}">${isShort?'Short':'Over'}</span></div>`;
+    });
+    html += '</div>';
+  } else {
+    html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:15px;font-weight:600;color:var(--green)">Perfect count — no variances!</div></div>`;
+  }
+
+  // Full detail
+  html += `<div class="card"><div class="card-title">Full count detail</div>`;
+  (data.items || []).forEach(item => {
+    const counted = (data.counts||{})[item.id];
+    const done = counted !== undefined;
+    let statusHtml = '<span style="color:var(--gray-400);font-size:12px">Not counted</span>';
+    if (done) {
+      if (item.type==='loaner') statusHtml = counted===1?'<span class="variance-ok">Found</span>':'<span class="variance-neg">Missing</span>';
+      else { const diff=counted-item.expected; statusHtml=diff===0?'<span class="variance-ok">Match</span>':diff>0?`<span class="variance-pos">+${diff}</span>`:`<span class="variance-neg">${diff}</span>`; }
+    }
+    html+=`<div class="count-row"><div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel}</div></div><div class="count-row-right"><span style="font-size:13px;font-weight:600">${done?(item.type==='loaner'?counted===1?'1 found':'Missing':counted+' '+item.unit):'—'}</span>${statusHtml}</div></div>`;
   });
   html += '</div>';
+
+  html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="renderInventoryCount()">← Back to counts</button></div>`;
   document.getElementById('main-content').innerHTML = html;
 }
+
+async function viewPastCount(countId) {
+  const res = await fetch(`/api/inventory-counts/${countId}`);
+  const c = await res.json();
+  const details = JSON.parse(c.details||'{}');
+  renderCountReport({ ...c, variances_list: details.variances||[], matchCount: c.item_count-(details.variances||[]).length, totalCounted:c.item_count, items:details.items||[], counts:details.counts||{} });
+}
+
+async function emailCountReport(countId) {
+  const res = await fetch(`/api/inventory-counts/${countId}/email`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin}) });
+  const data = await res.json();
+  if (data.success) alert('✅ Report emailed to accounting!');
+  else alert('Email sent (check server logs if not received — SMTP setup required).');
+}
+
 </script>
 </body>
 </html>
