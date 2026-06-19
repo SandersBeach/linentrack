@@ -995,7 +995,7 @@ function renderCountInProgress() {
 
   html += `<div style="display:flex;gap:8px;margin-top:1.25rem">
     <button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button>
-    <button class="btn btn-primary btn-full" onclick="finalizeCount()" ${counted===0?'disabled':''}>Finalize & generate report</button>
+    <button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button>
   </div></div>`;
 
   document.getElementById('main-content').innerHTML = html;
