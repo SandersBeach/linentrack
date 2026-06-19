@@ -439,39 +439,6 @@ def email_inventory_count(cid):
     return jsonify({'success':True,'email_sent':sent})
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-@app.route('/api/seed-supplies', methods=['GET'])
-def seed_supplies():
-    supplies = [
-        ('AA Batteries',           'Electrical', 24,  6,  'packs'),
-        ('AAA Batteries',          'Electrical', 12,  4,  'packs'),
-        ('9V Batteries',           'Electrical',  8,  3,  'packs'),
-        ('60W Light Bulbs',        'Electrical', 48, 10,  'bulbs'),
-        ('LED Bulbs (Candelabra)', 'Electrical', 24,  6,  'bulbs'),
-        ('Night Light Bulbs',      'Electrical', 12,  4,  'bulbs'),
-        ('Air Filters 16x20',      'HVAC',       10,  3,  'filters'),
-        ('Air Filters 20x25',      'HVAC',        8,  3,  'filters'),
-        ('Air Filters 16x25',      'HVAC',        6,  2,  'filters'),
-        ('Paper Towels',           'Cleaning',   60, 15,  'rolls'),
-        ('Trash Bags (13 gal)',    'Cleaning',  200, 50,  'bags'),
-        ('Dish Soap',              'Cleaning',   24,  6,  'bottles'),
-    ]
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    added = []; skipped = []
-    for name, category, qty, threshold, unit in supplies:
-        cur.execute("SELECT id FROM supply_items WHERE name=%s", (name,))
-        existing = cur.fetchone()
-        if existing:
-            skipped.append(name)
-            continue
-        cur.execute("""INSERT INTO supply_items (name,category,quantity,low_stock_threshold,unit,created_at)
-            VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""", (name,category,qty,threshold,unit,now_central()))
-        sid = cur.fetchone()['id']
-        qr = make_supply_qr(sid)
-        cur.execute("UPDATE supply_items SET qr_code=%s WHERE id=%s", (qr, sid))
-        added.append(f"{name} (id={sid})")
-    conn.commit(); cur.close(); conn.close()
-    return jsonify({'added': added, 'skipped': skipped, 'message': 'Done! Now remove this route from server.py'})
 
 if __name__ == '__main__':
     init_db()
