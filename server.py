@@ -279,7 +279,7 @@ def get_activity():
 @app.route('/api/maintenance_staff', methods=['GET'])
 def get_maintenance_staff():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM loaner_staff WHERE active=1 ORDER BY name")
+    cur.execute("SELECT * FROM maintenance_staff WHERE active=1 ORDER BY name")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
 # ── Loaners ───────────────────────────────────────────────────────────────────
