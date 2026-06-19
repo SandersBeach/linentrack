@@ -1050,83 +1050,29 @@ function cancelCount() {
   _countSession = null;
   renderInventoryCount();
 }
-
 async function finalizeCount() {
   const s = _countSession;
   if (!s) return;
   const variances = [];
   let matchCount = 0;
-
   s.items.forEach(item => {
     const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : null;
-
     if (item.type === 'loaner') {
-      if (counted === null || counted === 0) {
-        variances.push({ label:item.label, type:'loaner', expectedLabel:item.expectedLabel, counted:'Missing' });
-      } else {
-        matchCount++;
-      }
+      if (counted === null || counted === 0) variances.push({ label:item.label, type:'loaner', expectedLabel:item.expectedLabel, counted:'Missing' });
+      else matchCount++;
     } else {
-      if (counted === null) {
-        variances.push({ label:item.label, type:'supply', expected:item.expected, counted:0, diff:-item.expected, unit:item.unit, missing:true });
-      } else {
-        const diff = counted - item.expected;
-        if (diff !== 0) variances.push({ label:item.label, type:'supply', expected:item.expected, counted, diff, unit:item.unit });
-        else matchCount++;
-      }
+      if (counted === null) variances.push({ label:item.label, type:'supply', expected:item.expected, counted:0, diff:-item.expected, unit:item.unit, missing:true });
+      else { const diff=counted-item.expected; if(diff!==0)variances.push({label:item.label,type:'supply',expected:item.expected,counted,diff,unit:item.unit}); else matchCount++; }
     }
   });
-
   const totalCounted = s.items.length;
-  const payload = {
-    areas: s.areas.join(', '),
-    started_at: s.startedAt,
-    item_count: totalCounted,
-    variances: variances.length,
-    details: JSON.stringify({ counts: s.counts, items: s.items, variances })
-  };
-
+  const payload = { areas:s.areas.join(', '), started_at:s.startedAt, item_count:totalCounted, variances:variances.length, details:JSON.stringify({counts:s.counts,items:s.items,variances}) };
   try {
-    const res = await fetch('/api/inventory-counts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
     _countSession = null;
-    renderCountReport({ ...payload, variances_list: variances, matchCount, totalCounted, id: saved.id });
-  } catch(e) {
-    alert('Error saving count — please try again.');
-    console.error(e);
-  }
-}
-  const s = _countSession;
-  const variances = [];
-  let matchCount = 0;
-
-  s.items.forEach(item => {
-    const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : null;
-    if (counted === null) return; // skip uncounted
-    if (item.type === 'loaner') {
-      if (counted !== item.expected) variances.push({ label:item.label, type:'loaner', expected:item.expectedLabel, counted:counted===1?'Found':'Missing' });
-      else matchCount++;
-    } else {
-      const diff = counted - item.expected;
-      if (diff !== 0) variances.push({ label:item.label, type:'supply', expected:item.expected, counted, diff, unit:item.unit });
-      else matchCount++;
-    }
-  });
-
-  const totalCounted = Object.keys(s.counts).length;
-  const payload = {
-    areas: s.areas.join(', '),
-    started_at: s.startedAt,
-    item_count: totalCounted,
-    variances: variances.length,
-    details: JSON.stringify({ counts: s.counts, items: s.items, variances })
-  };
-
-  const res = await fetch('/api/inventory-counts', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-  const saved = await res.json();
-
-  _countSession = null;
-  renderCountReport({ ...payload, variances_list: variances, matchCount, totalCounted, id: saved.id });
+    renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
+  } catch(e) { alert('Error saving count — please try again.'); console.error(e); }
 }
 
 function renderCountReport(data) {
