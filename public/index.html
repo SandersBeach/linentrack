@@ -1073,9 +1073,7 @@ async function finalizeCount() {
     _countSession = null;
     renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
   } catch(e) { alert('Error saving count — please try again.'); console.error(e); }
-}
-
-function renderCountReport(data) {
+}function renderCountReport(data) {
   const v = data.variances_list || [];
   const shorts = v.filter(x=>x.diff<0||x.counted==='Missing');
   const overs = v.filter(x=>x.diff>0);
