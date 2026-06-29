@@ -188,18 +188,44 @@
       <label>Category</label>
       <select id="po-pl-category">
         <option value="">Select a category...</option>
-        <option>Beach &amp; Pool Equipment</option><option>Boat &amp; Watercraft Supplies</option>
-        <option>Cleaning Supplies &amp; Equipment</option><option>Construction &amp; Structural Repairs</option>
-        <option>Electrical &amp; Lighting</option><option>Electronics &amp; Technology</option>
-        <option>Exterior &amp; Landscaping</option><option>Furniture &amp; Décor</option>
-        <option>Grill &amp; Outdoor Cooking</option><option>Guest Amenities &amp; Toiletries</option>
-        <option>HVAC &amp; Ventilation</option><option>Housekeeping Supplies</option>
-        <option>Kitchen &amp; Appliances</option><option>Linens &amp; Bedding</option>
-        <option>Lock &amp; Security Systems</option><option>Maintenance Tools &amp; Hardware</option>
-        <option>Marketing &amp; Signage</option><option>Office &amp; Administrative Supplies</option>
-        <option>Pest Control</option><option>Plumbing &amp; Water Systems</option>
-        <option>Safety &amp; Compliance</option><option>Vehicle &amp; Transportation</option>
-        <option>Other</option>
+        <option>Advertising (Google & FB only)</option>
+        <option>AI Office Expense & Misc</option>
+        <option>AL Repairs</option>
+        <option>Auto Servicing & Repairs (including car wash)</option>
+        <option>Bayhouse SBR Expense</option>
+        <option>Billable Upgrade - A/C Filters</option>
+        <option>Billable Upgrade - Landscaping</option>
+        <option>Billable Upgrade - Small appliances & Home Goods</option>
+        <option>Billable upgrade to home - Large Appliances</option>
+        <option>Billable Upgrades - Linen Purchases</option>
+        <option>Business Merchandise and Development - COGS</option>
+        <option>Client/Owner Meals/Gifts</option>
+        <option>Computer/Software Subscriptions</option>
+        <option>Employee Promotions/Rewards/Gifts/Incentives - Alabama</option>
+        <option>Employee Promotions/Rewards/Gifts/Incentives - Florida</option>
+        <option>FL Cleaning Supplies - Housekeeping</option>
+        <option>FL Maintenance Equipment</option>
+        <option>FL Maintenance Supplies</option>
+        <option>FL Office Expenses & Misc</option>
+        <option>FL Repairs/Service Calls</option>
+        <option>Fuel - Alabama</option>
+        <option>Fuel - Florida - Housekeeping</option>
+        <option>Fuel - Florida - Maintenance</option>
+        <option>Guest Damage</option>
+        <option>Guest Fees</option>
+        <option>Human Resources</option>
+        <option>Marketing</option>
+        <option>Meals - Dothan Office</option>
+        <option>Meals - Housekeeping Team</option>
+        <option>Meals - Maintenance Team</option>
+        <option>Medical Insurance</option>
+        <option>Mileage</option>
+        <option>MISC</option>
+        <option>New Hire Expense</option>
+        <option>Professional Growth/Education</option>
+        <option>Reservation Expense - COGS</option>
+        <option>Travel</option>
+        <option>VRBO Renewals</option>
       </select>
       <label>Urgency</label>
       <select id="po-pl-urgency">
@@ -1120,14 +1146,44 @@ async function emailCountReport(countId) {
 // ══════════════════════════════════════════════════════════════
 
 const PO_CATEGORIES = [
-  'Beach & Pool Equipment','Boat & Watercraft Supplies','Cleaning Supplies & Equipment',
-  'Construction & Structural Repairs','Electrical & Lighting','Electronics & Technology',
-  'Exterior & Landscaping','Furniture & Décor','Grill & Outdoor Cooking',
-  'Guest Amenities & Toiletries','HVAC & Ventilation','Housekeeping Supplies',
-  'Kitchen & Appliances','Linens & Bedding','Lock & Security Systems',
-  'Maintenance Tools & Hardware','Marketing & Signage','Office & Administrative Supplies',
-  'Pest Control','Plumbing & Water Systems','Safety & Compliance',
-  'Vehicle & Transportation','Other'
+  'Advertising (Google & FB only)',
+  'AI Office Expense & Misc',
+  'AL Repairs',
+  'Auto Servicing & Repairs (including car wash)',
+  'Bayhouse SBR Expense',
+  'Billable Upgrade - A/C Filters',
+  'Billable Upgrade - Landscaping',
+  'Billable Upgrade - Small appliances & Home Goods',
+  'Billable upgrade to home - Large Appliances',
+  'Billable Upgrades - Linen Purchases',
+  'Business Merchandise and Development - COGS',
+  'Client/Owner Meals/Gifts',
+  'Computer/Software Subscriptions',
+  'Employee Promotions/Rewards/Gifts/Incentives - Alabama',
+  'Employee Promotions/Rewards/Gifts/Incentives - Florida',
+  'FL Cleaning Supplies - Housekeeping',
+  'FL Maintenance Equipment',
+  'FL Maintenance Supplies',
+  'FL Office Expenses & Misc',
+  'FL Repairs/Service Calls',
+  'Fuel - Alabama',
+  'Fuel - Florida - Housekeeping',
+  'Fuel - Florida - Maintenance',
+  'Guest Damage',
+  'Guest Fees',
+  'Human Resources',
+  'Marketing',
+  'Meals - Dothan Office',
+  'Meals - Housekeeping Team',
+  'Meals - Maintenance Team',
+  'Medical Insurance',
+  'Mileage',
+  'MISC',
+  'New Hire Expense',
+  'Professional Growth/Education',
+  'Reservation Expense - COGS',
+  'Travel',
+  'VRBO Renewals'
 ];
 
 function showPOPreLogin() {
@@ -1194,7 +1250,44 @@ async function renderPORequest() {
         <div><label>Amount ($)</label><input type="number" id="po-amount" placeholder="0.00" min="0" step="0.01"></div>
       </div>
       <label>Category</label>
-      <select id="po-category"><option value="">Select a category...</option>${catOpts}</select>
+      <select id="po-category"><option value="">Select a category...</option><option value="Advertising (Google & FB only)">Advertising (Google & FB only)</option>
+<option value="AI Office Expense & Misc">AI Office Expense & Misc</option>
+<option value="AL Repairs">AL Repairs</option>
+<option value="Auto Servicing & Repairs (including car wash)">Auto Servicing & Repairs (including car wash)</option>
+<option value="Bayhouse SBR Expense">Bayhouse SBR Expense</option>
+<option value="Billable Upgrade - A/C Filters">Billable Upgrade - A/C Filters</option>
+<option value="Billable Upgrade - Landscaping">Billable Upgrade - Landscaping</option>
+<option value="Billable Upgrade - Small appliances & Home Goods">Billable Upgrade - Small appliances & Home Goods</option>
+<option value="Billable upgrade to home - Large Appliances">Billable upgrade to home - Large Appliances</option>
+<option value="Billable Upgrades - Linen Purchases">Billable Upgrades - Linen Purchases</option>
+<option value="Business Merchandise and Development - COGS">Business Merchandise and Development - COGS</option>
+<option value="Client/Owner Meals/Gifts">Client/Owner Meals/Gifts</option>
+<option value="Computer/Software Subscriptions">Computer/Software Subscriptions</option>
+<option value="Employee Promotions/Rewards/Gifts/Incentives - Alabama">Employee Promotions/Rewards/Gifts/Incentives - Alabama</option>
+<option value="Employee Promotions/Rewards/Gifts/Incentives - Florida">Employee Promotions/Rewards/Gifts/Incentives - Florida</option>
+<option value="FL Cleaning Supplies - Housekeeping">FL Cleaning Supplies - Housekeeping</option>
+<option value="FL Maintenance Equipment">FL Maintenance Equipment</option>
+<option value="FL Maintenance Supplies">FL Maintenance Supplies</option>
+<option value="FL Office Expenses & Misc">FL Office Expenses & Misc</option>
+<option value="FL Repairs/Service Calls">FL Repairs/Service Calls</option>
+<option value="Fuel - Alabama">Fuel - Alabama</option>
+<option value="Fuel - Florida - Housekeeping">Fuel - Florida - Housekeeping</option>
+<option value="Fuel - Florida - Maintenance">Fuel - Florida - Maintenance</option>
+<option value="Guest Damage">Guest Damage</option>
+<option value="Guest Fees">Guest Fees</option>
+<option value="Human Resources">Human Resources</option>
+<option value="Marketing">Marketing</option>
+<option value="Meals - Dothan Office">Meals - Dothan Office</option>
+<option value="Meals - Housekeeping Team">Meals - Housekeeping Team</option>
+<option value="Meals - Maintenance Team">Meals - Maintenance Team</option>
+<option value="Medical Insurance">Medical Insurance</option>
+<option value="Mileage">Mileage</option>
+<option value="MISC">MISC</option>
+<option value="New Hire Expense">New Hire Expense</option>
+<option value="Professional Growth/Education">Professional Growth/Education</option>
+<option value="Reservation Expense - COGS">Reservation Expense - COGS</option>
+<option value="Travel">Travel</option>
+<option value="VRBO Renewals">VRBO Renewals</option></select>
       <label>Urgency</label>
       <select id="po-urgency">
         <option value="Routine">📋 Routine</option>
