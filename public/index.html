@@ -451,7 +451,7 @@ async function renderScan() {
     <div class="card">
       <div class="card-title">Session mode</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn ${scanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setMode('out')">Sending bags out</button>
+        <button class="btn ${scanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setMode('out')">Stage bags for pickup</button>
         <button class="btn ${scanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setMode('in')">Checking bags back in</button>
       </div>
       <div id="cleaner-row" style="${scanState.mode==='out'?'':'display:none'}">
@@ -519,7 +519,7 @@ async function processScan() {
     try {
       const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cleaner_id: parseInt(cleaner_id)}) });
       const data = await r.json();
-      if (r.ok) { const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name||''; scanState.sessionLog.push({id, home:data.home, msg:`Sent out with ${cname}`, error:false, action:'out'}); }
+      if (r.ok) { const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name||''; scanState.sessionLog.push({id, home:data.home, msg:`Staged for ${cname} — awaiting pickup`, error:false, action:'out'}); }
       else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'}); }
     } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'}); }
   } else {
@@ -539,14 +539,14 @@ async function renderOverdue() {
   document.getElementById('main-content').innerHTML = '<div class="card">Checking for overdue bags...</div>';
   const inv = await fetch('/api/inventory').then(r => r.json());
   const now = new Date();
-  const overdue = inv.filter(b => { if (b.status !== 'out' || !b.checked_out) return false; return (now - new Date(b.checked_out)) / 3600000 >= 24; });
+  const overdue = inv.filter(b => { if (b.status !== 'out' || !b.picked_up_at) return false; return (now - new Date(b.picked_up_at)) / 3600000 >= 24; });
   if (!overdue.length) { document.getElementById('main-content').innerHTML = `<div class="card" style="text-align:center;padding:2.5rem"><div style="font-size:32px;margin-bottom:8px">✓</div><div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div><div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div></div>`; return; }
   const byCleaner = {};
   overdue.forEach(b => { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); });
   let html = `<div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">🚨</div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div><div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours</div></div></div>`;
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
     html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600;color:var(--coral-dark)">⚠ ${name}</div><span class="badge badge-out">${bags.length} overdue</span></div>`;
-    bags.forEach(b => { const out=new Date(b.checked_out); const hours=Math.floor((now-out)/3600000); const days=Math.floor(hours/24); const timeStr=days>0?`${days}d ${hours%24}hr`:`${hours}hr`; const since=out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">Out since ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div></div><span class="badge badge-out">Overdue</span></div>`; });
+    bags.forEach(b => { const out=new Date(b.picked_up_at); const hours=Math.floor((now-out)/3600000); const days=Math.floor(hours/24); const timeStr=days>0?`${days}d ${hours%24}hr`:`${hours}hr`; const since=out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">Picked up ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div></div><span class="badge badge-out">Overdue</span></div>`; });
     html += `</div>`;
   });
   document.getElementById('main-content').innerHTML = html;
@@ -557,12 +557,24 @@ async function renderStatus() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const [inv, stats] = await Promise.all([fetch('/api/inventory').then(r=>r.json()), fetch('/api/stats').then(r=>r.json())]);
   const byCleaner = {}; const inWarehouse = [];
-  inv.forEach(b => { if (b.status==='out') { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); } else inWarehouse.push(b); });
-  let html = `<div class="stat-grid"><div class="stat"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total bags</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${stats.out}</div><div class="stat-lbl">With cleaners</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${stats['in']}</div><div class="stat-lbl">At warehouse</div></div></div>
+  const byCleanerStaged = {};
+  inv.forEach(b => {
+    if (b.status==='out') { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); }
+    else if (b.status==='staged') { if (!byCleanerStaged[b.cleaner_name]) byCleanerStaged[b.cleaner_name]=[]; byCleanerStaged[b.cleaner_name].push(b); }
+    else inWarehouse.push(b);
+  });
+  let html = `<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)"><div class="stat"><div class="stat-num">${stats.total}</div><div class="stat-lbl">Total bags</div></div><div class="stat"><div class="stat-num" style="color:var(--amber)">${stats.staged||0}</div><div class="stat-lbl">Staged</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${stats.out}</div><div class="stat-lbl">With cleaners</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${stats['in']}</div><div class="stat-lbl">At warehouse</div></div></div>
     <div class="search-row"><input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" /><select id="status-f" onchange="filterStatus()" style="width:150px"><option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option></select></div><div id="status-body">`;
+  // Staged bags section
+  Object.entries(byCleanerStaged).sort().forEach(([name, bags]) => {
+    html += `<div class="card" data-section="staged"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-warn">${bags.length} staged</span></div>`;
+    bags.forEach(b => { const since=b.staged_at?new Date(b.staged_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">⏳ Staged ${since} — awaiting pickup</div></div><span class="badge badge-warn">Staged</span></div>`; });
+    html += `</div>`;
+  });
+  // Out bags section
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
     html += `<div class="card" data-section="out"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span></div>`;
-    bags.forEach(b => { const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Since ${since}</div>`:''}</div><span class="badge badge-out">Out</span></div>`; });
+    bags.forEach(b => { const since=b.picked_up_at?new Date(b.picked_up_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Picked up ${since}</div>`:''}</div><span class="badge badge-out">Out</span></div>`; });
     html += `</div>`;
   });
   if (inWarehouse.length) { html+=`<div class="card" data-section="in"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">At warehouse</div><span class="badge badge-in">${inWarehouse.length} bags</span></div>`; inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;}); html+=`</div>`; }
@@ -607,13 +619,97 @@ async function renderLog() {
 async function renderCleaners() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const cleaners = await fetch('/api/cleaners').then(r => r.json());
-  let html = `<div class="section-header"><h2>Cleaners</h2></div><div class="card"><div class="card-title">Add cleaner</div><div class="form-row"><div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div><div style="display:flex;align-items:flex-end"><button class="btn btn-primary" style="margin-bottom:10px;width:100%" onclick="addCleaner()">Add cleaner</button></div></div></div><div class="card"><div class="card-title">Active cleaners</div>`;
-  if (cleaners.length) { cleaners.forEach(c=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${c.name}</div><div class="row-sub">${c.bags_out} bag${c.bags_out!==1?'s':''} currently out</div></div>${c.bags_out===0?`<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name}')">Remove</button>`:'<span class="badge badge-out">Has bags</span>'}</div>`;}); }
-  else { html+='<div class="empty">No cleaners yet</div>'; }
+  const pickupUrl = window.location.origin + '/pickup';
+  let html = `<div class="section-header"><h2>Cleaners</h2></div>
+  <div class="card" style="background:var(--teal-light);border-color:var(--teal-mid)">
+    <div style="font-size:13px;color:var(--teal-dark)">📱 <strong>Cleaner pickup URL:</strong> <a href="${pickupUrl}" style="color:var(--teal-dark)">${pickupUrl}</a><br><span style="font-size:11px;opacity:0.8">Post a QR code of this URL at the warehouse for cleaners to scan with their phone.</span></div>
+  </div>
+  <div class="card"><div class="card-title">Add cleaner</div>
+    <div class="form-row"><div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div><div><label>Email (for overdue alerts)</label><input type="email" id="new-cleaner-email" placeholder="cleaner@email.com" /></div></div>
+    <label>Phone (optional)</label><input type="text" id="new-cleaner-phone" placeholder="e.g. 555-1234" style="max-width:200px">
+    <button class="btn btn-primary" onclick="addCleaner()">Add cleaner</button>
+    <div id="add-cleaner-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+  </div>
+  <div class="card"><div class="card-title">Active cleaners</div>`;
+  if (cleaners.length) {
+    cleaners.forEach(c=>{
+      html+=`<div class="row" style="align-items:flex-start;padding:12px 0">
+        <div class="row-main">
+          <div class="row-title" style="font-size:14px">${c.name}</div>
+          <div class="row-sub" style="margin-top:4px">${c.bags_out} bag${c.bags_out!==1?'s':''} out/staged</div>
+          <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">
+            <div style="font-size:11px;color:var(--gray-400)">📧 ${c.email||'<em>No email</em>'}</div>
+            ${c.phone?`<div style="font-size:11px;color:var(--gray-400)">📞 ${c.phone}</div>`:''}
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;background:var(--gray-50);padding:6px 10px;border-radius:var(--radius-sm);width:fit-content">
+            <span style="font-size:11px;color:var(--gray-400)">PIN:</span>
+            <span style="font-size:16px;font-weight:700;font-family:monospace;letter-spacing:3px;color:var(--teal-dark)">${c.pin||'—'}</span>
+            <button class="btn btn-ghost btn-sm" onclick="resetPin(${c.id},'${c.name.replace(/'/g,"&#39;")}')" style="font-size:11px;padding:3px 8px">Reset</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">
+          <button class="btn btn-ghost btn-sm" onclick="editCleaner(${c.id},'${c.name.replace(/'/g,"&#39;")}','${(c.email||'').replace(/'/g,"&#39;")}','${(c.phone||'').replace(/'/g,"&#39;")}')">Edit</button>
+          ${c.bags_out===0?`<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name.replace(/'/g,"&#39;")}')">Remove</button>`:'<span class="badge badge-out" style="font-size:10px">Has bags</span>'}
+        </div>
+      </div>`;
+    });
+  } else { html+='<div class="empty">No cleaners yet</div>'; }
   html+=`</div>`;
+
+  // Edit modal
+  html += `<div id="modal-cleaner-edit" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+      <h3>Edit Cleaner</h3>
+      <input type="hidden" id="edit-cleaner-id">
+      <label>Full name</label><input type="text" id="edit-cleaner-name" placeholder="Full name">
+      <label>Email</label><input type="email" id="edit-cleaner-email" placeholder="cleaner@email.com">
+      <label>Phone</label><input type="text" id="edit-cleaner-phone" placeholder="555-1234">
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-cleaner-edit').style.display='none'">Cancel</button>
+        <button class="btn btn-primary" onclick="saveCleanerEdit()">Save</button>
+      </div>
+    </div>
+  </div>`;
+
   document.getElementById('main-content').innerHTML = html;
 }
-async function addCleaner() { const name=document.getElementById('new-cleaner')?.value?.trim(); if(!name)return; await fetch('/api/cleaners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); renderCleaners(); }
+async function addCleaner() {
+  const name=document.getElementById('new-cleaner')?.value?.trim();
+  const email=document.getElementById('new-cleaner-email')?.value?.trim();
+  const phone=document.getElementById('new-cleaner-phone')?.value?.trim();
+  if(!name){alert('Name is required');return;}
+  const r=await fetch('/api/cleaners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone})});
+  const d=await r.json();
+  if(!r.ok){alert(d.error);return;}
+  const msg=document.getElementById('add-cleaner-msg');
+  if(msg)msg.innerHTML=`✓ ${name} added — PIN: <strong style="font-family:monospace;letter-spacing:2px;color:var(--teal-dark)">${d.pin}</strong> (write this down!)`;
+  renderCleaners();
+}
+function editCleaner(id,name,email,phone) {
+  document.getElementById('edit-cleaner-id').value=id;
+  document.getElementById('edit-cleaner-name').value=name;
+  document.getElementById('edit-cleaner-email').value=email;
+  document.getElementById('edit-cleaner-phone').value=phone;
+  document.getElementById('modal-cleaner-edit').style.display='flex';
+}
+async function saveCleanerEdit() {
+  const id=document.getElementById('edit-cleaner-id').value;
+  const name=document.getElementById('edit-cleaner-name').value.trim();
+  const email=document.getElementById('edit-cleaner-email').value.trim();
+  const phone=document.getElementById('edit-cleaner-phone').value.trim();
+  if(!name){alert('Name required');return;}
+  const r=await fetch('/api/cleaners/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone})});
+  if(!r.ok){const d=await r.json();alert(d.error);return;}
+  document.getElementById('modal-cleaner-edit').style.display='none';
+  renderCleaners();
+}
+async function resetPin(id,name) {
+  if(!confirm(`Reset PIN for ${name}? Their current PIN will stop working immediately.`))return;
+  const r=await fetch('/api/cleaners/'+id+'/reset-pin',{method:'POST'});
+  const d=await r.json();
+  if(d.pin)alert(`New PIN for ${name}: ${d.pin}\n\nMake sure to give them this new PIN!`);
+  renderCleaners();
+}
 async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/cleaners/'+id,{method:'DELETE'}); const d=await r.json(); if(!r.ok)alert(d.error); renderCleaners(); }
 
 // ── Settings Tab ───────────────────────────────────────────────────────────────
@@ -1223,15 +1319,18 @@ async function submitPOPreLogin() {
     const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
     const data = await res.json();
     if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
-    document.getElementById('po-prelogin').innerHTML = `
-      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem;background:var(--gray-50)">
-        <div style="background:#fff;border:0.5px solid var(--gray-200);border-radius:var(--radius);padding:2.5rem 2rem;width:100%;max-width:400px;text-align:center">
-          <div style="font-size:48px;margin-bottom:1rem">✅</div>
-          <div style="font-size:18px;font-weight:600;margin-bottom:8px">Request Submitted!</div>
-          <div style="font-size:13px;color:var(--gray-400);margin-bottom:1.5rem">Your request has been sent to the approvers. You'll receive an email at <strong>${fields.employee_email}</strong> when a decision is made.</div>
-          <button class="btn btn-primary btn-full" onclick="hidePOPreLogin()">Back to login</button>
-        </div>
-      </div>`;
+    // Show success then reset form for another submission
+    document.getElementById('po-pl-err').textContent = '';
+    const successBanner = document.createElement('div');
+    successBanner.style.cssText = 'background:var(--teal-light);border:0.5px solid var(--teal-mid);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:1rem;text-align:center;font-size:13px;color:var(--teal-dark);font-weight:500';
+    successBanner.innerHTML = '✅ Request submitted! You\'ll receive an email when a decision is made.';
+    const formCard = document.querySelector('#po-prelogin .card') || document.querySelector('#po-prelogin div > div');
+    if (formCard) formCard.insertBefore(successBanner, formCard.firstChild);
+    setTimeout(() => successBanner.remove(), 5000);
+    // Reset the form fields
+    ['po-pl-name','po-pl-vendor','po-pl-amount','po-pl-description','po-pl-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    document.getElementById('po-pl-category').value='';
+    document.getElementById('po-pl-urgency').value='Routine';
   } catch(e) { alert('Connection error — please try again.'); btn.textContent='Submit Request'; btn.disabled=false; }
 }
 
@@ -1312,7 +1411,7 @@ async function submitPOFromTab() {
     const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
     const data = await res.json();
     if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
-    document.getElementById('po-tab-msg').textContent = '✅ Request submitted! You\'ll get an email when it\'s decided.';
+    document.getElementById('po-tab-msg').innerHTML = '✅ Request submitted! The approvers have been notified. You can submit another request below.';
     ['po-name','po-email','po-vendor','po-amount','po-description','po-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     document.getElementById('po-category').value='';
     document.getElementById('po-urgency').value='Routine';
