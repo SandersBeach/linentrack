@@ -1318,20 +1318,27 @@ async function submitPOPreLogin() {
   try {
     const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
     const data = await res.json();
-    if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
-    // Show success then reset form for another submission
+    if (data.error) { alert('Error: ' + data.error); return; }
+    // Show success banner
     document.getElementById('po-pl-err').textContent = '';
+    const existing = document.getElementById('po-success-banner');
+    if (existing) existing.remove();
     const successBanner = document.createElement('div');
-    successBanner.style.cssText = 'background:var(--teal-light);border:0.5px solid var(--teal-mid);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:1rem;text-align:center;font-size:13px;color:var(--teal-dark);font-weight:500';
-    successBanner.innerHTML = '✅ Request submitted! You\'ll receive an email when a decision is made.';
-    const formCard = document.querySelector('#po-prelogin .card') || document.querySelector('#po-prelogin div > div');
-    if (formCard) formCard.insertBefore(successBanner, formCard.firstChild);
-    setTimeout(() => successBanner.remove(), 5000);
-    // Reset the form fields
+    successBanner.id = 'po-success-banner';
+    successBanner.style.cssText = 'background:var(--teal-light);border:0.5px solid var(--teal-mid);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:1rem;text-align:center;font-size:13px;color:var(--teal-dark);font-weight:600';
+    successBanner.textContent = '✅ Request submitted! You can submit another below.';
+    btn.parentNode.insertBefore(successBanner, btn.parentNode.firstChild);
+    setTimeout(() => { const b = document.getElementById('po-success-banner'); if(b) b.remove(); }, 6000);
+    // Reset form fields
     ['po-pl-name','po-pl-vendor','po-pl-amount','po-pl-description','po-pl-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     document.getElementById('po-pl-category').value='';
     document.getElementById('po-pl-urgency').value='Routine';
-  } catch(e) { alert('Connection error — please try again.'); btn.textContent='Submit Request'; btn.disabled=false; }
+  } catch(e) {
+    alert('Connection error — please try again.');
+  } finally {
+    // Always re-enable the button
+    btn.textContent = 'Submit Request'; btn.disabled = false;
+  }
 }
 
 async function renderPORequest() {
