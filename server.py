@@ -21,6 +21,12 @@ SMTP_PORT   = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USER   = os.environ.get('SMTP_USER', '')
 SMTP_PASS   = os.environ.get('SMTP_PASS', '')
 
+# PO Request approvers
+PO_APPROVER_1_EMAIL = 'sabrina@sandersbeachrentals.com'
+PO_APPROVER_1_NAME  = 'Sabrina Renshaw'
+PO_APPROVER_2_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
+PO_APPROVER_2_NAME  = 'Sarah Jordan'
+
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -81,6 +87,22 @@ def init_db():
             item_count INTEGER NOT NULL DEFAULT 0, variances INTEGER NOT NULL DEFAULT 0,
             details TEXT, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS po_requests (
+            id SERIAL PRIMARY KEY,
+            employee_name TEXT NOT NULL,
+            employee_email TEXT NOT NULL,
+            vendor TEXT NOT NULL,
+            amount NUMERIC(10,2) NOT NULL,
+            category TEXT NOT NULL,
+            description TEXT NOT NULL,
+            date_needed TEXT NOT NULL,
+            urgency TEXT NOT NULL DEFAULT 'Routine',
+            status TEXT NOT NULL DEFAULT 'Pending',
+            approver_notes TEXT,
+            approved_by TEXT,
+            submitted_at TEXT NOT NULL,
+            decided_at TEXT
+        );
     """)
     for col_sql in [
         "ALTER TABLE supply_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'General'",
@@ -101,16 +123,112 @@ def check_pin(pin):
     if p == COORDINATOR_PIN: return 'coordinator'
     return None
 
-def send_email(subject, body, to=ALERT_EMAIL):
+def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
     if not SMTP_HOST or not SMTP_USER:
         print(f'[EMAIL SKIPPED] {subject}'); return False
     try:
-        msg = MIMEMultipart(); msg['From']=SMTP_USER; msg['To']=to; msg['Subject']=subject
-        msg.attach(MIMEText(body,'plain'))
+        msg = MIMEMultipart('alternative')
+        msg['From'] = SMTP_USER
+        msg['To'] = to if isinstance(to, str) else ', '.join(to)
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        if html_body:
+            msg.attach(MIMEText(html_body, 'html'))
+        recipients = [to] if isinstance(to, str) else to
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-            s.starttls(); s.login(SMTP_USER, SMTP_PASS); s.sendmail(SMTP_USER, to, msg.as_string())
+            s.starttls(); s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_USER, recipients, msg.as_string())
         print(f'[EMAIL SENT] {subject}'); return True
     except Exception as e: print(f'[EMAIL ERROR] {e}'); return False
+
+def send_po_approver_email(req):
+    """Email both approvers when a new PO request comes in."""
+    urgency_emoji = {'Routine': '📋', 'At Risk': '⚠️', 'Unstayable': '🚨'}.get(req['urgency'], '📋')
+    subject = f"{urgency_emoji} New PO Request — {req['vendor']} (${req['amount']:.2f})"
+    approvals_url = 'https://sbrlinens.up.railway.app/po-approvals'
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+        <h2 style="color:#fff;margin:0;font-size:18px">New Purchase Request</h2>
+        <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals</p>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p style="margin:0 0 16px;color:#444">A new purchase request has been submitted and needs your approval.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888;width:140px">Employee</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">{req['employee_name']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Vendor</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">{req['vendor']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Amount</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600;font-size:16px">${req['amount']:.2f}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Category</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req['category']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Urgency</td><td style="padding:8px 0;border-bottom:1px solid #eee">{urgency_emoji} {req['urgency']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Date Needed</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req['date_needed']}</td></tr>
+          <tr><td style="padding:8px 0;color:#888;vertical-align:top">Description</td><td style="padding:8px 0">{req['description']}</td></tr>
+        </table>
+        <div style="margin-top:20px;text-align:center">
+          <a href="{approvals_url}" style="background:#95B9B8;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;display:inline-block">Review &amp; Approve Request →</a>
+        </div>
+        <p style="margin:16px 0 0;font-size:12px;color:#aaa;text-align:center">Sanders Beach Rentals · PO Request System</p>
+      </div>
+    </div>"""
+
+    plain = f"""New PO Request — {req['vendor']} (${req['amount']:.2f})
+
+Employee: {req['employee_name']}
+Vendor: {req['vendor']}
+Amount: ${req['amount']:.2f}
+Category: {req['category']}
+Urgency: {req['urgency']}
+Date Needed: {req['date_needed']}
+Description: {req['description']}
+
+Review and approve here: {approvals_url}"""
+
+    recipients = [PO_APPROVER_1_EMAIL, PO_APPROVER_2_EMAIL]
+    return send_email(subject, plain, to=recipients, html_body=html)
+
+def send_po_decision_email(req):
+    """Email the employee when their request is approved or denied."""
+    status = req['status']
+    emoji = '✅' if status == 'Approved' else '❌'
+    subject = f"{emoji} Your Purchase Request has been {status}"
+    color = '#2d7a4f' if status == 'Approved' else '#c0392b'
+    bg = '#e8f5ee' if status == 'Approved' else '#fdecea'
+
+    notes_html = f'<tr><td style="padding:8px 0;color:#888;vertical-align:top">Notes from approver</td><td style="padding:8px 0">{req["approver_notes"]}</td></tr>' if req.get('approver_notes') else ''
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+        <h2 style="color:#fff;margin:0;font-size:18px">Purchase Request {status}</h2>
+        <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals</p>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <div style="background:{bg};border-radius:6px;padding:12px 16px;margin-bottom:20px;text-align:center">
+          <span style="font-size:24px">{emoji}</span>
+          <span style="color:{color};font-weight:700;font-size:16px;margin-left:8px">Your request has been {status}</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888;width:140px">Vendor</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">{req['vendor']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Amount</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">${req['amount']:.2f}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Category</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req['category']}</td></tr>
+          <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Approved by</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req.get('approved_by','Sanders Beach Rentals Management')}</td></tr>
+          {notes_html}
+        </table>
+        <p style="margin:20px 0 0;font-size:12px;color:#aaa;text-align:center">Sanders Beach Rentals · PO Request System</p>
+      </div>
+    </div>"""
+
+    plain = f"""Your purchase request has been {status}.
+
+Vendor: {req['vendor']}
+Amount: ${req['amount']:.2f}
+Category: {req['category']}
+Decision by: {req.get('approved_by','Sanders Beach Rentals Management')}
+{('Notes: ' + req['approver_notes']) if req.get('approver_notes') else ''}
+
+Sanders Beach Rentals Management"""
+
+    return send_email(subject, plain, to=req['employee_email'], html_body=html)
 
 def make_supply_qr(supply_id):
     url = f'https://sbrlinens.up.railway.app?supply={supply_id}'
@@ -124,6 +242,9 @@ def make_supply_qr(supply_id):
 
 @app.route('/')
 def index(): return send_from_directory('public', 'index.html')
+
+@app.route('/po-approvals')
+def po_approvals(): return send_from_directory('public', 'po-approvals.html')
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -437,6 +558,58 @@ def email_inventory_count(cid):
         lines.append("No variances — all items matched!")
     sent=send_email(f"Inventory Count Report — {row['started_at']}",'\n'.join(lines))
     return jsonify({'success':True,'email_sent':sent})
+
+# ── PO Requests ───────────────────────────────────────────────────────────────
+
+@app.route('/api/po-requests', methods=['GET'])
+def get_po_requests():
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM po_requests ORDER BY submitted_at DESC LIMIT 200")
+    rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/po-requests', methods=['POST'])
+def create_po_request():
+    data=request.json or {}
+    required=['employee_name','employee_email','vendor','amount','category','description','date_needed']
+    for f in required:
+        if not data.get(f): return jsonify({'error':f'{f} is required'}),400
+    try: amount=float(data['amount'])
+    except: return jsonify({'error':'Invalid amount'}),400
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""INSERT INTO po_requests
+        (employee_name,employee_email,vendor,amount,category,description,date_needed,urgency,status,submitted_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'Pending',%s) RETURNING id""",
+        (data['employee_name'].strip(), data['employee_email'].strip().lower(),
+         data['vendor'].strip(), amount, data['category'].strip(),
+         data['description'].strip(), data['date_needed'].strip(),
+         data.get('urgency','Routine'), now_central()))
+    row=cur.fetchone(); conn.commit()
+    req_id=row['id']
+    # Fetch full record to email
+    cur.execute("SELECT * FROM po_requests WHERE id=%s",(req_id,)); req=cur.fetchone()
+    cur.close(); conn.close()
+    send_po_approver_email(req)
+    return jsonify({'success':True,'id':req_id})
+
+@app.route('/api/po-requests/<int:rid>/decide', methods=['POST'])
+def decide_po_request(rid):
+    data=request.json or {}
+    status=data.get('status','')
+    if status not in ('Approved','Denied'): return jsonify({'error':'Status must be Approved or Denied'}),400
+    approver_name=data.get('approver_name','Sanders Beach Rentals Management').strip()
+    notes=data.get('notes','').strip()
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); req=cur.fetchone()
+    if not req: cur.close(); conn.close(); return jsonify({'error':'Request not found'}),404
+    if req['status'] != 'Pending': cur.close(); conn.close(); return jsonify({'error':'Already decided'}),400
+    ts=now_central()
+    cur.execute("UPDATE po_requests SET status=%s,approver_notes=%s,approved_by=%s,decided_at=%s WHERE id=%s",
+        (status,notes,approver_name,ts,rid))
+    conn.commit()
+    cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); updated=cur.fetchone()
+    cur.close(); conn.close()
+    send_po_decision_email(updated)
+    return jsonify({'success':True})
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
