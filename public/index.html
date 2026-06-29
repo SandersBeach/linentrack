@@ -31,7 +31,7 @@
   .login-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 2.5rem 2rem; width: 100%; max-width: 360px; text-align: center; }
   .login-logo { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
   .login-logo span { color: var(--teal); }
-  .login-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 2rem; }
+  .login-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 1rem; }
   .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 1.5rem; }
   .pin-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--gray-200); transition: all 0.15s; }
   .pin-dot.filled { background: var(--teal); border-color: var(--teal); }
@@ -154,6 +154,11 @@
   .report-stat .rnum { font-size: 22px; font-weight: 700; line-height: 1; }
   .report-stat .rlbl { font-size: 11px; margin-top: 4px; }
 
+  /* ── PO Request ── */
+  .po-urgency-routine { background: var(--gray-100); color: var(--gray-700); }
+  .po-urgency-atrisk { background: var(--amber-light); color: var(--amber); }
+  .po-urgency-unstayable { background: var(--coral-light); color: var(--coral-dark); }
+
   /* ── Scan result animated entry ── */
   @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
   .anim { animation: slideIn 0.2s ease; }
@@ -161,11 +166,65 @@
 </head>
 <body>
 
+<!-- ══════════════ PO REQUEST PRE-LOGIN ══════════════ -->
+<div id="po-prelogin" style="display:none">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem;background:var(--gray-50)">
+    <div style="background:#fff;border:0.5px solid var(--gray-200);border-radius:var(--radius);padding:2rem;width:100%;max-width:480px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem">
+        <button onclick="hidePOPreLogin()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--gray-400);line-height:1">←</button>
+        <div>
+          <div style="font-size:16px;font-weight:600">📝 Purchase Request</div>
+          <div style="font-size:12px;color:var(--gray-400)">Sanders Beach Rentals</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div><label>Your name</label><input type="text" id="po-pl-name" placeholder="Full name"></div>
+        <div><label>Your email</label><input type="email" id="po-pl-email" placeholder="you@sandersbeachrentals.com"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Vendor</label><input type="text" id="po-pl-vendor" placeholder="e.g. Amazon, Home Depot"></div>
+        <div><label>Amount ($)</label><input type="number" id="po-pl-amount" placeholder="0.00" min="0" step="0.01"></div>
+      </div>
+      <label>Category</label>
+      <select id="po-pl-category">
+        <option value="">Select a category...</option>
+        <option>Beach &amp; Pool Equipment</option><option>Boat &amp; Watercraft Supplies</option>
+        <option>Cleaning Supplies &amp; Equipment</option><option>Construction &amp; Structural Repairs</option>
+        <option>Electrical &amp; Lighting</option><option>Electronics &amp; Technology</option>
+        <option>Exterior &amp; Landscaping</option><option>Furniture &amp; Décor</option>
+        <option>Grill &amp; Outdoor Cooking</option><option>Guest Amenities &amp; Toiletries</option>
+        <option>HVAC &amp; Ventilation</option><option>Housekeeping Supplies</option>
+        <option>Kitchen &amp; Appliances</option><option>Linens &amp; Bedding</option>
+        <option>Lock &amp; Security Systems</option><option>Maintenance Tools &amp; Hardware</option>
+        <option>Marketing &amp; Signage</option><option>Office &amp; Administrative Supplies</option>
+        <option>Pest Control</option><option>Plumbing &amp; Water Systems</option>
+        <option>Safety &amp; Compliance</option><option>Vehicle &amp; Transportation</option>
+        <option>Other</option>
+      </select>
+      <label>Urgency</label>
+      <select id="po-pl-urgency">
+        <option value="Routine">📋 Routine</option>
+        <option value="At Risk">⚠️ At Risk</option>
+        <option value="Unstayable">🚨 Unstayable</option>
+      </select>
+      <label>Date needed by</label>
+      <input type="date" id="po-pl-date">
+      <label>Description / reason for purchase</label>
+      <input type="text" id="po-pl-description" placeholder="What are you buying and why?">
+      <button class="btn btn-primary btn-full" id="po-pl-submit-btn" onclick="submitPOPreLogin()" style="margin-top:4px">Submit Request</button>
+      <div id="po-pl-err" style="font-size:13px;color:var(--coral);margin-top:8px;min-height:18px;text-align:center"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════ LOGIN ══════════════ -->
 <div class="login-wrap" id="login">
   <div class="login-card">
     <div class="login-logo"><span>Linen</span>Track</div>
     <div class="login-sub">Warehouse · Admin · Maintenance</div>
+    <div style="margin-bottom:1.25rem">
+      <button class="btn" style="width:100%;background:var(--teal-light);color:var(--teal-dark);border:0.5px solid var(--teal-mid);font-size:13px;font-weight:600;padding:10px;justify-content:center" onclick="showPOPreLogin()">📝 Submit a Purchase Request</button>
+    </div>
     <div class="pin-dots" id="pin-dots">
       <div class="pin-dot" id="d0"></div>
       <div class="pin-dot" id="d1"></div>
@@ -270,17 +329,18 @@ let _supplies = [];
 let _loanerStaff = [];
 
 const TABS = {
-  warehouse: ['scan', 'overdue', 'status', 'homes', 'log'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status'],
-  coordinator: ['inventory_count'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'inventory_count', 'cleaners', 'settings']
+  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'po_request'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'po_request'],
+  coordinator: ['inventory_count', 'po_request'],
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
   loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
   supply_scan: '🧰 Supplies', supply_status: 'Supply Inventory',
-  inventory_count: '📋 Inventory Count'
+  inventory_count: '📋 Inventory Count',
+  po_request: '📝 PO Request'
 };
 let currentTab = 'scan';
 
@@ -313,10 +373,7 @@ async function submitPin() {
       role === 'maintenance' ? '🔧 Maintenance' :
       role === 'coordinator' ? '📋 Coordinator' : '📦 Warehouse';
     buildTabs();
-
-    // Pre-load loaner staff for supply modals
     fetch('/api/maintenance_staff').then(r=>r.json()).then(d => { _loanerStaff = d; });
-
     const defaultView = sessionStorage.getItem('defaultView');
     if (defaultView === 'loaners' && (role === 'maintenance' || role === 'admin')) {
       sessionStorage.removeItem('defaultView');
@@ -351,7 +408,8 @@ function showTab(t) {
     log: renderLog, cleaners: renderCleaners, settings: renderSettings,
     loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog,
     supply_scan: renderSupplyScan, supply_status: renderSupplyStatus,
-    inventory_count: renderInventoryCount
+    inventory_count: renderInventoryCount,
+    po_request: renderPORequest
   };
   if (fns[t]) fns[t]();
 }
@@ -755,7 +813,6 @@ async function renderSupplyStatus() {
   renderSupplyScan();
 }
 
-// Supply modals
 function showAddSupplyModal() {
   document.getElementById('supply-modal-title').textContent = 'Add Supply Item';
   document.getElementById('supply-edit-id').value = '';
@@ -765,7 +822,6 @@ function showAddSupplyModal() {
   document.getElementById('supply-threshold').value = 5;
   document.getElementById('supply-init-qty').value = 0;
   document.getElementById('supply-qty-row').style.display = 'block';
-  // Populate category datalist
   const cats = [...new Set(_supplies.map(s=>s.category))].sort();
   document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('modal-supply-item').style.display = 'flex';
@@ -846,33 +902,21 @@ function printSupplyQR() {
 // ── InventoryCount ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
-let _countSession = null; // { areas, items, startedAt, counts:{id:qty} }
+let _countSession = null;
 let _countScanBuffer = '';
 
 async function renderInventoryCount() {
   const pastRes = await fetch('/api/inventory-counts');
   const pastCounts = await pastRes.json();
-
-  if (_countSession) {
-    renderCountInProgress();
-    return;
-  }
-
+  if (_countSession) { renderCountInProgress(); return; }
   let pastHtml = '';
   if (pastCounts.length) {
     pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
       pastCounts.slice(0,10).map(c=>{
         const variances = c.variances || 0;
-        return `<div class="row">
-          <div class="row-main">
-            <div class="row-title">${c.started_at} — ${c.areas}</div>
-            <div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button>
-        </div>`;
+        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at} — ${c.areas}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button></div>`;
       }).join('') + '</div>';
   }
-
   document.getElementById('main-content').innerHTML = `
     <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📋 Inventory Count</div>
     <div class="card">
@@ -881,21 +925,13 @@ async function renderInventoryCount() {
       <label style="margin-bottom:8px">Areas to count</label>
       <div id="count-area-loaners" class="count-area-card selected" onclick="toggleCountArea('loaners')">
         <input type="checkbox" checked id="chk-loaners">
-        <div>
-          <div style="font-size:14px;font-weight:600">📦 Loaner items</div>
-          <div style="font-size:12px;color:var(--gray-400)">Scan each item to confirm it's physically present</div>
-        </div>
+        <div><div style="font-size:14px;font-weight:600">📦 Loaner items</div><div style="font-size:12px;color:var(--gray-400)">Scan each item to confirm it's physically present</div></div>
       </div>
       <div id="count-area-supplies" class="count-area-card selected" onclick="toggleCountArea('supplies')">
         <input type="checkbox" checked id="chk-supplies">
-        <div>
-          <div style="font-size:14px;font-weight:600">🧰 Supplies</div>
-          <div style="font-size:12px;color:var(--gray-400)">Scan item QR, enter quantity on shelf</div>
-        </div>
+        <div><div style="font-size:14px;font-weight:600">🧰 Supplies</div><div style="font-size:12px;color:var(--gray-400)">Scan item QR, enter quantity on shelf</div></div>
       </div>
-      <div style="margin-top:1rem">
-        <button class="btn btn-primary btn-full" onclick="startCount()">Begin count</button>
-      </div>
+      <div style="margin-top:1rem"><button class="btn btn-primary btn-full" onclick="startCount()">Begin count</button></div>
     </div>
     ${pastHtml}`;
 }
@@ -912,19 +948,15 @@ async function startCount() {
   if (document.getElementById('chk-loaners')?.checked) areas.push('loaners');
   if (document.getElementById('chk-supplies')?.checked) areas.push('supplies');
   if (!areas.length) { alert('Please select at least one area to count.'); return; }
-
-  // Load items for selected areas
   let items = [];
   if (areas.includes('loaners')) {
     const loaners = await fetch('/api/loaners').then(r=>r.json());
-    // Only count items that should be in (not deployed)
     loaners.forEach(l => items.push({ id:'L-'+l.id, label:l.name, tag:l.id, type:'loaner', expected: l.status==='in'?1:0, expectedLabel: l.status==='in'?'In warehouse':'Deployed out', category:l.category }));
   }
   if (areas.includes('supplies')) {
     const supplies = await fetch('/api/supplies').then(r=>r.json());
     supplies.forEach(s => items.push({ id:'S-'+s.id, label:s.name, tag:'supply-'+s.id, type:'supply', expected:s.quantity, expectedLabel:`${s.quantity} ${s.unit}`, unit:s.unit, category:s.category, supplyId:s.id }));
   }
-
   _countSession = { areas, items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
 }
@@ -934,41 +966,26 @@ function renderCountInProgress() {
   const total = s.items.length;
   const counted = Object.keys(s.counts).length;
   const pct = total ? Math.round(counted/total*100) : 0;
-
   let loanerItems = s.items.filter(i=>i.type==='loaner');
   let supplyItems = s.items.filter(i=>i.type==='supply');
-
   function itemRow(item) {
     const done = s.counts.hasOwnProperty(item.id);
     const countedQty = s.counts[item.id];
     let varianceHtml = '';
     if (done) {
-      if (item.type==='loaner') {
-        varianceHtml = countedQty===1 ? '<span class="variance-ok">✓ Found</span>' : '<span class="variance-neg">✗ Missing</span>';
-      } else {
-        const diff = countedQty - item.expected;
-        if (diff===0) varianceHtml = '<span class="variance-ok">✓ Match</span>';
-        else if (diff>0) varianceHtml = `<span class="variance-pos">+${diff} over</span>`;
-        else varianceHtml = `<span class="variance-neg">${diff} short</span>`;
-      }
+      if (item.type==='loaner') { varianceHtml = countedQty===1 ? '<span class="variance-ok">✓ Found</span>' : '<span class="variance-neg">✗ Missing</span>'; }
+      else { const diff = countedQty - item.expected; if (diff===0) varianceHtml = '<span class="variance-ok">✓ Match</span>'; else if (diff>0) varianceHtml = `<span class="variance-pos">+${diff} over</span>`; else varianceHtml = `<span class="variance-neg">${diff} short</span>`; }
     }
     const inputVal = done ? countedQty : '';
     return `<div class="count-row" id="crow-${item.id}">
-      <div class="count-row-left">
-        <div style="font-size:13px;font-weight:500">${item.label}</div>
-        <div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel} · <span class="tag" style="font-size:10px">${item.tag}</span></div>
-      </div>
-      <div class="count-row-right">
-        ${varianceHtml}
+      <div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel} · <span class="tag" style="font-size:10px">${item.tag}</span></div></div>
+      <div class="count-row-right">${varianceHtml}
         ${item.type==='loaner'
-          ? `<button class="btn btn-sm ${done&&countedQty===1?'btn-primary':'btn-ghost'}" onclick="countLoaner('${item.id}',1)" style="${done&&countedQty===1?'background:var(--green)':''}">Found</button>
-             <button class="btn btn-sm ${done&&countedQty===0?'btn-danger':'btn-ghost'}" onclick="countLoaner('${item.id}',0)">Missing</button>`
-          : `<input class="count-input" type="number" min="0" value="${inputVal}" placeholder="—" onchange="countSupply('${item.id}',this.value)" oninput="countSupply('${item.id}',this.value)">`
-        }
+          ? `<button class="btn btn-sm ${done&&countedQty===1?'btn-primary':'btn-ghost'}" onclick="countLoaner('${item.id}',1)" style="${done&&countedQty===1?'background:var(--green)':''}">Found</button><button class="btn btn-sm ${done&&countedQty===0?'btn-danger':'btn-ghost'}" onclick="countLoaner('${item.id}',0)">Missing</button>`
+          : `<input class="count-input" type="number" min="0" value="${inputVal}" placeholder="—" onchange="countSupply('${item.id}',this.value)" oninput="countSupply('${item.id}',this.value)">`}
       </div>
     </div>`;
   }
-
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">📋 Count in progress</div>
@@ -977,84 +994,50 @@ function renderCountInProgress() {
     <div class="card">
       <div class="count-progress"><div class="count-progress-bar" style="width:${pct}%"></div></div>
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:1rem">${pct}% complete · Started ${s.startedAt}</div>
-
       <div style="background:var(--gray-50);border:0.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem">
         <label style="margin-bottom:4px">Quick scan — scan a QR code to jump to that item</label>
-        <input type="text" id="count-scan-input" placeholder="Scan QR code here..." autocomplete="off" autocapitalize="off"
-          onkeydown="if(event.key==='Enter')processCountScan()" style="margin-bottom:0">
+        <input type="text" id="count-scan-input" placeholder="Scan QR code here..." autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter')processCountScan()" style="margin-bottom:0">
       </div>`;
-
-  if (loanerItems.length) {
-    html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px">📦 Loaner Items</div>`;
-    html += loanerItems.map(itemRow).join('');
-  }
-  if (supplyItems.length) {
-    html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px">🧰 Supplies</div>`;
-    html += supplyItems.map(itemRow).join('');
-  }
-
-  html += `<div style="display:flex;gap:8px;margin-top:1.25rem">
-    <button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button>
-    <button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button>
-  </div></div>`;
-
+  if (loanerItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px">📦 Loaner Items</div>`; html += loanerItems.map(itemRow).join(''); }
+  if (supplyItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px">🧰 Supplies</div>`; html += supplyItems.map(itemRow).join(''); }
+  html += `<div style="display:flex;gap:8px;margin-top:1.25rem"><button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button><button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button></div></div>`;
   document.getElementById('main-content').innerHTML = html;
   document.getElementById('count-scan-input')?.focus();
 }
 
-function countLoaner(itemId, found) {
-  _countSession.counts[itemId] = found;
-  renderCountInProgress();
-  document.getElementById('count-scan-input')?.focus();
-}
-function countSupply(itemId, val) {
-  const qty = parseInt(val);
-  if (!isNaN(qty) && qty >= 0) _countSession.counts[itemId] = qty;
-  else delete _countSession.counts[itemId];
-}
+function countLoaner(itemId, found) { _countSession.counts[itemId] = found; renderCountInProgress(); document.getElementById('count-scan-input')?.focus(); }
+function countSupply(itemId, val) { const qty = parseInt(val); if (!isNaN(qty) && qty >= 0) _countSession.counts[itemId] = qty; else delete _countSession.counts[itemId]; }
 
 function processCountScan() {
   const input = document.getElementById('count-scan-input');
-  let raw = (input?.value||'').trim();
-  input.value = '';
-
-  // Extract supply ID from URL param
+  let raw = (input?.value||'').trim(); input.value = '';
   const supplyMatch = raw.match(/[?&][Ss][Uu][Pp][Pp][Ll][Yy]=(\d+)/);
   const loanerMatch = raw.match(/[?&][Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/i);
-
   let found = false;
   if (supplyMatch) {
-    const sid = 'S-'+supplyMatch[1];
-    const el = document.getElementById('crow-'+sid);
+    const sid = 'S-'+supplyMatch[1]; const el = document.getElementById('crow-'+sid);
     if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--teal-light)'; setTimeout(()=>el.style.background='',1500); found=true; el.querySelector('.count-input')?.focus(); }
   } else if (loanerMatch) {
-    const lid = 'L-'+loanerMatch[1].toUpperCase();
-    const el = document.getElementById('crow-'+lid);
+    const lid = 'L-'+loanerMatch[1].toUpperCase(); const el = document.getElementById('crow-'+lid);
     if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--teal-light)'; setTimeout(()=>el.style.background='',1500); found=true; }
   } else if (raw) {
-    // Try matching raw as loaner tag
     const item = _countSession.items.find(i=>i.tag.toUpperCase()===raw.toUpperCase());
     if (item) { const el=document.getElementById('crow-'+item.id); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.background='var(--teal-light)';setTimeout(()=>el.style.background='',1500);found=true;if(item.type==='loaner')countLoaner(item.id,1);} }
   }
   if (!found && raw) {
     const flash = document.createElement('div');
     flash.style.cssText='position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--coral-light);color:var(--coral-dark);padding:8px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;z-index:999';
-    flash.textContent='Item not found in this count';
-    document.body.appendChild(flash); setTimeout(()=>flash.remove(),2000);
+    flash.textContent='Item not found in this count'; document.body.appendChild(flash); setTimeout(()=>flash.remove(),2000);
   }
   setTimeout(()=>document.getElementById('count-scan-input')?.focus(), 100);
 }
 
-function cancelCount() {
-  if (!confirm('Cancel this count? Progress will be lost.')) return;
-  _countSession = null;
-  renderInventoryCount();
-}
+function cancelCount() { if (!confirm('Cancel this count? Progress will be lost.')) return; _countSession = null; renderInventoryCount(); }
+
 async function finalizeCount() {
   const s = _countSession;
   if (!s) return;
-  const variances = [];
-  let matchCount = 0;
+  const variances = []; let matchCount = 0;
   s.items.forEach(item => {
     const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : null;
     if (item.type === 'loaner') {
@@ -1073,36 +1056,27 @@ async function finalizeCount() {
     _countSession = null;
     renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
   } catch(e) { alert('Error saving count — please try again.'); console.error(e); }
-}function renderCountReport(data) {
+}
+
+function renderCountReport(data) {
   const v = data.variances_list || [];
   const shorts = v.filter(x=>x.diff<0||x.counted==='Missing');
   const overs = v.filter(x=>x.diff>0);
-
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
       <div style="font-size:15px;font-weight:600">📋 Count Report — ${data.started_at}</div>
       <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})">📧 Email to accounting</button>
     </div>
     <div class="report-stat-grid">
-      <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)">
-        <div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div>
-      </div>
-      <div class="report-stat" style="background:var(--green-light)">
-        <div class="rnum" style="color:var(--green)">${data.matchCount}</div><div class="rlbl" style="color:var(--green)">Match</div>
-      </div>
-      <div class="report-stat" style="background:var(--coral-light)">
-        <div class="rnum" style="color:var(--coral-dark)">${shorts.length}</div><div class="rlbl" style="color:var(--coral-dark)">Short/missing</div>
-      </div>
-      <div class="report-stat" style="background:var(--amber-light)">
-        <div class="rnum" style="color:var(--amber)">${overs.length}</div><div class="rlbl" style="color:var(--amber)">Over count</div>
-      </div>
+      <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)"><div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div></div>
+      <div class="report-stat" style="background:var(--green-light)"><div class="rnum" style="color:var(--green)">${data.matchCount}</div><div class="rlbl" style="color:var(--green)">Match</div></div>
+      <div class="report-stat" style="background:var(--coral-light)"><div class="rnum" style="color:var(--coral-dark)">${shorts.length}</div><div class="rlbl" style="color:var(--coral-dark)">Short/missing</div></div>
+      <div class="report-stat" style="background:var(--amber-light)"><div class="rnum" style="color:var(--amber)">${overs.length}</div><div class="rlbl" style="color:var(--amber)">Over count</div></div>
     </div>`;
-
   if (v.length) {
     html += `<div class="card"><div class="card-title" style="color:var(--coral-dark)">⚠️ Variances (${v.length})</div>`;
     v.forEach(item => {
-      const isShort = item.diff<0||item.counted==='Missing';
-      const isOver = item.diff>0;
+      const isShort = item.diff<0||item.counted==='Missing'; const isOver = item.diff>0;
       let detail = '';
       if (item.type==='loaner') detail = item.counted==='Found'?'✓ Found':'✗ Missing — expected in warehouse';
       else { const diff=item.counted-item.expected; detail=`Found ${item.counted} ${item.unit||''} · expected ${item.expected} · <strong style="color:${diff<0?'var(--coral-dark)':'var(--amber)'}">${diff>0?'+':''}${diff}</strong>`; }
@@ -1112,12 +1086,9 @@ async function finalizeCount() {
   } else {
     html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:15px;font-weight:600;color:var(--green)">Perfect count — no variances!</div></div>`;
   }
-
-  // Full detail
   html += `<div class="card"><div class="card-title">Full count detail</div>`;
   (data.items || []).forEach(item => {
-    const counted = (data.counts||{})[item.id];
-    const done = counted !== undefined;
+    const counted = (data.counts||{})[item.id]; const done = counted !== undefined;
     let statusHtml = '<span style="color:var(--gray-400);font-size:12px">Not counted</span>';
     if (done) {
       if (item.type==='loaner') statusHtml = counted===1?'<span class="variance-ok">Found</span>':'<span class="variance-neg">Missing</span>';
@@ -1126,7 +1097,6 @@ async function finalizeCount() {
     html+=`<div class="count-row"><div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel}</div></div><div class="count-row-right"><span style="font-size:13px;font-weight:600">${done?(item.type==='loaner'?counted===1?'1 found':'Missing':counted+' '+item.unit):'—'}</span>${statusHtml}</div></div>`;
   });
   html += '</div>';
-
   html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="renderInventoryCount()">← Back to counts</button></div>`;
   document.getElementById('main-content').innerHTML = html;
 }
@@ -1143,6 +1113,118 @@ async function emailCountReport(countId) {
   const data = await res.json();
   if (data.success) alert('✅ Report emailed to accounting!');
   else alert('Email sent (check server logs if not received — SMTP setup required).');
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── PO Request ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+const PO_CATEGORIES = [
+  'Beach & Pool Equipment','Boat & Watercraft Supplies','Cleaning Supplies & Equipment',
+  'Construction & Structural Repairs','Electrical & Lighting','Electronics & Technology',
+  'Exterior & Landscaping','Furniture & Décor','Grill & Outdoor Cooking',
+  'Guest Amenities & Toiletries','HVAC & Ventilation','Housekeeping Supplies',
+  'Kitchen & Appliances','Linens & Bedding','Lock & Security Systems',
+  'Maintenance Tools & Hardware','Marketing & Signage','Office & Administrative Supplies',
+  'Pest Control','Plumbing & Water Systems','Safety & Compliance',
+  'Vehicle & Transportation','Other'
+];
+
+function showPOPreLogin() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('po-prelogin').style.display = 'block';
+}
+function hidePOPreLogin() {
+  document.getElementById('po-prelogin').style.display = 'none';
+  document.getElementById('login').style.display = 'flex';
+}
+
+function getPOFields(prefix) {
+  const g = id => document.getElementById(prefix+id)?.value?.trim();
+  return {
+    employee_name: g('name'), employee_email: g('email'), vendor: g('vendor'),
+    amount: g('amount'), category: g('category'), description: g('description'),
+    date_needed: g('date'), urgency: g('urgency') || 'Routine'
+  };
+}
+function validatePOFields(f) {
+  if (!f.employee_name) { alert('Please enter your name.'); return false; }
+  if (!f.employee_email || !f.employee_email.includes('@')) { alert('Please enter a valid email.'); return false; }
+  if (!f.vendor) { alert('Please enter a vendor.'); return false; }
+  if (!f.amount || isNaN(parseFloat(f.amount))) { alert('Please enter a valid amount.'); return false; }
+  if (!f.category) { alert('Please select a category.'); return false; }
+  if (!f.description) { alert('Please describe what you need.'); return false; }
+  if (!f.date_needed) { alert('Please enter the date needed by.'); return false; }
+  return true;
+}
+
+async function submitPOPreLogin() {
+  const fields = getPOFields('po-pl-');
+  if (!validatePOFields(fields)) return;
+  const btn = document.getElementById('po-pl-submit-btn');
+  btn.textContent = 'Submitting...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
+    const data = await res.json();
+    if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
+    document.getElementById('po-prelogin').innerHTML = `
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem;background:var(--gray-50)">
+        <div style="background:#fff;border:0.5px solid var(--gray-200);border-radius:var(--radius);padding:2.5rem 2rem;width:100%;max-width:400px;text-align:center">
+          <div style="font-size:48px;margin-bottom:1rem">✅</div>
+          <div style="font-size:18px;font-weight:600;margin-bottom:8px">Request Submitted!</div>
+          <div style="font-size:13px;color:var(--gray-400);margin-bottom:1.5rem">Your request has been sent to the approvers. You'll receive an email at <strong>${fields.employee_email}</strong> when a decision is made.</div>
+          <button class="btn btn-primary btn-full" onclick="hidePOPreLogin()">Back to login</button>
+        </div>
+      </div>`;
+  } catch(e) { alert('Connection error — please try again.'); btn.textContent='Submit Request'; btn.disabled=false; }
+}
+
+async function renderPORequest() {
+  const catOpts = PO_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📝 Purchase Request</div>
+    <div class="card">
+      <div class="card-title">Submit a new purchase request</div>
+      <div class="form-row">
+        <div><label>Your name</label><input type="text" id="po-name" placeholder="Full name"></div>
+        <div><label>Your email</label><input type="email" id="po-email" placeholder="you@sandersbeachrentals.com"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Vendor / where you're buying from</label><input type="text" id="po-vendor" placeholder="e.g. Amazon, Home Depot"></div>
+        <div><label>Amount ($)</label><input type="number" id="po-amount" placeholder="0.00" min="0" step="0.01"></div>
+      </div>
+      <label>Category</label>
+      <select id="po-category"><option value="">Select a category...</option>${catOpts}</select>
+      <label>Urgency</label>
+      <select id="po-urgency">
+        <option value="Routine">📋 Routine</option>
+        <option value="At Risk">⚠️ At Risk</option>
+        <option value="Unstayable">🚨 Unstayable</option>
+      </select>
+      <label>Date needed by</label>
+      <input type="date" id="po-date">
+      <label>Description / reason for purchase</label>
+      <input type="text" id="po-description" placeholder="What are you buying and why?">
+      <button class="btn btn-primary btn-full" id="po-tab-btn" onclick="submitPOFromTab()" style="margin-top:4px">Submit Request</button>
+      <div id="po-tab-msg" style="margin-top:10px;font-size:13px;color:var(--teal);text-align:center;min-height:20px"></div>
+    </div>`;
+}
+
+async function submitPOFromTab() {
+  const fields = getPOFields('po-');
+  if (!validatePOFields(fields)) return;
+  const btn = document.getElementById('po-tab-btn');
+  btn.textContent = 'Submitting...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
+    const data = await res.json();
+    if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
+    document.getElementById('po-tab-msg').textContent = '✅ Request submitted! You\'ll get an email when it\'s decided.';
+    ['po-name','po-email','po-vendor','po-amount','po-description','po-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    document.getElementById('po-category').value='';
+    document.getElementById('po-urgency').value='Routine';
+    btn.textContent='Submit Request'; btn.disabled=false;
+  } catch(e) { alert('Connection error — please try again.'); btn.textContent='Submit Request'; btn.disabled=false; }
 }
 
 </script>
