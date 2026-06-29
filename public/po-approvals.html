@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>PO Approvals — Sanders Beach Rentals</title>
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --teal: #95B9B8; --teal-dark: #6a9998; --teal-light: #edf5f5;
+    --green: #2d7a4f; --green-light: #e8f5ee;
+    --coral: #c0392b; --coral-light: #fdecea;
+    --amber: #b7680a; --amber-light: #fef3e2;
+    --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
+    --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
+    --radius: 10px; --radius-sm: 6px;
+    --font: 'Josefin Sans', -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; height: 52px; gap: 12px; }
+  .topbar-logo { font-size: 15px; font-weight: 700; letter-spacing: 0.03em; color: var(--gray-900); }
+  .topbar-logo span { color: var(--teal-dark); }
+  .topbar-sub { font-size: 12px; color: var(--gray-400); }
+  .content { padding: 1.25rem; max-width: 800px; margin: 0 auto; }
+  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  .card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--gray-400); margin-bottom: 1rem; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 1rem; }
+  .stat { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; }
+  .stat-num { font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat-lbl { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+  .filter-row { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filter-btn { padding: 6px 16px; border-radius: 20px; border: 0.5px solid var(--gray-200); background: #fff; font-size: 12px; font-weight: 600; font-family: var(--font); cursor: pointer; transition: all 0.15s; }
+  .filter-btn.active { background: var(--teal); border-color: var(--teal); color: #fff; }
+  .request-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 10px; transition: box-shadow 0.15s; }
+  .request-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .req-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .req-vendor { font-size: 16px; font-weight: 700; }
+  .req-amount { font-size: 20px; font-weight: 700; color: var(--teal-dark); }
+  .req-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+  .badge-pending { background: var(--amber-light); color: var(--amber); }
+  .badge-approved { background: var(--green-light); color: var(--green); }
+  .badge-denied { background: var(--coral-light); color: var(--coral); }
+  .badge-routine { background: var(--gray-100); color: var(--gray-700); }
+  .badge-atrisk { background: var(--amber-light); color: var(--amber); }
+  .badge-unstayable { background: var(--coral-light); color: var(--coral); }
+  .badge-cat { background: var(--teal-light); color: var(--teal-dark); }
+  .req-detail { font-size: 13px; color: var(--gray-700); margin-bottom: 8px; line-height: 1.5; }
+  .req-footer { font-size: 11px; color: var(--gray-400); margin-bottom: 12px; }
+  .req-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { padding: 9px 18px; border-radius: var(--radius-sm); border: none; font-size: 13px; font-weight: 600; font-family: var(--font); cursor: pointer; transition: all 0.15s; letter-spacing: 0.02em; }
+  .btn-approve { background: var(--green); color: #fff; }
+  .btn-approve:hover { background: #235f3d; }
+  .btn-deny { background: var(--coral-light); color: var(--coral); }
+  .btn-deny:hover { background: #f5c4c0; }
+  .btn-ghost { background: var(--gray-100); color: var(--gray-700); }
+  .btn-ghost:hover { background: var(--gray-200); }
+  .btn-teal { background: var(--teal); color: #fff; }
+  .btn-teal:hover { background: var(--teal-dark); }
+  .decided-note { font-size: 12px; color: var(--gray-400); margin-top: 8px; font-style: italic; }
+  .empty { text-align: center; padding: 3rem; color: var(--gray-400); font-size: 14px; }
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 1rem; }
+  .modal-box { background: #fff; border-radius: var(--radius); padding: 1.5rem; width: 100%; max-width: 420px; }
+  .modal-box h3 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .modal-sub { font-size: 13px; color: var(--gray-400); margin-bottom: 1.25rem; }
+  label { font-size: 12px; color: var(--gray-400); display: block; margin-bottom: 4px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  input, select, textarea { width: 100%; padding: 9px 12px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); background: #fff; color: var(--gray-900); margin-bottom: 12px; outline: none; transition: border 0.15s; }
+  input:focus, textarea:focus { border-color: var(--teal); }
+  textarea { resize: vertical; min-height: 80px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+  .anim { animation: fadeIn 0.2s ease; }
+  .loading { text-align:center; padding:3rem; color:var(--gray-400); }
+  .refresh-btn { font-size:12px; color:var(--teal-dark); background:none; border:none; cursor:pointer; font-family:var(--font); font-weight:600; padding:4px 8px; }
+  .refresh-btn:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-logo">SANDERS BEACH RENTALS <span>· PO Approvals</span></div>
+  </div>
+  <div style="flex:1"></div>
+  <button class="refresh-btn" onclick="loadRequests()">↻ Refresh</button>
+</div>
+
+<div class="content">
+  <div id="stats-area"></div>
+  <div class="filter-row" id="filter-row">
+    <button class="filter-btn active" onclick="setFilter('Pending')" id="f-Pending">⏳ Pending</button>
+    <button class="filter-btn" onclick="setFilter('Approved')" id="f-Approved">✅ Approved</button>
+    <button class="filter-btn" onclick="setFilter('Denied')" id="f-Denied">❌ Denied</button>
+    <button class="filter-btn" onclick="setFilter('All')" id="f-All">All</button>
+  </div>
+  <div id="requests-area"><div class="loading">Loading requests...</div></div>
+</div>
+
+<!-- Decision Modal -->
+<div id="modal-decide" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box anim">
+    <h3 id="modal-title">Approve Request</h3>
+    <div class="modal-sub" id="modal-sub"></div>
+    <input type="hidden" id="modal-req-id">
+    <input type="hidden" id="modal-action">
+    <label>Your name</label>
+    <input type="text" id="modal-approver" placeholder="Enter your name">
+    <label>Notes (optional)</label>
+    <textarea id="modal-notes" placeholder="Add any notes for the employee..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-teal" id="modal-confirm-btn" onclick="confirmDecision()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _requests = [];
+let _filter = 'Pending';
+
+async function loadRequests() {
+  try {
+    const res = await fetch('/api/po-requests');
+    _requests = await res.json();
+    renderStats();
+    renderRequests();
+  } catch(e) {
+    document.getElementById('requests-area').innerHTML = '<div class="empty">Error loading requests — check connection.</div>';
+  }
+}
+
+function renderStats() {
+  const pending = _requests.filter(r=>r.status==='Pending').length;
+  const approved = _requests.filter(r=>r.status==='Approved').length;
+  const denied = _requests.filter(r=>r.status==='Denied').length;
+  document.getElementById('stats-area').innerHTML = `
+    <div class="stat-grid" style="margin-bottom:1rem">
+      <div class="stat"><div class="stat-num" style="color:var(--amber)">${pending}</div><div class="stat-lbl">Pending</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--green)">${approved}</div><div class="stat-lbl">Approved</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--coral)">${denied}</div><div class="stat-lbl">Denied</div></div>
+    </div>`;
+}
+
+function setFilter(f) {
+  _filter = f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('f-'+f)?.classList.add('active');
+  renderRequests();
+}
+
+function urgencyBadge(u) {
+  if (u==='Unstayable') return '<span class="badge badge-unstayable">🚨 Unstayable</span>';
+  if (u==='At Risk') return '<span class="badge badge-atrisk">⚠️ At Risk</span>';
+  return '<span class="badge badge-routine">📋 Routine</span>';
+}
+
+function statusBadge(s) {
+  if (s==='Approved') return '<span class="badge badge-approved">✅ Approved</span>';
+  if (s==='Denied') return '<span class="badge badge-denied">❌ Denied</span>';
+  return '<span class="badge badge-pending">⏳ Pending</span>';
+}
+
+function renderRequests() {
+  const filtered = _filter==='All' ? _requests : _requests.filter(r=>r.status===_filter);
+  const area = document.getElementById('requests-area');
+  if (!filtered.length) {
+    area.innerHTML = `<div class="empty">No ${_filter==='All'?'':_filter.toLowerCase()+' '}requests found.</div>`;
+    return;
+  }
+  area.innerHTML = filtered.map(req => {
+    const isPending = req.status === 'Pending';
+    const date = new Date(req.submitted_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const decidedStr = req.decided_at ? ` · Decided ${new Date(req.decided_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}` : '';
+    return `<div class="request-card anim">
+      <div class="req-header">
+        <div>
+          <div class="req-vendor">${req.vendor}</div>
+          <div style="font-size:13px;color:var(--gray-400);margin-top:2px">${req.employee_name} · ${req.employee_email}</div>
+        </div>
+        <div class="req-amount">$${parseFloat(req.amount).toFixed(2)}</div>
+      </div>
+      <div class="req-meta">
+        ${statusBadge(req.status)}
+        ${urgencyBadge(req.urgency)}
+        <span class="badge badge-cat">${req.category}</span>
+      </div>
+      <div class="req-detail"><strong>Description:</strong> ${req.description}</div>
+      <div class="req-detail"><strong>Date needed:</strong> ${req.date_needed}</div>
+      ${req.approver_notes ? `<div class="req-detail"><strong>Notes:</strong> ${req.approver_notes}</div>` : ''}
+      ${req.approved_by ? `<div class="req-detail"><strong>${req.status==='Approved'?'Approved':'Denied'} by:</strong> ${req.approved_by}</div>` : ''}
+      <div class="req-footer">Submitted ${date}${decidedStr}</div>
+      ${isPending ? `
+      <div class="req-actions">
+        <button class="btn btn-approve" onclick="openDecide(${req.id},'Approved','${escapeHtml(req.vendor)}',${req.amount})">✅ Approve</button>
+        <button class="btn btn-deny" onclick="openDecide(${req.id},'Denied','${escapeHtml(req.vendor)}',${req.amount})">❌ Deny</button>
+      </div>` : `<div class="decided-note">This request has already been ${req.status.toLowerCase()}.</div>`}
+    </div>`;
+  }).join('');
+}
+
+function escapeHtml(s) { return s.replace(/'/g,"&#39;").replace(/"/g,"&quot;"); }
+
+function openDecide(id, action, vendor, amount) {
+  document.getElementById('modal-req-id').value = id;
+  document.getElementById('modal-action').value = action;
+  document.getElementById('modal-title').textContent = action==='Approved' ? '✅ Approve Request' : '❌ Deny Request';
+  document.getElementById('modal-sub').textContent = `${vendor} — $${parseFloat(amount).toFixed(2)}`;
+  document.getElementById('modal-approver').value = '';
+  document.getElementById('modal-notes').value = '';
+  document.getElementById('modal-confirm-btn').textContent = action==='Approved' ? 'Confirm Approval' : 'Confirm Denial';
+  document.getElementById('modal-confirm-btn').style.background = action==='Approved' ? 'var(--green)' : 'var(--coral)';
+  document.getElementById('modal-decide').style.display = 'flex';
+  setTimeout(()=>document.getElementById('modal-approver').focus(), 100);
+}
+
+function closeModal() { document.getElementById('modal-decide').style.display='none'; }
+
+async function confirmDecision() {
+  const id = document.getElementById('modal-req-id').value;
+  const status = document.getElementById('modal-action').value;
+  const approver_name = document.getElementById('modal-approver').value.trim();
+  const notes = document.getElementById('modal-notes').value.trim();
+  if (!approver_name) { alert('Please enter your name.'); return; }
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.textContent = 'Sending...'; btn.disabled = true;
+  try {
+    const res = await fetch(`/api/po-requests/${id}/decide`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({status, approver_name, notes})
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent='Confirm'; btn.disabled=false; return; }
+    closeModal();
+    await loadRequests();
+  } catch(e) {
+    alert('Connection error — please try again.');
+    btn.textContent='Confirm'; btn.disabled=false;
+  }
+}
+
+// Load on start
+loadRequests();
+// Auto-refresh every 60 seconds
+setInterval(loadRequests, 60000);
+</script>
+</body>
+</html>
