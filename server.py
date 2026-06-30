@@ -175,8 +175,9 @@ def check_pin(pin):
     return None
 
 def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
+    print(f'[EMAIL ATTEMPT] {subject} | key_present={bool(SENDGRID_API_KEY)} | from={FROM_EMAIL}', flush=True)
     if not SENDGRID_API_KEY:
-        print(f'[EMAIL SKIPPED - no API key] {subject}'); return False
+        print(f'[EMAIL SKIPPED - no API key] {subject}', flush=True); return False
     try:
         recipients = [to] if isinstance(to, str) else to
         to_list = [{'email': r} for r in recipients]
@@ -199,10 +200,10 @@ def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
             method='POST'
         )
         with urllib.request.urlopen(req) as resp:
-            print(f'[EMAIL SENT] {subject} → {recipients} (status {resp.status})')
+            print(f'[EMAIL SENT] {subject} -> {recipients} (status {resp.status})', flush=True)
         return True
     except Exception as e:
-        print(f'[EMAIL ERROR] {subject}: {e}')
+        import traceback; print(f'[EMAIL ERROR] {subject}: {e}', flush=True); traceback.print_exc()
         return False
 
 def send_overdue_email(bag, cleaner):
@@ -1030,7 +1031,12 @@ def create_po_request():
     row=cur.fetchone(); conn.commit(); req_id=row['id']
     cur.execute("SELECT * FROM po_requests WHERE id=%s",(req_id,)); req=cur.fetchone()
     cur.close(); conn.close()
-    send_po_approver_email(req)
+    try:
+        send_po_approver_email(req)
+    except Exception as e:
+        import traceback
+        print(f'[PO EMAIL CALL FAILED] {e}', flush=True)
+        traceback.print_exc()
     return jsonify({'success':True,'id':req_id})
 
 @app.route('/api/po-requests/<int:rid>/decide', methods=['POST'])
