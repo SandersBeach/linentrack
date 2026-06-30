@@ -1067,7 +1067,7 @@ def run_forecast(conn, date_from=None, date_to=None):
     if date_from:
         q += " AND arrive >= %s"; params.append(date_from)
     if date_to:
-        q += " AND depart <= %s"; params.append(date_to)
+        q += " AND arrive <= %s"; params.append(date_to)
     cur.execute(q, params)
     reservations = cur.fetchall()
 
@@ -1253,12 +1253,21 @@ def box_packing():
     bottleneck = min(ingredient_limits, key=ingredient_limits.get) if ingredient_limits else None
 
     # Boxes needed from forecast
-    cur.execute("""
+    date_from = request.args.get('from')
+    date_to = request.args.get('to')
+    q = """
         SELECT fp.supplies, COUNT(fr.id) as turnovers
         FROM forecast_reservations fr
         JOIN forecast_pack_list fp ON fp.address = fr.unit_address
-        GROUP BY fp.address, fp.supplies
-    """)
+        WHERE 1=1
+    """
+    params = []
+    if date_from:
+        q += " AND fr.arrive >= %s"; params.append(date_from)
+    if date_to:
+        q += " AND fr.arrive <= %s"; params.append(date_to)
+    q += " GROUP BY fp.address, fp.supplies"
+    cur.execute(q, params)
     rows = cur.fetchall()
     import json
     boxes_needed = 0
