@@ -106,7 +106,11 @@
     <input type="hidden" id="modal-req-id">
     <input type="hidden" id="modal-action">
     <label>Your name</label>
-    <input type="text" id="modal-approver" placeholder="Enter your name">
+    <select id="modal-approver">
+      <option value="">Select your name...</option>
+      <option value="Sabrina Renshaw">Sabrina Renshaw</option>
+      <option value="Sarah Jordan">Sarah Jordan</option>
+    </select>
     <label>Notes (optional)</label>
     <textarea id="modal-notes" placeholder="Add any notes for the employee..."></textarea>
     <div class="modal-actions">
@@ -193,14 +197,29 @@ function renderRequests() {
       <div class="req-footer">Submitted ${date}${decidedStr}</div>
       ${isPending ? `
       <div class="req-actions">
-        <button class="btn btn-approve" onclick="openDecide(${req.id},'Approved','${escapeHtml(req.vendor)}',${req.amount})">✅ Approve</button>
-        <button class="btn btn-deny" onclick="openDecide(${req.id},'Denied','${escapeHtml(req.vendor)}',${req.amount})">❌ Deny</button>
+        <button class="btn btn-approve" data-action="Approved" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}">✅ Approve</button>
+        <button class="btn btn-deny" data-action="Denied" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}">❌ Deny</button>
       </div>` : `<div class="decided-note">This request has already been ${req.status.toLowerCase()}.</div>`}
     </div>`;
   }).join('');
 }
 
-function escapeHtml(s) { return s.replace(/'/g,"&#39;").replace(/"/g,"&quot;"); }
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// Event delegation for Approve/Deny buttons — robust against special characters in vendor names
+document.getElementById('requests-area').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const id = parseInt(btn.dataset.id);
+  const action = btn.dataset.action;
+  const vendor = btn.dataset.vendor;
+  const amount = parseFloat(btn.dataset.amount);
+  openDecide(id, action, vendor, amount);
+});
 
 function openDecide(id, action, vendor, amount) {
   document.getElementById('modal-req-id').value = id;
@@ -222,7 +241,7 @@ async function confirmDecision() {
   const status = document.getElementById('modal-action').value;
   const approver_name = document.getElementById('modal-approver').value.trim();
   const notes = document.getElementById('modal-notes').value.trim();
-  if (!approver_name) { alert('Please enter your name.'); return; }
+  if (!approver_name) { alert('Please select your name.'); return; }
   const btn = document.getElementById('modal-confirm-btn');
   btn.textContent = 'Sending...'; btn.disabled = true;
   try {
