@@ -755,7 +755,26 @@ async function renderSettings() {
     <div class="card"><div class="card-title">All homes</div>`;
   homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>`:''}</div>`;});
   html+=`</div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
+    <div class="card"><div class="card-title">Load real inventory</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the current housekeeping supply inventory from the master list. <strong>This will replace all existing HK supply quantities.</strong> Only do this once, or when resetting to baseline.</p>
+    <button class="btn btn-primary" onclick="seedHKSupplies()">Load HK Inventory</button>
+    <div id="seed-hk-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div></div>`;
   document.getElementById('main-content').innerHTML = html;
+}
+async function seedHKSupplies() {
+  if (!confirm('This will replace all current HK supply quantities with the master list. Continue?')) return;
+  const btn = event.target;
+  btn.textContent = 'Loading...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/seed-hk-supplies', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:_currentPin})});
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent='Load HK Inventory'; btn.disabled=false; return; }
+    document.getElementById('seed-hk-msg').textContent = `✓ ${data.inserted} items loaded successfully!`;
+    btn.textContent='Load HK Inventory'; btn.disabled=false;
+  } catch(e) {
+    alert('Connection error'); btn.textContent='Load HK Inventory'; btn.disabled=false;
+  }
 }
 async function savePins() {
   const w=document.getElementById('wpin')?.value; const a=document.getElementById('apin')?.value; const m=document.getElementById('mpin')?.value; const c=document.getElementById('cpin')?.value;
@@ -1963,18 +1982,61 @@ function renderForecastUpload() {
   document.getElementById('forecast-body').innerHTML = `
     <div class="card">
       <div class="card-title">Upload pack list CSV</div>
-      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload your property pack list spreadsheet (saved as CSV). This only needs to be updated when pack lists change — not every week.</p>
-      <input type="file" id="fc-packlist-file" accept=".csv" style="margin-bottom:10px">
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload your property pack list spreadsheet (saved as CSV). Only needs updating when pack lists change.</p>
+      <div id="fc-packlist-drop" ondragover="fcDragOver(event,'fc-packlist-drop')" ondragleave="fcDragLeave('fc-packlist-drop')" ondrop="fcDrop(event,'fc-packlist-file','fc-packlist-drop','fc-packlist-name')"
+        style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
+        onclick="document.getElementById('fc-packlist-file').click()">
+        <div style="font-size:24px;margin-bottom:6px">📄</div>
+        <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
+        <div id="fc-packlist-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
+      </div>
+      <input type="file" id="fc-packlist-file" accept=".csv" style="display:none" onchange="fcFileSelected('fc-packlist-file','fc-packlist-name')">
       <button class="btn btn-primary btn-full" onclick="uploadPackList()">Upload Pack List</button>
       <div id="fc-packlist-msg" style="font-size:13px;margin-top:8px;min-height:18px"></div>
     </div>
     <div class="card">
       <div class="card-title">Upload reservations CSV</div>
-      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload the latest reservations export from Streamline. Replace this weekly (or whenever you want a fresh forecast). Each upload replaces the previous data.</p>
-      <input type="file" id="fc-res-file" accept=".csv" style="margin-bottom:10px">
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload the latest reservations export from Streamline. Replace this weekly for a fresh forecast.</p>
+      <div id="fc-res-drop" ondragover="fcDragOver(event,'fc-res-drop')" ondragleave="fcDragLeave('fc-res-drop')" ondrop="fcDrop(event,'fc-res-file','fc-res-drop','fc-res-name')"
+        style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
+        onclick="document.getElementById('fc-res-file').click()">
+        <div style="font-size:24px;margin-bottom:6px">📅</div>
+        <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
+        <div id="fc-res-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
+      </div>
+      <input type="file" id="fc-res-file" accept=".csv" style="display:none" onchange="fcFileSelected('fc-res-file','fc-res-name')">
       <button class="btn btn-primary btn-full" onclick="uploadReservations()">Upload Reservations</button>
       <div id="fc-res-msg" style="font-size:13px;margin-top:8px;min-height:18px"></div>
     </div>`;
+}
+
+function fcDragOver(e, zoneId) {
+  e.preventDefault();
+  const z = document.getElementById(zoneId);
+  if (z) { z.style.borderColor='var(--teal)'; z.style.background='var(--teal-light)'; }
+}
+function fcDragLeave(zoneId) {
+  const z = document.getElementById(zoneId);
+  if (z) { z.style.borderColor='var(--gray-200)'; z.style.background=''; }
+}
+function fcDrop(e, inputId, zoneId, nameId) {
+  e.preventDefault();
+  fcDragLeave(zoneId);
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const input = document.getElementById(inputId);
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  const nameEl = document.getElementById(nameId);
+  if (nameEl) nameEl.textContent = '✓ ' + file.name;
+  const zone = document.getElementById(zoneId);
+  if (zone) { zone.style.borderColor='var(--teal)'; zone.style.borderStyle='solid'; }
+}
+function fcFileSelected(inputId, nameId) {
+  const file = document.getElementById(inputId)?.files[0];
+  const nameEl = document.getElementById(nameId);
+  if (file && nameEl) nameEl.textContent = '✓ ' + file.name;
 }
 
 
