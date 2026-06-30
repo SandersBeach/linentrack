@@ -1,0 +1,24 @@
+{
+  "name": "SandersCentral",
+  "short_name": "SandersCentral",
+  "description": "Sanders Beach Rentals operations management — linens, loaners, supplies, inventory, and purchase requests",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F7F5",
+  "theme_color": "#95B9B8",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/sbr-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/sbr-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
