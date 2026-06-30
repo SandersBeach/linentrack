@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Bag Pickup — Sanders Beach Rentals</title>
+<style>
+  :root {
+    --teal: #1D9E75; --teal-light: #E1F5EE; --teal-dark: #0F6E56; --teal-mid: #5DCAA5;
+    --coral: #D85A30; --coral-light: #FAECE7; --coral-dark: #993C1D;
+    --amber: #854F0B; --amber-light: #FAEEDA;
+    --green: #3B6D11; --green-light: #EAF3DE;
+    --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
+    --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
+    --radius: 10px; --radius-sm: 6px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+
+  /* ── Shared ── */
+  .screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 2rem; width: 100%; max-width: 400px; }
+  .logo { font-size: 13px; font-weight: 600; color: var(--gray-400); text-align: center; margin-bottom: 1.5rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .logo span { color: var(--teal); }
+  .title { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: var(--gray-400); text-align: center; margin-bottom: 1.75rem; }
+  .btn { width: 100%; padding: 13px; border-radius: var(--radius-sm); border: none; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: var(--font); }
+  .btn-primary { background: var(--teal); color: #fff; }
+  .btn-primary:hover { background: var(--teal-dark); }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-ghost { background: var(--gray-100); color: var(--gray-700); margin-top: 10px; }
+  .btn-ghost:hover { background: var(--gray-200); }
+  .err { color: var(--coral-dark); font-size: 13px; text-align: center; margin-top: 10px; min-height: 20px; }
+
+  /* ── PIN pad ── */
+  .pin-dots { display: flex; justify-content: center; gap: 14px; margin-bottom: 1.75rem; }
+  .pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--gray-200); transition: all 0.15s; }
+  .pin-dot.filled { background: var(--teal); border-color: var(--teal); }
+  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1.25rem; }
+  .num-btn { padding: 16px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); background: #fff; font-size: 20px; font-weight: 500; cursor: pointer; font-family: var(--font); transition: all 0.1s; }
+  .num-btn:hover { background: var(--gray-50); }
+  .num-btn:active { background: var(--gray-100); transform: scale(0.96); }
+  .num-btn.del { font-size: 14px; color: var(--gray-400); }
+
+  /* ── Scan screen ── */
+  .scan-screen { min-height: 100vh; background: var(--gray-50); }
+  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; justify-content: space-between; height: 52px; }
+  .topbar-name { font-size: 15px; font-weight: 600; }
+  .topbar-name span { color: var(--teal); }
+  .topbar-btn { font-size: 12px; color: var(--coral); background: none; border: none; cursor: pointer; padding: 4px 8px; font-family: var(--font); }
+  .content { padding: 1.25rem; max-width: 520px; margin: 0 auto; }
+  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-400); margin-bottom: 0.75rem; }
+  .bag-list { margin-bottom: 1.25rem; }
+  .bag-row { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; }
+  .bag-row.confirmed { border-color: var(--teal); background: var(--teal-light); }
+  .bag-row.error { border-color: var(--coral); background: var(--coral-light); animation: shake 0.4s ease; }
+  .bag-home { font-size: 14px; font-weight: 600; flex: 1; }
+  .bag-id { font-size: 11px; color: var(--gray-400); font-family: monospace; background: var(--gray-100); padding: 2px 8px; border-radius: 20px; }
+  .bag-status { font-size: 12px; font-weight: 600; }
+  .status-waiting { color: var(--amber); }
+  .status-confirmed { color: var(--teal-dark); }
+  .scan-box { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  input[type=text] { width: 100%; padding: 11px 14px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 15px; font-family: var(--font); background: #fff; color: var(--gray-900); outline: none; transition: border 0.15s; }
+  input[type=text]:focus { border-color: var(--teal); }
+  .hint { font-size: 12px; color: var(--gray-400); margin-top: 6px; }
+  .flash { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; z-index: 999; white-space: nowrap; }
+  .flash-ok { background: var(--teal-light); color: var(--teal-dark); border: 0.5px solid var(--teal-mid); }
+  .flash-err { background: var(--coral-light); color: var(--coral-dark); border: 0.5px solid var(--coral); }
+  .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--gray-400); font-size: 14px; }
+  .all-done { background: var(--teal-light); border: 0.5px solid var(--teal-mid); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1rem; }
+  .all-done .check { font-size: 40px; margin-bottom: 8px; }
+  .all-done .msg { font-size: 16px; font-weight: 600; color: var(--teal-dark); margin-bottom: 4px; }
+  .all-done .sub { font-size: 13px; color: var(--gray-700); }
+  .wrong-bag-alert { background: var(--coral-light); border: 2px solid var(--coral); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .wrong-bag-alert .wa-title { font-size: 15px; font-weight: 700; color: var(--coral-dark); margin-bottom: 4px; }
+  .wrong-bag-alert .wa-sub { font-size: 13px; color: var(--coral-dark); }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  @keyframes slideIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+  .anim { animation: slideIn 0.2s ease; }
+</style>
+</head>
+<body>
+
+<!-- ── PIN Login ── -->
+<div id="screen-pin" class="screen" style="background:var(--gray-50)">
+  <div class="card">
+    <div class="logo">Sanders Beach Rentals · <span>LinenTrack</span></div>
+    <div class="title">Bag Pickup</div>
+    <div class="subtitle">Enter your 5-digit cleaner PIN</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+      <div class="pin-dot" id="pd4"></div>
+    </div>
+    <div class="numpad">
+      <button class="num-btn" onclick="pinPress('1')">1</button>
+      <button class="num-btn" onclick="pinPress('2')">2</button>
+      <button class="num-btn" onclick="pinPress('3')">3</button>
+      <button class="num-btn" onclick="pinPress('4')">4</button>
+      <button class="num-btn" onclick="pinPress('5')">5</button>
+      <button class="num-btn" onclick="pinPress('6')">6</button>
+      <button class="num-btn" onclick="pinPress('7')">7</button>
+      <button class="num-btn" onclick="pinPress('8')">8</button>
+      <button class="num-btn" onclick="pinPress('9')">9</button>
+      <button class="num-btn del" onclick="pinClear()">Clear</button>
+      <button class="num-btn" onclick="pinPress('0')">0</button>
+      <button class="num-btn del" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="err" id="pin-err"></div>
+  </div>
+</div>
+
+<!-- ── Scan Screen ── -->
+<div id="screen-scan" class="scan-screen" style="display:none">
+  <div class="topbar">
+    <div class="topbar-name">👋 <span id="cleaner-name-display">Cleaner</span></div>
+    <button class="topbar-btn" onclick="logout()">Sign out</button>
+  </div>
+  <div class="content">
+    <div id="wrong-bag-area"></div>
+    <div id="all-done-area"></div>
+    <div class="scan-box">
+      <div class="section-title" style="margin-bottom:8px">Scan a bag to confirm pickup</div>
+      <input type="text" id="scan-input" placeholder="Scan bag tag..." autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter')processScan()">
+      <div class="hint">Scanner auto-submits · or press Enter after typing</div>
+    </div>
+    <div class="section-title">Your bags ready for pickup</div>
+    <div id="bag-list" class="bag-list">
+      <div class="empty-state">Loading your bags...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _pin = '';
+let _cleaner = null;
+let _stagedBags = [];
+let _confirmedIds = new Set();
+
+// ── PIN ───────────────────────────────────────────────────────────────────────
+function pinPress(d) {
+  if (_pin.length >= 5) return;
+  _pin += d;
+  updateDots();
+  if (_pin.length === 5) setTimeout(submitPin, 80);
+}
+function pinDel() { _pin = _pin.slice(0,-1); updateDots(); }
+function pinClear() { _pin = ''; updateDots(); }
+function updateDots() {
+  for (let i=0;i<5;i++) document.getElementById('pd'+i).classList.toggle('filled', i<_pin.length);
+}
+async function submitPin() {
+  document.getElementById('pin-err').textContent = '';
+  try {
+    const r = await fetch('/api/cleaner-auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_pin}) });
+    const data = await r.json();
+    if (!r.ok || !data.success) {
+      document.getElementById('pin-err').textContent = 'Wrong PIN — try again';
+      _pin = ''; updateDots(); return;
+    }
+    _cleaner = data.cleaner;
+    document.getElementById('screen-pin').style.display = 'none';
+    document.getElementById('screen-scan').style.display = 'block';
+    document.getElementById('cleaner-name-display').textContent = _cleaner.name;
+    await loadStagedBags();
+    focusScan();
+  } catch(e) {
+    document.getElementById('pin-err').textContent = 'Connection error';
+    _pin = ''; updateDots();
+  }
+}
+function logout() {
+  _pin = ''; _cleaner = null; _stagedBags = []; _confirmedIds = new Set();
+  updateDots();
+  document.getElementById('screen-scan').style.display = 'none';
+  document.getElementById('screen-pin').style.display = 'flex';
+  document.getElementById('pin-err').textContent = '';
+  document.getElementById('wrong-bag-area').innerHTML = '';
+  document.getElementById('all-done-area').innerHTML = '';
+}
+
+// ── Bags ──────────────────────────────────────────────────────────────────────
+async function loadStagedBags() {
+  try {
+    const r = await fetch(`/api/cleaner/${_cleaner.id}/staged-bags`);
+    _stagedBags = await r.json();
+    renderBagList();
+  } catch(e) {
+    document.getElementById('bag-list').innerHTML = '<div class="empty-state">Error loading bags</div>';
+  }
+}
+
+function renderBagList() {
+  const list = document.getElementById('bag-list');
+  const allDone = _stagedBags.length > 0 && _stagedBags.every(b => _confirmedIds.has(b.id));
+
+  if (allDone) {
+    document.getElementById('all-done-area').innerHTML = `
+      <div class="all-done anim">
+        <div class="check">✅</div>
+        <div class="msg">All bags confirmed!</div>
+        <div class="sub">You're good to go. Your 24-hour return window starts now.</div>
+      </div>`;
+    list.innerHTML = '';
+    return;
+  }
+
+  document.getElementById('all-done-area').innerHTML = '';
+
+  if (!_stagedBags.length) {
+    list.innerHTML = '<div class="empty-state">No bags are staged for you right now.<br>Check with the linen attendant.</div>';
+    return;
+  }
+
+  list.innerHTML = _stagedBags.map(b => {
+    const confirmed = _confirmedIds.has(b.id);
+    return `<div class="bag-row ${confirmed?'confirmed':''} anim" id="bagrow-${b.id}">
+      <div>
+        <div class="bag-home">${b.home_name}</div>
+        <span class="bag-id">${b.id}</span>
+      </div>
+      <div class="bag-status ${confirmed?'status-confirmed':'status-waiting'}">
+        ${confirmed ? '✓ Confirmed' : '⏳ Waiting'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function focusScan() { setTimeout(() => document.getElementById('scan-input')?.focus(), 100); }
+
+async function processScan() {
+  const input = document.getElementById('scan-input');
+  let raw = (input?.value || '').trim();
+  input.value = '';
+
+  // Extract bag ID from URL param if scanner reads a QR URL
+  let id = raw;
+  if (raw.includes('?') || raw.includes('=')) {
+    const m = raw.match(/[?&][Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
+    if (m) id = m[1].toUpperCase();
+    else id = raw.toUpperCase();
+  } else {
+    id = raw.toUpperCase();
+  }
+  if (!id) { focusScan(); return; }
+
+  // Check if this bag is in the staged list for this cleaner
+  const inList = _stagedBags.find(b => b.id === id);
+  if (inList && _confirmedIds.has(id)) {
+    showFlash('Already confirmed!', 'ok');
+    focusScan(); return;
+  }
+
+  try {
+    const r = await fetch(`/api/bag/${encodeURIComponent(id)}/pickup`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ cleaner_pin: _pin })
+    });
+    const data = await r.json();
+
+    if (r.ok && data.success) {
+      _confirmedIds.add(id);
+      document.getElementById('wrong-bag-area').innerHTML = '';
+      showFlash(`✓ ${data.home} confirmed!`, 'ok');
+      renderBagList();
+    } else if (data.wrong_cleaner) {
+      // Wrong cleaner's bag — big alert
+      document.getElementById('wrong-bag-area').innerHTML = `
+        <div class="wrong-bag-alert anim">
+          <div class="wa-title">🚨 Wrong bag!</div>
+          <div class="wa-sub"><strong>${id}</strong> belongs to ${data.assigned_to}. Please put it back where you found it.</div>
+        </div>`;
+      // Flash the bag row red if it happens to be in our list
+      showFlash('⚠️ That bag is not yours!', 'err');
+    } else {
+      showFlash(data.error || 'Error — try again', 'err');
+    }
+  } catch(e) {
+    showFlash('Connection error', 'err');
+  }
+  focusScan();
+}
+
+function showFlash(msg, type) {
+  const el = document.createElement('div');
+  el.className = `flash flash-${type === 'ok' ? 'ok' : 'err'}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+// Auto-focus scan input when tapping anywhere on scan screen
+document.addEventListener('click', e => {
+  if (document.getElementById('screen-scan').style.display !== 'none' && !e.target.closest('button, input')) {
+    focusScan();
+  }
+});
+</script>
+</body>
+</html>
