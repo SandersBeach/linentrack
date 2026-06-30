@@ -135,8 +135,10 @@ def init_db():
             received_units INTEGER,
             unit_label TEXT NOT NULL DEFAULT 'units',
             price NUMERIC(10,2),
-            line_discrepancy INTEGER DEFAULT 0
+            line_discrepancy INTEGER DEFAULT 0,
+            receive_notes TEXT
         );
+        ALTER TABLE supply_order_items ADD COLUMN IF NOT EXISTS receive_notes TEXT;
         CREATE TABLE IF NOT EXISTS forecast_pack_list (
             id SERIAL PRIMARY KEY,
             address TEXT NOT NULL UNIQUE,
@@ -918,6 +920,7 @@ def receive_order(oid):
     received_by = data.get('received_by','').strip()
     if not received_by:
         return jsonify({'error':'received_by is required'}), 400
+    receive_notes = data.get('notes','').strip()
     item_updates = data.get('items', [])
 
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -937,9 +940,10 @@ def receive_order(oid):
         received_units = int(received_units)
         line_discrepancy = 1 if received_units != line['expected_units'] else 0
         if line_discrepancy: has_discrepancy = True
+        line_notes = upd.get('notes','').strip() or None
         cur.execute(
-            "UPDATE supply_order_items SET received_units=%s, line_discrepancy=%s WHERE id=%s",
-            (received_units, line_discrepancy, item_id)
+            "UPDATE supply_order_items SET received_units=%s, line_discrepancy=%s, receive_notes=%s WHERE id=%s",
+            (received_units, line_discrepancy, line_notes, item_id)
         )
         # Auto-update inventory if this line is matched to a real item
         if line['matched_supply_id'] and line['matched_supply_table'] and received_units > 0:
@@ -952,8 +956,8 @@ def receive_order(oid):
 
     ts = now_central()
     cur.execute(
-        "UPDATE supply_orders SET status='Received', received_at=%s, received_by=%s, has_discrepancy=%s WHERE id=%s",
-        (ts, received_by, 1 if has_discrepancy else 0, oid)
+        "UPDATE supply_orders SET status='Received', received_at=%s, received_by=%s, has_discrepancy=%s, discrepancy_notes=%s WHERE id=%s",
+        (ts, received_by, 1 if has_discrepancy else 0, receive_notes or None, oid)
     )
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True, 'has_discrepancy':has_discrepancy})
@@ -1065,9 +1069,10 @@ def run_forecast(conn, date_from=None, date_to=None):
     q = "SELECT unit_address, arrive, depart FROM forecast_reservations WHERE 1=1"
     params = []
     if date_from:
-        q += " AND arrive >= %s"; params.append(date_from)
+        # Convert M/D/YYYY strings to dates for proper comparison
+        q += " AND TO_DATE(arrive, 'MM/DD/YYYY') >= %s::date"; params.append(date_from)
     if date_to:
-        q += " AND arrive <= %s"; params.append(date_to)
+        q += " AND TO_DATE(arrive, 'MM/DD/YYYY') <= %s::date"; params.append(date_to)
     cur.execute(q, params)
     reservations = cur.fetchall()
 
@@ -1143,6 +1148,33 @@ def run_forecast(conn, date_from=None, date_to=None):
         'reservation_count': len(reservations)
     }
 
+
+@app.route('/api/forecast/debug', methods=['GET'])
+def forecast_debug():
+    """Debug endpoint to check address matching."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT address FROM forecast_pack_list ORDER BY address LIMIT 10")
+    pack_sample = [r['address'] for r in cur.fetchall()]
+    cur.execute("SELECT unit_address FROM forecast_reservations ORDER BY unit_address LIMIT 10")
+    res_sample = [r['unit_address'] for r in cur.fetchall()]
+    cur.execute("SELECT COUNT(*) as cnt FROM forecast_pack_list")
+    pack_count = cur.fetchone()['cnt']
+    cur.execute("SELECT COUNT(*) as cnt FROM forecast_reservations")
+    res_count = cur.fetchone()['cnt']
+    # Check actual matches
+    cur.execute("""SELECT COUNT(DISTINCT fr.unit_address) as matched
+        FROM forecast_reservations fr
+        JOIN forecast_pack_list fp ON LOWER(TRIM(fp.address)) = LOWER(TRIM(fr.unit_address))""")
+    matched = cur.fetchone()['matched']
+    cur.close(); conn.close()
+    return jsonify({
+        'pack_list_count': pack_count,
+        'reservation_count': res_count,
+        'matched_addresses': matched,
+        'pack_list_sample': pack_sample,
+        'reservation_sample': res_sample
+    })
+
 @app.route('/api/forecast/upload-packlist', methods=['POST'])
 def upload_pack_list():
     """Upload and parse a pack list CSV."""
@@ -1209,7 +1241,10 @@ def forecast_status():
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT COUNT(*) as cnt, MAX(updated_at) as last FROM forecast_pack_list")
     pl = cur.fetchone()
-    cur.execute("SELECT COUNT(*) as cnt, MAX(uploaded_at) as last, MIN(arrive) as min_date, MAX(depart) as max_date FROM forecast_reservations")
+    cur.execute("""SELECT COUNT(*) as cnt, MAX(uploaded_at) as last,
+        TO_CHAR(MIN(TO_DATE(arrive,'MM/DD/YYYY')),'MM/DD/YYYY') as min_date,
+        TO_CHAR(MAX(TO_DATE(depart,'MM/DD/YYYY')),'MM/DD/YYYY') as max_date
+        FROM forecast_reservations""")
     res = cur.fetchone()
     cur.close(); conn.close()
     return jsonify({
@@ -1365,6 +1400,52 @@ def email_sarah_forecast():
 
     sent = send_email(subject, body_text, to=SARAH_EMAIL, html_body=html)
     return jsonify({'success': True, 'email_sent': sent, 'shortfalls': len(shortfalls)})
+
+
+# ── PackCentral (stub — deduction trigger) ────────────────────────────────────
+
+@app.route('/api/pack-home', methods=['POST'])
+def pack_home():
+    """Deduct HK inventory when a home is packed for a reservation.
+    Expects: unit_address, packed_by, reservation_id (optional)"""
+    data = request.json or {}
+    unit_address = data.get('unit_address','').strip().lower()
+    packed_by = data.get('packed_by','').strip()
+    if not unit_address or not packed_by:
+        return jsonify({'error':'unit_address and packed_by required'}), 400
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Look up pack list for this property
+    cur.execute("SELECT supplies FROM forecast_pack_list WHERE address=%s", (unit_address,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return jsonify({'error': f'No pack list found for {unit_address}'}), 404
+
+    import json
+    supplies = row['supplies'] if isinstance(row['supplies'], dict) else json.loads(row['supplies'])
+
+    deductions = []
+    not_found = []
+    for supply_name, qty in supplies.items():
+        if not qty: continue
+        cur.execute("SELECT id, quantity FROM hk_supply_items WHERE name=%s", (supply_name,))
+        item = cur.fetchone()
+        if not item:
+            not_found.append(supply_name)
+            continue
+        new_qty = max(0, item['quantity'] - qty)
+        cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s", (new_qty, item['id']))
+        cur.execute("""INSERT INTO hk_supply_transactions
+            (supply_id, action, quantity, quantity_after, performed_by, timestamp, notes)
+            VALUES (%s,'take',%s,%s,%s,%s,%s)""",
+            (item['id'], qty, new_qty, packed_by, now_central(),
+             f"Auto-deducted: packed {unit_address}"))
+        deductions.append({'item': supply_name, 'deducted': qty, 'remaining': new_qty})
+
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'deductions': deductions, 'not_found': not_found})
 
 # ── InventoryCount ────────────────────────────────────────────────────────────
 
