@@ -98,6 +98,45 @@ def init_db():
             item_count INTEGER NOT NULL DEFAULT 0, variances INTEGER NOT NULL DEFAULT 0,
             details TEXT, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS hk_supply_items (
+            id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+            category TEXT NOT NULL DEFAULT 'General', quantity INTEGER NOT NULL DEFAULT 0,
+            low_stock_threshold INTEGER NOT NULL DEFAULT 5, unit TEXT NOT NULL DEFAULT 'units',
+            created_at TEXT NOT NULL, qr_code TEXT
+        );
+        CREATE TABLE IF NOT EXISTS hk_supply_transactions (
+            id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES hk_supply_items(id),
+            action TEXT NOT NULL, quantity INTEGER NOT NULL, quantity_after INTEGER NOT NULL,
+            performed_by TEXT NOT NULL, timestamp TEXT NOT NULL, notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS supply_orders (
+            id SERIAL PRIMARY KEY,
+            module TEXT NOT NULL,
+            ordered_by TEXT NOT NULL,
+            vendor TEXT,
+            status TEXT NOT NULL DEFAULT 'Ordered',
+            notes TEXT,
+            ordered_at TEXT NOT NULL,
+            received_at TEXT,
+            received_by TEXT,
+            has_discrepancy INTEGER DEFAULT 0,
+            discrepancy_resolved INTEGER DEFAULT 0,
+            discrepancy_notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS supply_order_items (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES supply_orders(id),
+            item_name TEXT NOT NULL,
+            matched_supply_id INTEGER,
+            matched_supply_table TEXT,
+            cases_ordered NUMERIC(10,2) NOT NULL DEFAULT 1,
+            units_per_case NUMERIC(10,2) NOT NULL DEFAULT 1,
+            expected_units INTEGER NOT NULL DEFAULT 0,
+            received_units INTEGER,
+            unit_label TEXT NOT NULL DEFAULT 'units',
+            price NUMERIC(10,2),
+            line_discrepancy INTEGER DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS po_requests (
             id SERIAL PRIMARY KEY,
             employee_name TEXT NOT NULL, employee_email TEXT NOT NULL,
@@ -269,6 +308,14 @@ def send_po_decision_email(req):
 
 def make_supply_qr(supply_id):
     url = f'https://sbrlinens.up.railway.app?supply={supply_id}'
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(url); qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO(); img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+
+def make_hk_supply_qr(supply_id):
+    url = f'https://sbrlinens.up.railway.app?hksupply={supply_id}'
     qr = qrcode.QRCode(box_size=6, border=2)
     qr.add_data(url); qr.make(fit=True)
     img = qr.make_image(fill_color='black', back_color='white')
@@ -660,6 +707,261 @@ def supply_log():
         JOIN supply_items si ON si.id=st.supply_id ORDER BY st.timestamp DESC LIMIT %s""",(limit,))
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
+
+# ── HousekeepingSupplyCentral ───────────────────────────────────────────────────
+
+@app.route('/api/hk-supplies', methods=['GET'])
+def get_hk_supplies():
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM hk_supply_items ORDER BY category,name")
+    rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/hk-supplies', methods=['POST'])
+def add_hk_supply():
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    name=data.get('name','').strip(); category=data.get('category','General').strip()
+    quantity=int(data.get('quantity',0)); threshold=int(data.get('low_stock_threshold',5))
+    unit=data.get('unit','units').strip()
+    if not name: return jsonify({'error':'Name required'}),400
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute("INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central()))
+        sid=cur.fetchone()['id']; qr=make_hk_supply_qr(sid)
+        cur.execute("UPDATE hk_supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
+        conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'id':sid})
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Item name already exists'}),409
+
+@app.route('/api/hk-supplies/<int:sid>', methods=['PUT'])
+def update_hk_supply(sid):
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("UPDATE hk_supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
+    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+
+@app.route('/api/hk-supplies/<int:sid>/transaction', methods=['POST'])
+def hk_supply_transaction(sid):
+    data=request.json or {}
+    role=check_pin(str(data.get('pin','')))
+    if role not in ('admin','warehouse'): return jsonify({'error':'Access denied'}),403
+    action=data.get('action',''); qty=int(data.get('quantity',1))
+    performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
+    if action not in ('take','restock'): return jsonify({'error':'Invalid action'}),400
+    if qty<=0: return jsonify({'error':'Quantity must be positive'}),400
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM hk_supply_items WHERE id=%s",(sid,)); item=cur.fetchone()
+    if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}),404
+    if action=='take' and item['quantity']<qty: cur.close(); conn.close(); return jsonify({'error':f"Only {item['quantity']} {item['unit']} in stock"}),400
+    new_qty=item['quantity']-qty if action=='take' else item['quantity']+qty
+    cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s",(new_qty,sid))
+    cur.execute("INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,%s,%s,%s,%s,%s,%s)",(sid,action,qty,new_qty,performed,now_central(),notes))
+    conn.commit(); alert_sent=False
+    if action=='take' and new_qty<=item['low_stock_threshold']:
+        body=f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
+        alert_sent=send_email(f"LOW STOCK (Housekeeping): {item['name']}",body)
+    cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
+
+@app.route('/api/hk-supplies/<int:sid>/qr', methods=['GET'])
+def get_hk_supply_qr(sid):
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name,qr_code FROM hk_supply_items WHERE id=%s",(sid,)); row=cur.fetchone()
+    cur.close(); conn.close()
+    if not row: return jsonify({'error':'Not found'}),404
+    return jsonify({'name':row['name'],'qr_code':row['qr_code']})
+
+@app.route('/api/hk-supply-log', methods=['GET'])
+def hk_supply_log():
+    limit=int(request.args.get('limit',100))
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT st.*,si.name AS item_name,si.unit FROM hk_supply_transactions st
+        JOIN hk_supply_items si ON si.id=st.supply_id ORDER BY st.timestamp DESC LIMIT %s""",(limit,))
+    rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/seed-hk-supplies', methods=['POST'])
+def seed_hk_supplies():
+    """One-time seed of real housekeeping supply inventory. Admin PIN required."""
+    data = request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+
+    items = [("Masking Tape", 2, "Maintenance", "rolls"), ("Plastic Stretch Wrap", 4, "Maintenance", "rolls"), ("Bathroom Trash Liners", 2000, "Trash & Liners", "liners"), ("Kitchen Trash Bags", 1100, "Trash & Liners", "bags"), ("10oz Tide Bottles", 96, "Laundry", "bottles"), ("Dishwasher Pod Packs", 1250, "Kitchen", "packs"), ("Kitchen Sponges", 432, "Kitchen", "sponges"), ("3oz Palmolive Bottles", 270, "Kitchen", "bottles"), ("Molton Brown Shampoo", 800, "Guest Amenities", "bottles"), ("Molton Brown Conditioner", 750, "Guest Amenities", "bottles"), ("Molton Brown Body Wash", 500, "Guest Amenities", "bottles"), ("Molton Brown Bar Soap", 480, "Guest Amenities", "bars"), ("Amavida Coffee Packs", 50, "Guest Amenities", "packs"), ("#4 Cone Coffee Filters", 400, "Guest Amenities", "filters"), ("Round Coffee Filters", 1350, "Guest Amenities", "filters"), ("Toilet Paper Rolls", 450, "Guest Amenities", "rolls"), ("Paper Towel Rolls", 174, "Guest Amenities", "rolls"), ("Kitchen Amenity Boxes", 336, "Guest Amenities", "boxes"), ("Laundry Detergent (Gallon)", 2, "Laundry", "gallons"), ("Pledge Cans", 18, "Cleaning Supplies", "cans"), ("Oven Cleaner", 4, "Cleaning Supplies", "bottles"), ("Stainless Steel Cleaner Cans", 7, "Cleaning Supplies", "cans"), ("Bar Keeper's Friend Cans", 3, "Cleaning Supplies", "cans"), ("SOS Scrub Pads", 50, "Cleaning Supplies", "pads"), ("Magic Erasers", 75, "Cleaning Supplies", "erasers"), ("Swiffer Duster Handles", 2, "Cleaning Supplies", "handles"), ("Swiffer Duster Pads", 2, "Cleaning Supplies", "pads"), ("2 Gal Ziploc Bags", 50, "Kitchen", "bags"), ("Large Floor Rollers", 0, "Cleaning Supplies", "rollers"), ("Small Lint Rollers", 21, "Cleaning Supplies", "rollers"), ("Bleach (Gallon)", 6, "Cleaning Supplies", "gallons"), ("White Vinegar (Gallon)", 2, "Cleaning Supplies", "gallons"), ("Kemzyme (Gallons)", 6, "Cleaning Supplies", "gallons"), ("Polishing Cleanser Bottles", 16, "Cleaning Supplies", "bottles"), ("Spor Go (Gallons)", 4, "Cleaning Supplies", "gallons"), ("Odorsorb (Gallons)", 6, "Cleaning Supplies", "gallons"), ("Drop N Go Glass Individual Cartridges", 94, "Cleaning Supplies", "cartridges"), ("Drop N Go Bathroom Cleaner Individual Cartridges", 144, "Cleaning Supplies", "cartridges"), ("Red Trash Bags", 200, "Trash & Liners", "bags"), ("Drop N Go Bathroom Spray Bottles", 1, "Cleaning Supplies", "bottles"), ("Drop N Go Glass Spray Bottles", 1, "Cleaning Supplies", "bottles"), ("Degreaser", 2, "Cleaning Supplies", "bottles")]
+
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM hk_supply_transactions")
+    cur.execute("DELETE FROM hk_supply_items")
+    conn.commit()
+
+    inserted = 0
+    for name, qty, category, unit in items:
+        try:
+            if qty <= 10:
+                threshold = max(1, qty)
+            else:
+                threshold = max(5, int(qty * 0.1))
+            cur.execute(
+                "INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (name, category, qty, threshold, unit, now_central())
+            )
+            sid = cur.fetchone()[0]
+            qr = make_hk_supply_qr(sid)
+            cur.execute("UPDATE hk_supply_items SET qr_code=%s WHERE id=%s", (qr, sid))
+            inserted += 1
+        except Exception as e:
+            print(f'Seed error for {name}: {e}')
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True, 'inserted':inserted})
+
+
+# ── OrdersCentral ─────────────────────────────────────────────────────────────
+
+def get_supply_table(module):
+    """Return the table name for a given module key."""
+    return 'hk_supply_items' if module == 'housekeeping' else 'supply_items'
+
+@app.route('/api/orders', methods=['GET'])
+def get_orders():
+    """List orders, optionally filtered by module and/or status."""
+    module = request.args.get('module')
+    status = request.args.get('status')
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    q = "SELECT * FROM supply_orders WHERE 1=1"
+    params = []
+    if module:
+        q += " AND module=%s"; params.append(module)
+    if status:
+        q += " AND status=%s"; params.append(status)
+    q += " ORDER BY ordered_at DESC LIMIT 200"
+    cur.execute(q, params)
+    orders = cur.fetchall()
+    # Attach line items to each order
+    for o in orders:
+        cur.execute("SELECT * FROM supply_order_items WHERE order_id=%s ORDER BY id", (o['id'],))
+        o['items'] = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(orders)
+
+@app.route('/api/orders/<int:oid>', methods=['GET'])
+def get_order(oid):
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM supply_orders WHERE id=%s", (oid,))
+    order = cur.fetchone()
+    if not order: cur.close(); conn.close(); return jsonify({'error':'Not found'}),404
+    cur.execute("SELECT * FROM supply_order_items WHERE order_id=%s ORDER BY id", (oid,))
+    order['items'] = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(order)
+
+@app.route('/api/orders', methods=['POST'])
+def create_order():
+    """Place a new order. Expects: module, ordered_by, vendor, notes, items[]
+    Each item: item_name, matched_supply_id (optional), cases_ordered, units_per_case, unit_label, price (optional)"""
+    data = request.json or {}
+    module = data.get('module')
+    if module not in ('housekeeping', 'maintenance'):
+        return jsonify({'error':'module must be housekeeping or maintenance'}), 400
+    ordered_by = data.get('ordered_by','').strip()
+    if not ordered_by:
+        return jsonify({'error':'ordered_by is required'}), 400
+    items = data.get('items', [])
+    if not items:
+        return jsonify({'error':'At least one item is required'}), 400
+
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "INSERT INTO supply_orders (module,ordered_by,vendor,status,notes,ordered_at) VALUES (%s,%s,%s,'Ordered',%s,%s) RETURNING id",
+        (module, ordered_by, data.get('vendor','').strip() or None, data.get('notes','').strip() or None, now_central())
+    )
+    order_id = cur.fetchone()['id']
+
+    table = get_supply_table(module)
+    for item in items:
+        name = item.get('item_name','').strip()
+        if not name: continue
+        cases = float(item.get('cases_ordered', 1))
+        units_per_case = float(item.get('units_per_case', 1))
+        expected = round(cases * units_per_case)
+        matched_id = item.get('matched_supply_id')
+        unit_label = item.get('unit_label','units').strip() or 'units'
+        price = item.get('price')
+        cur.execute(
+            """INSERT INTO supply_order_items
+               (order_id,item_name,matched_supply_id,matched_supply_table,cases_ordered,units_per_case,expected_units,unit_label,price)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (order_id, name, matched_id, table if matched_id else None, cases, units_per_case, expected, unit_label, price)
+        )
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True, 'id':order_id})
+
+@app.route('/api/orders/<int:oid>/receive', methods=['POST'])
+def receive_order(oid):
+    """Mark an order received. Expects: received_by, items[{id, received_units}]"""
+    data = request.json or {}
+    received_by = data.get('received_by','').strip()
+    if not received_by:
+        return jsonify({'error':'received_by is required'}), 400
+    item_updates = data.get('items', [])
+
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM supply_orders WHERE id=%s", (oid,))
+    order = cur.fetchone()
+    if not order: cur.close(); conn.close(); return jsonify({'error':'Order not found'}),404
+    if order['status'] == 'Received': cur.close(); conn.close(); return jsonify({'error':'Already received'}),400
+
+    has_discrepancy = False
+    for upd in item_updates:
+        item_id = upd.get('id')
+        received_units = upd.get('received_units')
+        if item_id is None or received_units is None: continue
+        cur.execute("SELECT * FROM supply_order_items WHERE id=%s AND order_id=%s", (item_id, oid))
+        line = cur.fetchone()
+        if not line: continue
+        received_units = int(received_units)
+        line_discrepancy = 1 if received_units != line['expected_units'] else 0
+        if line_discrepancy: has_discrepancy = True
+        cur.execute(
+            "UPDATE supply_order_items SET received_units=%s, line_discrepancy=%s WHERE id=%s",
+            (received_units, line_discrepancy, item_id)
+        )
+        # Auto-update inventory if this line is matched to a real item
+        if line['matched_supply_id'] and line['matched_supply_table'] and received_units > 0:
+            table = line['matched_supply_table']
+            cur.execute(f"SELECT quantity FROM {table} WHERE id=%s", (line['matched_supply_id'],))
+            row = cur.fetchone()
+            if row:
+                new_qty = row['quantity'] + received_units
+                cur.execute(f"UPDATE {table} SET quantity=%s WHERE id=%s", (new_qty, line['matched_supply_id']))
+
+    ts = now_central()
+    cur.execute(
+        "UPDATE supply_orders SET status='Received', received_at=%s, received_by=%s, has_discrepancy=%s WHERE id=%s",
+        (ts, received_by, 1 if has_discrepancy else 0, oid)
+    )
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True, 'has_discrepancy':has_discrepancy})
+
+@app.route('/api/orders/<int:oid>/resolve-discrepancy', methods=['POST'])
+def resolve_discrepancy(oid):
+    data = request.json or {}
+    notes = data.get('notes','').strip()
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("UPDATE supply_orders SET discrepancy_resolved=1, discrepancy_notes=%s WHERE id=%s", (notes, oid))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True})
+
+@app.route('/api/orders/<int:oid>', methods=['DELETE'])
+def cancel_order(oid):
+    """Cancel a pending order (only if not yet received)."""
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT status FROM supply_orders WHERE id=%s",(oid,))
+    row=cur.fetchone()
+    if not row: cur.close(); conn.close(); return jsonify({'error':'Not found'}),404
+    if row['status']=='Received': cur.close(); conn.close(); return jsonify({'error':'Cannot cancel a received order'}),400
+    cur.execute("DELETE FROM supply_order_items WHERE order_id=%s",(oid,))
+    cur.execute("DELETE FROM supply_orders WHERE id=%s",(oid,))
+    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+
 # ── InventoryCount ────────────────────────────────────────────────────────────
 
 @app.route('/api/inventory-counts', methods=['GET'])
@@ -749,6 +1051,7 @@ def decide_po_request(rid):
     cur.close(); conn.close()
     send_po_decision_email(updated)
     return jsonify({'success':True})
+
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
