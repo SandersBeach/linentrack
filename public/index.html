@@ -359,10 +359,10 @@ let _placeOrderItems = [];
 let _loanerStaff = [];
 
 const TABS = {
-  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'hk_supply', 'orders', 'po_request'],
+  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'hk_supply', 'orders', 'forecast', 'po_request'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -372,7 +372,8 @@ const TAB_LABELS = {
   inventory_count: '📋 InventoryCentral',
   po_request: '📝 POCentral',
   hk_supply: '🧴 Housekeeping Supplies',
-  orders: '📦 Orders'
+  orders: '📦 Orders',
+  forecast: '🔮 Forecast'
 };
 let currentTab = 'scan';
 
@@ -446,7 +447,8 @@ const MODULE_NAMES = {
   inventory_count: 'InventoryCentral',
   po_request: 'POCentral',
   hk_supply: 'HousekeepingSupplyCentral',
-  orders: 'OrdersCentral'
+  orders: 'OrdersCentral',
+  forecast: 'ForecastCentral'
 };
 function showTab(t) {
   currentTab = t;
@@ -465,7 +467,8 @@ function showTab(t) {
     inventory_count: renderInventoryCount,
     po_request: renderPORequest,
     hk_supply: renderHKSupply,
-    orders: renderOrders
+    orders: renderOrders,
+    forecast: renderForecast
   };
   if (fns[t]) fns[t]();
 }
@@ -1721,6 +1724,381 @@ async function resolveOrderDiscrepancy(orderId) {
   const notes = document.getElementById(`resolve-note-${orderId}`)?.value?.trim() || '';
   await fetch(`/api/orders/${orderId}/resolve-discrepancy`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes}) });
   renderDiscrepancies();
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// ── ForecastCentral ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function renderForecast() {
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">🔮 ForecastCentral</div>
+    <div id="forecast-status-area"></div>
+    <div class="subtab-bar">
+      <button class="subtab active" id="fct-run" onclick="forecastSubtab('run')">📊 Run Forecast</button>
+      <button class="subtab" id="fct-boxes" onclick="forecastSubtab('boxes')">📦 Box Packing</button>
+      <button class="subtab" id="fct-upload" onclick="forecastSubtab('upload')">📁 Upload Data</button>
+    </div>
+    <div id="forecast-body"></div>`;
+  await loadForecastStatus();
+  forecastSubtab('run');
+}
+
+async function loadForecastStatus() {
+  try {
+    const s = await fetch('/api/forecast/status').then(r=>r.json());
+    const hasPackList = s.pack_list_count > 0;
+    const hasReservations = s.reservation_count > 0;
+    document.getElementById('forecast-status-area').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem">
+        <div class="card" style="padding:0.875rem;${hasPackList?'border-color:var(--teal)':'border-color:var(--coral)'}">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:4px">Pack List</div>
+          <div style="font-size:14px;font-weight:600;color:${hasPackList?'var(--teal-dark)':'var(--coral-dark)'}">
+            ${hasPackList ? `✓ ${s.pack_list_count} properties loaded` : '⚠️ Not loaded'}
+          </div>
+          ${hasPackList && s.pack_list_updated ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">Updated ${new Date(s.pack_list_updated).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>` : ''}
+        </div>
+        <div class="card" style="padding:0.875rem;${hasReservations?'border-color:var(--teal)':'border-color:var(--coral)'}">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:4px">Reservations</div>
+          <div style="font-size:14px;font-weight:600;color:${hasReservations?'var(--teal-dark)':'var(--coral-dark)'}">
+            ${hasReservations ? `✓ ${s.reservation_count} reservations loaded` : '⚠️ Not loaded'}
+          </div>
+          ${hasReservations && s.date_range ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">${s.date_range}</div>` : ''}
+        </div>
+      </div>`;
+    return s;
+  } catch(e) {
+    document.getElementById('forecast-status-area').innerHTML = '';
+    return null;
+  }
+}
+
+function forecastSubtab(tab) {
+  document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('fct-'+tab)?.classList.add('active');
+  if (tab === 'run') renderForecastRun();
+  else if (tab === 'boxes') renderBoxPacking();
+  else if (tab === 'upload') renderForecastUpload();
+}
+
+// ── Run Forecast ─────────────────────────────────────────────
+
+async function renderForecastRun() {
+  const body = document.getElementById('forecast-body');
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">Date range to forecast</div>
+      <div class="form-row">
+        <div><label>From date</label><input type="date" id="fc-from"></div>
+        <div><label>To date</label><input type="date" id="fc-to"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="setForecastRange(90)">Next 90 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="setForecastRange(60)">Next 60 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="setForecastRange(30)">Next 30 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearForecastRange()">All loaded data</button>
+      </div>
+      <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="runForecast()" id="run-forecast-btn">Run Forecast</button>
+    </div>
+    <div id="forecast-results"></div>`;
+
+  // Default to all data
+  clearForecastRange();
+}
+
+function setForecastRange(days) {
+  const from = new Date();
+  const to = new Date();
+  to.setDate(to.getDate() + days);
+  document.getElementById('fc-from').value = from.toISOString().split('T')[0];
+  document.getElementById('fc-to').value = to.toISOString().split('T')[0];
+}
+function clearForecastRange() {
+  document.getElementById('fc-from').value = '';
+  document.getElementById('fc-to').value = '';
+}
+
+async function runForecast() {
+  const btn = document.getElementById('run-forecast-btn');
+  btn.textContent = 'Calculating...'; btn.disabled = true;
+
+  const from = document.getElementById('fc-from')?.value;
+  const to = document.getElementById('fc-to')?.value;
+  let url = '/api/forecast/run';
+  if (from && to) url += `?from=${from}&to=${to}`;
+  else if (from) url += `?from=${from}`;
+  else if (to) url += `?to=${to}`;
+
+  try {
+    const data = await fetch(url).then(r=>r.json());
+    renderForecastResults(data, from, to);
+  } catch(e) {
+    alert('Error running forecast — please try again.');
+  } finally {
+    btn.textContent = 'Run Forecast'; btn.disabled = false;
+  }
+}
+
+function renderForecastResults(data, from, to) {
+  const results = document.getElementById('forecast-results');
+  if (!data.results || !data.results.length) {
+    results.innerHTML = '<div class="empty">No forecast data — make sure both pack list and reservations are loaded.</div>';
+    return;
+  }
+
+  const shortfalls = data.results.filter(r => !r.ok);
+  const sufficient = data.results.filter(r => r.ok);
+  const dateLabel = (from && to) ? `${from} to ${to}` : 'all loaded reservations';
+
+  let html = `
+    <div class="report-stat-grid" style="margin-bottom:1rem">
+      <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)">
+        <div class="rnum">${data.reservation_count}</div><div class="rlbl" style="color:var(--gray-400)">Reservations</div>
+      </div>
+      <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)">
+        <div class="rnum">${data.properties_matched}</div><div class="rlbl" style="color:var(--gray-400)">Properties</div>
+      </div>
+      <div class="report-stat" style="background:${shortfalls.length?'var(--coral-light)':'var(--green-light)'}">
+        <div class="rnum" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green)'}">${shortfalls.length}</div>
+        <div class="rlbl" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green)'}">Need Ordering</div>
+      </div>
+      <div class="report-stat" style="background:var(--green-light)">
+        <div class="rnum" style="color:var(--green)">${sufficient.length}</div><div class="rlbl" style="color:var(--green)">Sufficient</div>
+      </div>
+    </div>`;
+
+  if (shortfalls.length) {
+    html += `<div class="card" style="border-color:var(--coral);border-width:1.5px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <div class="card-title" style="margin-bottom:0;color:var(--coral-dark)">⚠️ Items to Order (${shortfalls.length})</div>
+        ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+      </div>`;
+    html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--gray-400)">
+        <td style="padding:6px 0;border-bottom:0.5px solid var(--gray-200)">Item</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">Need</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">In Stock</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">On Order</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right;color:var(--coral-dark)">Short By</td>
+      </tr>`;
+    shortfalls.forEach(r => {
+      html += `<tr>
+        <td style="padding:8px 0;border-bottom:0.5px solid var(--gray-100);font-weight:500">${r.supply_name}</td>
+        <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.needed}</td>
+        <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.current_stock}</td>
+        <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.on_order}</td>
+        <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:right;font-weight:700;color:var(--coral-dark)">${r.shortfall}</td>
+      </tr>`;
+    });
+    html += `</table></div></div>`;
+  } else {
+    html += `<div class="card" style="border-color:var(--teal);text-align:center;padding:1.5rem">
+      <div style="font-size:32px;margin-bottom:8px">✅</div>
+      <div style="font-size:15px;font-weight:600;color:var(--teal-dark)">All items sufficiently stocked!</div>
+      <div style="font-size:13px;color:var(--gray-400);margin-top:4px">Current inventory covers all ${data.reservation_count} upcoming reservations.</div>
+      ${role==='admin'?`<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+    </div>`;
+  }
+
+  // Full table — all items
+  html += `<div class="card" style="margin-top:1rem">
+    <div class="card-title">All items — full breakdown</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <tr style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--gray-400)">
+        <td style="padding:6px 0;border-bottom:0.5px solid var(--gray-200)">Item</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">Need</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">Stock</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">On Order</td>
+        <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:right">Status</td>
+      </tr>`;
+  data.results.forEach(r => {
+    html += `<tr>
+      <td style="padding:6px 0;border-bottom:0.5px solid var(--gray-100)">${r.supply_name}</td>
+      <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.needed}</td>
+      <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.current_stock}</td>
+      <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.on_order}</td>
+      <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">
+        ${r.ok ? '<span style="color:var(--green);font-weight:600">✓ OK</span>' : `<span style="color:var(--coral-dark);font-weight:600">-${r.shortfall}</span>`}
+      </td>
+    </tr>`;
+  });
+  html += `</table></div></div>`;
+
+  if (data.properties_unmatched && data.properties_unmatched.length) {
+    html += `<div class="card" style="margin-top:1rem;border-color:var(--amber)">
+      <div class="card-title" style="color:var(--amber)">⚠️ Properties in reservations with no pack list match (${data.properties_unmatched.length})</div>
+      ${data.properties_unmatched.map(p=>`<div style="font-size:12px;color:var(--gray-700);padding:2px 0">${p}</div>`).join('')}
+      <div style="font-size:11px;color:var(--gray-400);margin-top:8px">These properties were excluded from the forecast. Upload an updated pack list to include them.</div>
+    </div>`;
+  }
+
+  results.innerHTML = html;
+}
+
+async function emailSarahForecast(from, to) {
+  const btn = event.target;
+  btn.textContent = 'Sending...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/forecast/email-sarah', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({from: from||null, to: to||null})
+    });
+    const data = await res.json();
+    if (data.email_sent) {
+      btn.textContent = '✓ Sent!';
+      setTimeout(() => { btn.textContent = '📧 Email Sarah'; btn.disabled = false; }, 3000);
+    } else {
+      alert('Email failed to send — check Railway logs.');
+      btn.textContent = '📧 Email Sarah'; btn.disabled = false;
+    }
+  } catch(e) {
+    alert('Connection error.'); btn.textContent = '📧 Email Sarah'; btn.disabled = false;
+  }
+}
+
+// ── Upload Data ──────────────────────────────────────────────
+
+function renderForecastUpload() {
+  document.getElementById('forecast-body').innerHTML = `
+    <div class="card">
+      <div class="card-title">Upload pack list CSV</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload your property pack list spreadsheet (saved as CSV). This only needs to be updated when pack lists change — not every week.</p>
+      <input type="file" id="fc-packlist-file" accept=".csv" style="margin-bottom:10px">
+      <button class="btn btn-primary btn-full" onclick="uploadPackList()">Upload Pack List</button>
+      <div id="fc-packlist-msg" style="font-size:13px;margin-top:8px;min-height:18px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Upload reservations CSV</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload the latest reservations export from Streamline. Replace this weekly (or whenever you want a fresh forecast). Each upload replaces the previous data.</p>
+      <input type="file" id="fc-res-file" accept=".csv" style="margin-bottom:10px">
+      <button class="btn btn-primary btn-full" onclick="uploadReservations()">Upload Reservations</button>
+      <div id="fc-res-msg" style="font-size:13px;margin-top:8px;min-height:18px"></div>
+    </div>`;
+}
+
+
+async function renderBoxPacking() {
+  const body = document.getElementById('forecast-body');
+  body.innerHTML = '<div class="card">Calculating box packing capacity...</div>';
+  try {
+    const data = await fetch('/api/forecast/box-packing').then(r=>r.json());
+
+    const shortfall = data.shortfall;
+    const pct = data.boxes_needed > 0 ? Math.min(100, Math.round(data.can_pack / data.boxes_needed * 100)) : 100;
+
+    let html = `
+      <div class="card">
+        <div class="card-title">Amenity Box Packing Summary</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:1rem">
+          <div class="stat">
+            <div class="stat-num">${data.boxes_needed}</div>
+            <div class="stat-lbl">Boxes needed</div>
+          </div>
+          <div class="stat" style="background:${data.can_pack >= data.boxes_needed ? 'var(--green-light)' : 'var(--coral-light)'}">
+            <div class="stat-num" style="color:${data.can_pack >= data.boxes_needed ? 'var(--green)' : 'var(--coral-dark)'}">${data.can_pack}</div>
+            <div class="stat-lbl">Can pack now</div>
+          </div>
+          <div class="stat" style="background:${shortfall > 0 ? 'var(--coral-light)' : 'var(--green-light)'}">
+            <div class="stat-num" style="color:${shortfall > 0 ? 'var(--coral-dark)' : 'var(--green)'}">${shortfall > 0 ? '-'+shortfall : '✓'}</div>
+            <div class="stat-lbl">${shortfall > 0 ? 'Shortfall' : 'Sufficient'}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:1rem">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--gray-400);margin-bottom:4px">
+            <span>Packing capacity</span><span>${pct}%</span>
+          </div>
+          <div style="height:10px;background:var(--gray-100);border-radius:5px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${pct>=100?'var(--green)':pct>=60?'var(--amber)':'var(--coral)'};border-radius:5px;transition:width 0.5s"></div>
+          </div>
+        </div>
+
+        ${data.bottleneck && shortfall > 0 ? `
+        <div style="background:var(--amber-light);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:1rem">
+          <div style="font-size:13px;font-weight:600;color:var(--amber)">⚠️ Bottleneck: ${data.bottleneck}</div>
+          <div style="font-size:12px;color:var(--amber);margin-top:2px">This item is limiting how many boxes you can pack. Order more to unlock capacity.</div>
+        </div>` : ''}
+
+        ${data.can_pack >= data.boxes_needed ? `
+        <div style="background:var(--green-light);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:1rem">
+          <div style="font-size:13px;font-weight:600;color:var(--green)">✅ You have enough supplies to pack all ${data.boxes_needed} boxes needed!</div>
+        </div>` : ''}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Ingredient breakdown</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <tr style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--gray-400)">
+              <td style="padding:6px 0;border-bottom:0.5px solid var(--gray-200)">Ingredient</td>
+              <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:center">Per Box</td>
+              <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:center">Total Needed</td>
+              <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:center">In Stock</td>
+              <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:center">Boxes Supported</td>
+              <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-200);text-align:center">Status</td>
+            </tr>
+            ${data.ingredients.map(ing => `
+            <tr style="${ing.is_bottleneck ? 'background:var(--amber-light)' : ''}">
+              <td style="padding:8px 0;border-bottom:0.5px solid var(--gray-100);font-weight:${ing.is_bottleneck ? '700' : '500'}">${ing.item}${ing.is_bottleneck ? ' ⚠️' : ''}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.per_box}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.needed_total}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.in_stock}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center;font-weight:600;color:${ing.can_support_boxes >= data.boxes_needed ? 'var(--green)' : 'var(--coral-dark)'}">${ing.can_support_boxes}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">
+                ${ing.ok
+                  ? '<span style="color:var(--green);font-weight:600">✓ OK</span>'
+                  : `<span style="color:var(--coral-dark);font-weight:600">-${ing.short}</span>`}
+              </td>
+            </tr>`).join('')}
+          </table>
+        </div>
+      </div>`;
+
+    body.innerHTML = html;
+  } catch(e) {
+    body.innerHTML = '<div class="empty">Error loading box packing data — make sure reservations and pack list are uploaded.</div>';
+  }
+}
+
+async function uploadPackList() {
+  const file = document.getElementById('fc-packlist-file')?.files[0];
+  if (!file) { alert('Please select a CSV file.'); return; }
+  const msg = document.getElementById('fc-packlist-msg');
+  msg.textContent = 'Uploading...'; msg.style.color = 'var(--gray-400)';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/api/forecast/upload-packlist', { method:'POST', body: formData });
+    const data = await res.json();
+    if (data.error) { msg.textContent = '✗ ' + data.error; msg.style.color = 'var(--coral-dark)'; return; }
+    msg.textContent = `✓ ${data.properties_loaded} properties loaded successfully!`;
+    msg.style.color = 'var(--teal-dark)';
+    await loadForecastStatus();
+  } catch(e) {
+    msg.textContent = '✗ Upload failed — please try again.';
+    msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function uploadReservations() {
+  const file = document.getElementById('fc-res-file')?.files[0];
+  if (!file) { alert('Please select a CSV file.'); return; }
+  const msg = document.getElementById('fc-res-msg');
+  msg.textContent = 'Uploading...'; msg.style.color = 'var(--gray-400)';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/api/forecast/upload-reservations', { method:'POST', body: formData });
+    const data = await res.json();
+    if (data.error) { msg.textContent = '✗ ' + data.error; msg.style.color = 'var(--coral-dark)'; return; }
+    msg.textContent = `✓ ${data.reservations_loaded} reservations loaded successfully!`;
+    msg.style.color = 'var(--teal-dark)';
+    await loadForecastStatus();
+  } catch(e) {
+    msg.textContent = '✗ Upload failed — please try again.';
+    msg.style.color = 'var(--coral-dark)';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
