@@ -1807,10 +1807,10 @@ async function renderForecastRun() {
   const body = document.getElementById('forecast-body');
   body.innerHTML = `
     <div class="card">
-      <div class="card-title">Date range to forecast</div>
+      <div class="card-title">Date range to forecast <span style="font-size:11px;font-weight:400;color:var(--gray-400)">(based on check-in date)</span></div>
       <div class="form-row">
-        <div><label>From date</label><input type="date" id="fc-from"></div>
-        <div><label>To date</label><input type="date" id="fc-to"></div>
+        <div><label>Check-in from</label><input type="date" id="fc-from"></div>
+        <div><label>Check-in to</label><input type="date" id="fc-to"></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="setForecastRange(90)">Next 90 days</button>
