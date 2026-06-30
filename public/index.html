@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>LinenTrack</title>
+<title>SandersCentral</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="LinenTrack">
+<meta name="apple-mobile-web-app-title" content="SandersCentral">
 <meta name="theme-color" content="#1D9E75">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/sbr-icon-192.png">
@@ -173,8 +173,8 @@
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem">
         <button onclick="hidePOPreLogin()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--gray-400);line-height:1">←</button>
         <div>
-          <div style="font-size:16px;font-weight:600">📝 Purchase Request</div>
-          <div style="font-size:12px;color:var(--gray-400)">Sanders Beach Rentals</div>
+          <div style="font-size:16px;font-weight:600">📝 POCentral</div>
+          <div style="font-size:12px;color:var(--gray-400)">SandersCentral</div>
         </div>
       </div>
       <div class="form-row">
@@ -246,8 +246,8 @@
 <!-- ══════════════ LOGIN ══════════════ -->
 <div class="login-wrap" id="login">
   <div class="login-card">
-    <div class="login-logo"><span>Linen</span>Track</div>
-    <div class="login-sub">Warehouse · Admin · Maintenance</div>
+    <div class="login-logo"><span>Sanders</span>Central</div>
+    <div class="login-sub">Warehouse · Admin · Maintenance · Coordinator</div>
     <div style="margin-bottom:1.25rem">
       <button class="btn" style="width:100%;background:var(--teal-light);color:var(--teal-dark);border:0.5px solid var(--teal-mid);font-size:13px;font-weight:600;padding:10px;justify-content:center" onclick="showPOPreLogin()">📝 Submit a Purchase Request</button>
     </div>
@@ -278,7 +278,7 @@
 <!-- ══════════════ APP ══════════════ -->
 <div id="app">
   <div class="topbar">
-    <div class="topbar-logo"><span>Linen</span>Track</div>
+    <div class="topbar-logo" id="topbar-logo"><span>Sanders</span>Central</div>
     <div class="topbar-role">
       <span id="role-label"></span>
       <button onclick="logout()">Sign out</button>
@@ -352,21 +352,27 @@ let role = null;
 let pinVal = '';
 let _currentPin = '';
 let _supplies = [];
+let _hkSupplies = [];
+let _ordersModuleFilter = 'housekeeping';
+let _ordersViewMode = 'pending';
+let _placeOrderItems = [];
 let _loanerStaff = [];
 
 const TABS = {
-  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'po_request'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'po_request'],
+  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'hk_supply', 'orders', 'po_request'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
   loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
-  supply_scan: '🧰 Supplies', supply_status: 'Supply Inventory',
-  inventory_count: '📋 Inventory Count',
-  po_request: '📝 PO Request'
+  supply_scan: '🧰 SupplyCentral', supply_status: 'Supply Inventory',
+  inventory_count: '📋 InventoryCentral',
+  po_request: '📝 POCentral',
+  hk_supply: '🧴 Housekeeping Supplies',
+  orders: '📦 Orders'
 };
 let currentTab = 'scan';
 
@@ -424,18 +430,42 @@ function buildTabs() {
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
   ).join('');
 }
+const MODULE_NAMES = {
+  scan: 'LinenCentral',
+  overdue: 'LinenCentral',
+  status: 'LinenCentral',
+  homes: 'LinenCentral',
+  log: 'LinenCentral',
+  cleaners: 'LinenCentral',
+  settings: 'SandersCentral',
+  loaner_scan: 'LoanerCentral',
+  loaner_status: 'LoanerCentral',
+  loaner_log: 'LoanerCentral',
+  supply_scan: 'SupplyCentral',
+  supply_status: 'SupplyCentral',
+  inventory_count: 'InventoryCentral',
+  po_request: 'POCentral',
+  hk_supply: 'HousekeepingSupplyCentral',
+  orders: 'OrdersCentral'
+};
 function showTab(t) {
   currentTab = t;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
+  // Update topbar module name
+  const moduleName = MODULE_NAMES[t] || 'SandersCentral';
+  const logoEl = document.getElementById('topbar-logo');
+  if (logoEl) logoEl.innerHTML = '<span>Sanders</span>Central <span style="font-weight:400;color:var(--gray-400);font-size:13px">· ' + moduleName + '</span>';
   const fns = {
     scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes,
     log: renderLog, cleaners: renderCleaners, settings: renderSettings,
     loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog,
     supply_scan: renderSupplyScan, supply_status: renderSupplyStatus,
     inventory_count: renderInventoryCount,
-    po_request: renderPORequest
+    po_request: renderPORequest,
+    hk_supply: renderHKSupply,
+    orders: renderOrders
   };
   if (fns[t]) fns[t]();
 }
@@ -853,7 +883,7 @@ async function renderSupplyScan() {
   const catFilter = `<select id="supply-cat-filter" onchange="renderSupplyCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">🧰 Supplies</div>
+      <div style="font-size:15px;font-weight:600">🧰 SupplyCentral</div>
       ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="showAddSupplyModal()">+ Add Item</button>`:''}
     </div>
     <div class="subtab-bar">
@@ -946,6 +976,7 @@ function showAddSupplyModal() {
   document.getElementById('supply-qty-row').style.display = 'block';
   const cats = [...new Set(_supplies.map(s=>s.category))].sort();
   document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
+  document.getElementById('modal-supply-item').dataset.target = 'supply';
   document.getElementById('modal-supply-item').style.display = 'flex';
 }
 function showEditSupplyModal(id) {
@@ -957,21 +988,24 @@ function showEditSupplyModal(id) {
   document.getElementById('supply-unit').value = item.unit;
   document.getElementById('supply-threshold').value = item.low_stock_threshold;
   document.getElementById('supply-qty-row').style.display = 'none';
+  document.getElementById('modal-supply-item').dataset.target = 'supply';
   document.getElementById('modal-supply-item').style.display = 'flex';
 }
 function closeSupplyItemModal() { document.getElementById('modal-supply-item').style.display='none'; }
 async function saveSupplyItem() {
   const editId = document.getElementById('supply-edit-id').value;
+  const target = document.getElementById('modal-supply-item').dataset.target || 'supply';
+  const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
   const body = { pin:_currentPin, name:document.getElementById('supply-name').value.trim(), category:document.getElementById('supply-category').value.trim()||'General', unit:document.getElementById('supply-unit').value.trim()||'units', low_stock_threshold:parseInt(document.getElementById('supply-threshold').value), quantity:parseInt(document.getElementById('supply-init-qty').value||'0') };
   if (!body.name) { alert('Please enter an item name.'); return; }
   const res = editId
-    ? await fetch(`/api/supplies/${editId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    : await fetch('/api/supplies', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    ? await fetch(`${endpoint}/${editId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    : await fetch(endpoint, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
   closeSupplyItemModal();
-  await loadSupplies();
-  renderSupplyCards();
+  if (target === 'hk') { await loadHKSupplies(); renderHKCards(); }
+  else { await loadSupplies(); renderSupplyCards(); }
 }
 
 function showSupplyTxModal(supplyId, action) {
@@ -986,6 +1020,7 @@ function showSupplyTxModal(supplyId, action) {
   sel.innerHTML = '<option value="">Select your name...</option>';
   _loanerStaff.forEach(s=>{ sel.innerHTML+=`<option value="${s.name}">${s.name}</option>`; });
   if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
+  document.getElementById('modal-supply-tx').dataset.target = 'supply';
   document.getElementById('modal-supply-tx').style.display = 'flex';
 }
 function openSupplyTxFromScan(supplyId) { showSupplyTxModal(supplyId, 'take'); }
@@ -996,16 +1031,23 @@ async function submitSupplyTx() {
   const qty = parseInt(document.getElementById('tx-qty').value);
   const performedBy = document.getElementById('tx-performer').value;
   const notes = document.getElementById('tx-notes').value;
+  const target = document.getElementById('modal-supply-tx').dataset.target || 'supply';
+  const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
   if (!performedBy) { alert('Please select your name.'); return; }
   if (!qty||qty<1) { alert('Please enter a valid quantity.'); return; }
-  const res = await fetch(`/api/supplies/${supplyId}/transaction`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, action, quantity:qty, performed_by:performedBy, notes}) });
+  const res = await fetch(`${endpoint}/${supplyId}/transaction`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, action, quantity:qty, performed_by:performedBy, notes}) });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
   closeSupplyTxModal();
-  const itemName = _supplies.find(s=>s.id==supplyId)?.name||'Item';
-  await loadSupplies();
-  renderSupplyCards();
-  if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+  if (target === 'hk') {
+    const itemName = _hkSupplies.find(s=>s.id==supplyId)?.name||'Item';
+    await loadHKSupplies(); renderHKCards();
+    if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+  } else {
+    const itemName = _supplies.find(s=>s.id==supplyId)?.name||'Item';
+    await loadSupplies(); renderSupplyCards();
+    if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+  }
 }
 
 async function showSupplyQR(supplyId) {
@@ -1040,7 +1082,7 @@ async function renderInventoryCount() {
       }).join('') + '</div>';
   }
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📋 Inventory Count</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📋 InventoryCentral</div>
     <div class="card">
       <div class="card-title">Start new count</div>
       <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Select which areas to count, then scan each item and enter the quantity you physically find.</p>
@@ -1110,7 +1152,7 @@ function renderCountInProgress() {
   }
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">📋 Count in progress</div>
+      <div style="font-size:15px;font-weight:600">📋 InventoryCentral — Count in progress</div>
       <span class="badge badge-count">${counted}/${total} done</span>
     </div>
     <div class="card">
@@ -1237,6 +1279,450 @@ async function emailCountReport(countId) {
   else alert('Email sent (check server logs if not received — SMTP setup required).');
 }
 
+
+// ══════════════════════════════════════════════════════════════
+// ── HousekeepingSupplyCentral ───────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function loadHKSupplies() {
+  const res = await fetch('/api/hk-supplies');
+  _hkSupplies = await res.json();
+}
+
+async function renderHKSupply() {
+  await loadHKSupplies();
+  const cats = [...new Set(_hkSupplies.map(s=>s.category))].sort();
+  const catFilter = `<select id="hk-cat-filter" onchange="renderHKCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
+  document.getElementById('main-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-size:15px;font-weight:600">🧴 Housekeeping Supplies</div>
+      ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
+    </div>
+    <div class="subtab-bar">
+      <button class="subtab active" id="hkt-inventory" onclick="hkSubtab('inventory')">Inventory</button>
+      <button class="subtab" id="hkt-log" onclick="hkSubtab('log')">Activity Log</button>
+      <button class="subtab" id="hkt-lowstock" onclick="hkSubtab('lowstock')">⚠️ Low Stock</button>
+    </div>
+    <div id="hkv-inventory">${catFilter}<div id="hk-cards" class="supply-grid"></div></div>
+    <div id="hkv-log" style="display:none"><div id="hk-log-table"></div></div>
+    <div id="hkv-lowstock" style="display:none"><div id="hk-lowstock-cards" class="supply-grid"></div></div>`;
+  renderHKCards();
+}
+
+function hkSubtab(tab) {
+  ['inventory','log','lowstock'].forEach(t => {
+    document.getElementById('hkv-'+t).style.display = t===tab?'block':'none';
+    document.getElementById('hkt-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab==='log') loadHKLog();
+  if (tab==='lowstock') renderHKLowStockCards();
+}
+
+function renderHKCards() {
+  const filter = document.getElementById('hk-cat-filter')?.value || '';
+  const items = filter ? _hkSupplies.filter(s=>s.category===filter) : _hkSupplies;
+  const grid = document.getElementById('hk-cards');
+  if (!grid) return;
+  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(role==='admin'?'Add one above.':'')+'</p>'; return; }
+  grid.innerHTML = items.map(item => {
+    const low = item.quantity <= item.low_stock_threshold;
+    return `<div class="supply-card ${low?'low-stock':''}">
+      <div class="supply-card-top">
+        <div class="supply-name">${item.name}</div>
+        ${low?'<span class="badge badge-out" style="font-size:10px">LOW</span>':''}
+      </div>
+      <div class="supply-cat">${item.category}</div>
+      <div class="supply-qty" style="color:${low?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
+      <div class="supply-unit">${item.unit}</div>
+      <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
+      <div class="supply-actions">
+        <button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
+        <button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button>
+        ${role==='admin'?`<button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderHKLowStockCards() {
+  const low = _hkSupplies.filter(s=>s.quantity<=s.low_stock_threshold);
+  const grid = document.getElementById('hk-lowstock-cards');
+  if (!grid) return;
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--green);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
+    <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
+    <div class="supply-cat">${item.category}</div>
+    <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
+    <div class="supply-unit">${item.unit}</div>
+    <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
+    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>
+  </div>`).join('');
+}
+
+async function loadHKLog() {
+  const res = await fetch('/api/hk-supply-log?limit=200');
+  const rows = await res.json();
+  const el = document.getElementById('hk-log-table');
+  if (!el) return;
+  if (!rows.length) { el.innerHTML='<div class="empty">No transactions yet</div>'; return; }
+  el.innerHTML = `<div class="card" style="padding:0.75rem 1.25rem">` + rows.map(r=>{
+    const isOut=r.action==='take';
+    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'📤 Took':'📥 Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
+  }).join('') + '</div>';
+}
+
+function showAddHKModal() {
+  document.getElementById('supply-modal-title').textContent = 'Add Housekeeping Supply';
+  document.getElementById('supply-edit-id').value = '';
+  document.getElementById('supply-name').value = '';
+  document.getElementById('supply-category').value = '';
+  document.getElementById('supply-unit').value = 'units';
+  document.getElementById('supply-threshold').value = 5;
+  document.getElementById('supply-init-qty').value = 0;
+  document.getElementById('supply-qty-row').style.display = 'block';
+  const cats = [...new Set(_hkSupplies.map(s=>s.category))].sort();
+  document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
+  document.getElementById('modal-supply-item').dataset.target = 'hk';
+  document.getElementById('modal-supply-item').style.display = 'flex';
+}
+function showEditHKModal(id) {
+  const item = _hkSupplies.find(s=>s.id===id); if(!item)return;
+  document.getElementById('supply-modal-title').textContent = 'Edit Housekeeping Supply';
+  document.getElementById('supply-edit-id').value = id;
+  document.getElementById('supply-name').value = item.name;
+  document.getElementById('supply-category').value = item.category;
+  document.getElementById('supply-unit').value = item.unit;
+  document.getElementById('supply-threshold').value = item.low_stock_threshold;
+  document.getElementById('supply-qty-row').style.display = 'none';
+  document.getElementById('modal-supply-item').dataset.target = 'hk';
+  document.getElementById('modal-supply-item').style.display = 'flex';
+}
+
+function showHKTxModal(supplyId, action) {
+  const item = _hkSupplies.find(s=>s.id===supplyId); if(!item)return;
+  document.getElementById('tx-supply-id').value = supplyId;
+  document.getElementById('tx-action').value = action;
+  document.getElementById('tx-modal-title').textContent = action==='take'?'📤 Take Supplies':'📥 Restock Supplies';
+  document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
+  document.getElementById('tx-qty').value = 1;
+  document.getElementById('tx-notes').value = '';
+  const sel = document.getElementById('tx-performer');
+  sel.innerHTML = '<option value="">Select your name...</option>';
+  scanState.cleaners.forEach(c=>{ sel.innerHTML+=`<option value="${c.name}">${c.name}</option>`; });
+  if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
+  document.getElementById('modal-supply-tx').dataset.target = 'hk';
+  document.getElementById('modal-supply-tx').style.display = 'flex';
+}
+
+async function showHKQR(supplyId) {
+  const res = await fetch(`/api/hk-supplies/${supplyId}/qr`);
+  const data = await res.json();
+  document.getElementById('qr-item-name').textContent = data.name;
+  document.getElementById('qr-img').src = data.qr_code;
+  document.getElementById('modal-supply-qr').style.display = 'flex';
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// ── OrdersCentral ────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+async function renderOrders() {
+  // Determine which modules this role can see
+  const canSeeHK = (role === 'warehouse' || role === 'admin');
+  const canSeeMaint = (role === 'maintenance' || role === 'admin');
+  if (!_ordersModuleFilter) _ordersModuleFilter = canSeeHK ? 'housekeeping' : 'maintenance';
+
+  let moduleToggle = '';
+  if (canSeeHK && canSeeMaint) {
+    moduleToggle = `<div style="display:flex;gap:8px;margin-bottom:1rem">
+      <button class="btn ${_ordersModuleFilter==='housekeeping'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('housekeeping')">🧴 Housekeeping</button>
+      <button class="btn ${_ordersModuleFilter==='maintenance'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('maintenance')">🧰 Maintenance</button>
+    </div>`;
+  }
+
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📦 OrdersCentral</div>
+    ${moduleToggle}
+    <div class="subtab-bar">
+      <button class="subtab ${_ordersViewMode==='pending'?'active':''}" id="ord-t-pending" onclick="ordersSubtab('pending')">⏳ Pending</button>
+      <button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>
+      <button class="subtab ${_ordersViewMode==='history'?'active':''}" id="ord-t-history" onclick="ordersSubtab('history')">History</button>
+      <button class="subtab ${_ordersViewMode==='discrepancies'?'active':''}" id="ord-t-discrepancies" onclick="ordersSubtab('discrepancies')">⚠️ Discrepancies</button>
+    </div>
+    <div id="orders-body"></div>`;
+  ordersSubtab(_ordersViewMode);
+}
+
+function setOrdersModule(m) { _ordersModuleFilter = m; renderOrders(); }
+
+function ordersSubtab(mode) {
+  _ordersViewMode = mode;
+  document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('ord-t-'+mode)?.classList.add('active');
+  if (mode === 'pending') renderPendingOrders();
+  else if (mode === 'place') renderPlaceOrderForm();
+  else if (mode === 'history') renderOrderHistory();
+  else if (mode === 'discrepancies') renderDiscrepancies();
+}
+
+// ── Pending orders (to receive) ────────────────────────────────────────────────
+
+async function renderPendingOrders() {
+  const body = document.getElementById('orders-body');
+  body.innerHTML = '<div class="card">Loading...</div>';
+  const orders = await fetch(`/api/orders?module=${_ordersModuleFilter}&status=Ordered`).then(r=>r.json());
+  if (!orders.length) {
+    body.innerHTML = '<div class="empty">No pending orders right now.</div>';
+    return;
+  }
+  body.innerHTML = orders.map(o => {
+    const date = new Date(o.ordered_at).toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <div style="font-size:14px;font-weight:600">${o.vendor || 'Order'} #${o.id}</div>
+          <div style="font-size:12px;color:var(--gray-400)">Ordered by ${o.ordered_by} · ${date} · ${o.items.length} item${o.items.length!==1?'s':''}</div>
+        </div>
+        <span class="badge badge-warn">Pending</span>
+      </div>
+      ${o.items.map(it=>`<div style="font-size:13px;padding:4px 0;color:var(--gray-700)">${it.item_name} — expecting <strong>${it.expected_units} ${it.unit_label}</strong> (${it.cases_ordered} case${it.cases_ordered!=1?'s':''} × ${it.units_per_case})</div>`).join('')}
+      <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="openReceiveModal(${o.id})">✅ Receive This Order</button>
+    </div>`;
+  }).join('');
+}
+
+function openReceiveModal(orderId) {
+  fetch(`/api/orders/${orderId}`).then(r=>r.json()).then(order => {
+    const rows = order.items.map(it => `
+      <div class="count-row">
+        <div class="count-row-left">
+          <div style="font-size:13px;font-weight:500">${it.item_name}</div>
+          <div style="font-size:11px;color:var(--gray-400)">Expected: ${it.expected_units} ${it.unit_label}</div>
+        </div>
+        <div class="count-row-right">
+          <input class="count-input" type="number" min="0" id="recv-${it.id}" value="${it.expected_units}" style="width:90px">
+        </div>
+      </div>`).join('');
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.id = 'modal-receive-order';
+    modal.innerHTML = `<div class="modal-box" style="max-width:480px">
+      <h3>Receive Order #${order.id}</h3>
+      <p style="font-size:13px;color:var(--gray-400);margin-bottom:1rem">Enter the actual quantity received for each item. Defaults to what was expected — change if different.</p>
+      ${rows}
+      <label style="margin-top:1rem">Your name</label>
+      <input type="text" id="recv-by" placeholder="Who is checking this in?">
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-receive-order').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitReceiveOrder(${order.id})">Confirm Receipt</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+  });
+}
+
+async function submitReceiveOrder(orderId) {
+  const receivedBy = document.getElementById('recv-by')?.value?.trim();
+  if (!receivedBy) { alert('Please enter your name.'); return; }
+  const order = await fetch(`/api/orders/${orderId}`).then(r=>r.json());
+  const items = order.items.map(it => ({
+    id: it.id,
+    received_units: parseInt(document.getElementById(`recv-${it.id}`)?.value || it.expected_units)
+  }));
+  const res = await fetch(`/api/orders/${orderId}/receive`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ received_by: receivedBy, items })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('modal-receive-order')?.remove();
+  if (data.has_discrepancy) {
+    alert("⚠️ Order received, but some quantities didn't match what was expected. This has been flagged for review.");
+  } else {
+    alert('✅ Order received! Inventory has been updated.');
+  }
+  renderPendingOrders();
+}
+
+// ── Place Order form ────────────────────────────────────────────────────────
+
+async function renderPlaceOrderForm() {
+  const body = document.getElementById('orders-body');
+  // Load the relevant inventory list for matching dropdown
+  const endpoint = _ordersModuleFilter === 'housekeeping' ? '/api/hk-supplies' : '/api/supplies';
+  const inventoryItems = await fetch(endpoint).then(r=>r.json());
+  window._orderInventoryItems = inventoryItems;
+
+  if (!_placeOrderItems.length) {
+    _placeOrderItems.push({ item_name:'', matched_supply_id:'', cases_ordered:1, units_per_case:1, unit_label:'units', price:'' });
+  }
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">New order — ${_ordersModuleFilter === 'housekeeping' ? 'Housekeeping Supplies' : 'Maintenance Supplies'}</div>
+      <div class="form-row">
+        <div><label>Ordered by</label><input type="text" id="po-ordered-by" placeholder="Your name"></div>
+        <div><label>Vendor (optional)</label><input type="text" id="po-vendor" placeholder="e.g. Amazon, Sam's Club"></div>
+      </div>
+      <label>Notes (optional)</label>
+      <input type="text" id="po-order-notes" placeholder="Any notes about this order">
+      <div id="order-items-list" style="margin-top:1rem"></div>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="addOrderItemRow()">+ Add another item</button>
+      <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="submitPlaceOrder()">Place Order</button>
+      <div id="place-order-msg" style="margin-top:10px;font-size:13px;color:var(--teal);text-align:center;min-height:18px"></div>
+    </div>`;
+  renderOrderItemRows();
+}
+
+function renderOrderItemRows() {
+  const list = document.getElementById('order-items-list');
+  if (!list) return;
+  const items = window._orderInventoryItems || [];
+  list.innerHTML = _placeOrderItems.map((row, idx) => {
+    const expected = (parseFloat(row.cases_ordered)||0) * (parseFloat(row.units_per_case)||0);
+    return `<div class="card" style="background:var(--gray-50);margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="card-title" style="margin-bottom:0">Item ${idx+1}</div>
+        ${_placeOrderItems.length>1?`<button class="btn btn-ghost btn-sm" onclick="removeOrderItemRow(${idx})">Remove</button>`:''}
+      </div>
+      <label>Match to existing item (optional)</label>
+      <select onchange="onOrderItemMatch(${idx}, this.value)">
+        <option value="">— New / unmatched item —</option>
+        ${items.map(it=>`<option value="${it.id}" ${row.matched_supply_id==it.id?'selected':''}>${it.name} (${it.unit})</option>`).join('')}
+      </select>
+      <label>Item name</label>
+      <input type="text" value="${row.item_name}" oninput="updateOrderItem(${idx},'item_name',this.value)" placeholder="e.g. Palmolive Dish Soap 3oz">
+      <div class="form-row">
+        <div><label>Cases/packs ordered</label><input type="number" min="0" step="1" value="${row.cases_ordered}" oninput="updateOrderItem(${idx},'cases_ordered',this.value)"></div>
+        <div><label>Units per case</label><input type="number" min="0" step="1" value="${row.units_per_case}" oninput="updateOrderItem(${idx},'units_per_case',this.value)"></div>
+      </div>
+      <div class="form-row">
+        <div><label>Unit label</label><input type="text" value="${row.unit_label}" oninput="updateOrderItem(${idx},'unit_label',this.value)" placeholder="e.g. rolls, bottles"></div>
+        <div><label>Price (optional)</label><input type="number" min="0" step="0.01" value="${row.price}" oninput="updateOrderItem(${idx},'price',this.value)" placeholder="$0.00"></div>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:var(--teal-dark);background:var(--teal-light);padding:8px 12px;border-radius:var(--radius-sm)">
+        = ${expected || 0} ${row.unit_label || 'units'} expected
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function addOrderItemRow() {
+  _placeOrderItems.push({ item_name:'', matched_supply_id:'', cases_ordered:1, units_per_case:1, unit_label:'units', price:'' });
+  renderOrderItemRows();
+}
+function removeOrderItemRow(idx) {
+  _placeOrderItems.splice(idx,1);
+  renderOrderItemRows();
+}
+function updateOrderItem(idx, field, value) {
+  _placeOrderItems[idx][field] = value;
+  renderOrderItemRows();
+}
+function onOrderItemMatch(idx, supplyId) {
+  _placeOrderItems[idx].matched_supply_id = supplyId;
+  if (supplyId) {
+    const item = (window._orderInventoryItems||[]).find(i=>i.id==supplyId);
+    if (item) {
+      _placeOrderItems[idx].item_name = item.name;
+      _placeOrderItems[idx].unit_label = item.unit;
+    }
+  }
+  renderOrderItemRows();
+}
+
+async function submitPlaceOrder() {
+  const orderedBy = document.getElementById('po-ordered-by')?.value?.trim();
+  const vendor = document.getElementById('po-vendor')?.value?.trim();
+  const notes = document.getElementById('po-order-notes')?.value?.trim();
+  if (!orderedBy) { alert('Please enter who is placing this order.'); return; }
+  const validItems = _placeOrderItems.filter(it => it.item_name.trim());
+  if (!validItems.length) { alert('Please add at least one item.'); return; }
+
+  const payload = {
+    module: _ordersModuleFilter,
+    ordered_by: orderedBy,
+    vendor, notes,
+    items: validItems.map(it => ({
+      item_name: it.item_name.trim(),
+      matched_supply_id: it.matched_supply_id ? parseInt(it.matched_supply_id) : null,
+      cases_ordered: parseFloat(it.cases_ordered) || 1,
+      units_per_case: parseFloat(it.units_per_case) || 1,
+      unit_label: it.unit_label.trim() || 'units',
+      price: it.price ? parseFloat(it.price) : null
+    }))
+  };
+
+  const res = await fetch('/api/orders', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+
+  document.getElementById('place-order-msg').textContent = '✅ Order placed! It will show under Pending until received.';
+  _placeOrderItems = [];
+  document.getElementById('po-ordered-by').value = '';
+  document.getElementById('po-vendor').value = '';
+  document.getElementById('po-order-notes').value = '';
+  setTimeout(() => ordersSubtab('pending'), 1200);
+}
+
+// ── Order history ────────────────────────────────────────────────────────────
+
+async function renderOrderHistory() {
+  const body = document.getElementById('orders-body');
+  body.innerHTML = '<div class="card">Loading...</div>';
+  const orders = await fetch(`/api/orders?module=${_ordersModuleFilter}`).then(r=>r.json());
+  if (!orders.length) { body.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+  body.innerHTML = orders.map(o => {
+    const date = new Date(o.ordered_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    const recvDate = o.received_at ? new Date(o.received_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : null;
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:14px;font-weight:600">${o.vendor || 'Order'} #${o.id}</div>
+        <span class="badge ${o.status==='Received'?(o.has_discrepancy?'badge-warn':'badge-ok'):'badge-warn'}">${o.status}${o.has_discrepancy?' ⚠️':''}</span>
+      </div>
+      <div style="font-size:12px;color:var(--gray-400);margin-bottom:8px">Ordered by ${o.ordered_by} · ${date}${recvDate?` · Received ${recvDate} by ${o.received_by}`:''}</div>
+      ${o.items.map(it=>`<div style="font-size:12px;padding:2px 0;color:var(--gray-700)">${it.item_name} — ${it.expected_units} ${it.unit_label} expected${it.received_units!=null?`, ${it.received_units} received`:''}${it.line_discrepancy?' <strong style="color:var(--coral-dark)">⚠ mismatch</strong>':''}</div>`).join('')}
+    </div>`;
+  }).join('');
+}
+
+// ── Discrepancies ────────────────────────────────────────────────────────────
+
+async function renderDiscrepancies() {
+  const body = document.getElementById('orders-body');
+  body.innerHTML = '<div class="card">Loading...</div>';
+  const orders = await fetch(`/api/orders?module=${_ordersModuleFilter}`).then(r=>r.json());
+  const withDiscrepancy = orders.filter(o => o.has_discrepancy);
+  if (!withDiscrepancy.length) {
+    body.innerHTML = '<div class="empty">✅ No discrepancies — everything has matched so far.</div>';
+    return;
+  }
+  body.innerHTML = withDiscrepancy.map(o => {
+    const mismatched = o.items.filter(it => it.line_discrepancy);
+    return `<div class="card" style="border-color:var(--coral);border-width:1.5px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600">${o.vendor || 'Order'} #${o.id}</div>
+        <span class="badge ${o.discrepancy_resolved?'badge-ok':'badge-out'}">${o.discrepancy_resolved?'Resolved':'Unresolved'}</span>
+      </div>
+      ${mismatched.map(it=>`<div class="row"><div class="row-main"><div class="row-title">${it.item_name}</div><div class="row-sub">Expected ${it.expected_units} ${it.unit_label} · Received ${it.received_units} ${it.unit_label}</div></div></div>`).join('')}
+      ${o.discrepancy_notes?`<div style="font-size:12px;color:var(--gray-400);margin-top:8px"><em>Note: ${o.discrepancy_notes}</em></div>`:''}
+      ${!o.discrepancy_resolved && role==='admin' ? `
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <input type="text" id="resolve-note-${o.id}" placeholder="Resolution note (optional)" style="flex:1;margin-bottom:0">
+          <button class="btn btn-primary btn-sm" onclick="resolveOrderDiscrepancy(${o.id})">Mark Resolved</button>
+        </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function resolveOrderDiscrepancy(orderId) {
+  const notes = document.getElementById(`resolve-note-${orderId}`)?.value?.trim() || '';
+  await fetch(`/api/orders/${orderId}/resolve-discrepancy`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes}) });
+  renderDiscrepancies();
+}
+
 // ══════════════════════════════════════════════════════════════
 // ── PO Request ────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
@@ -1344,7 +1830,7 @@ async function submitPOPreLogin() {
 async function renderPORequest() {
   const catOpts = PO_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📝 Purchase Request</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📝 POCentral</div>
     <div class="card">
       <div class="card-title">Submit a new purchase request</div>
       <div class="form-row">
