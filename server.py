@@ -137,6 +137,22 @@ def init_db():
             price NUMERIC(10,2),
             line_discrepancy INTEGER DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS forecast_pack_list (
+            id SERIAL PRIMARY KEY,
+            address TEXT NOT NULL UNIQUE,
+            property_name TEXT,
+            supplies JSONB NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS forecast_reservations (
+            id SERIAL PRIMARY KEY,
+            lease_id TEXT,
+            arrive TEXT NOT NULL,
+            depart TEXT NOT NULL,
+            unit_address TEXT NOT NULL,
+            area TEXT,
+            uploaded_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS po_requests (
             id SERIAL PRIMARY KEY,
             employee_name TEXT NOT NULL, employee_email TEXT NOT NULL,
@@ -962,6 +978,384 @@ def cancel_order(oid):
     cur.execute("DELETE FROM supply_order_items WHERE order_id=%s",(oid,))
     cur.execute("DELETE FROM supply_orders WHERE id=%s",(oid,))
     conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+
+
+# ── ForecastCentral ───────────────────────────────────────────────────────────
+
+SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
+
+SUPPLY_MAP = {
+    11: ['Toilet Paper Rolls'],
+    12: ['Bathroom Trash Liners'],
+    13: ['Molton Brown Shampoo', 'Molton Brown Conditioner', 'Molton Brown Body Wash'],
+    14: ['Molton Brown Bar Soap'],
+    15: ['Kitchen Amenity Boxes'],
+    # 16 = pool towels, skip
+    17: ['Paper Towel Rolls'],
+    18: ['Kitchen Trash Bags'],
+    19: ['Round Coffee Filters'],
+    20: ['Amavida Coffee Packs'],
+    21: ['3oz Palmolive Bottles'],
+    22: ['Dishwasher Pod Packs'],
+    23: ['Kitchen Sponges'],
+    24: ['10oz Tide Bottles'],
+}
+
+def parse_pack_list_csv(content):
+    """Parse pack list CSV → {address: {supply_name: qty}}"""
+    import csv, io
+    reader = csv.reader(io.StringIO(content))
+    rows = list(reader)
+    pack_list = {}
+    for row in rows:
+        if not row: continue
+        first = row[0].strip().strip('"')
+        if not first or not (first[0].isdigit() or first[0].isalpha()): continue
+        # Must look like an address - has a number or starts with a digit
+        if not any(c.isdigit() for c in first[:5]): continue
+        addr = first.lower().strip()
+        prop_name = row[1].strip() if len(row) > 1 else addr
+        supplies = {}
+        for col_idx, supply_names in SUPPLY_MAP.items():
+            if col_idx >= len(row): continue
+            val = row[col_idx].strip()
+            try: qty = int(float(val)) if val else 0
+            except: qty = 0
+            for name in supply_names:
+                supplies[name] = qty
+        if any(v > 0 for v in supplies.values()):
+            pack_list[addr] = {'property_name': prop_name, 'supplies': supplies}
+    return pack_list
+
+def parse_reservations_csv(content):
+    """Parse reservation CSV → list of {lease_id, arrive, depart, unit, area}"""
+    import csv, io
+    reader = csv.reader(io.StringIO(content))
+    reservations = []
+    header_found = False
+    for row in reader:
+        if not row: continue
+        if 'Lease ID' in row[0] or 'Lease ID' in (row[0] if row else ''):
+            header_found = True
+            continue
+        if not header_found: continue
+        if not row[0].strip() or not row[0].strip().isdigit(): continue
+        try:
+            reservations.append({
+                'lease_id': row[0].strip(),
+                'arrive': row[1].strip(),
+                'depart': row[2].strip(),
+                'area': row[4].strip() if len(row) > 4 else '',
+                'unit': row[5].strip().strip('"').lower() if len(row) > 5 else ''
+            })
+        except: pass
+    return reservations
+
+def run_forecast(conn, date_from=None, date_to=None):
+    """Calculate supply needs from pack list × turnovers, compare to HK inventory."""
+    from collections import defaultdict
+    from datetime import datetime
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Load pack list
+    cur.execute("SELECT address, supplies FROM forecast_pack_list")
+    pack_list = {row['address']: row['supplies'] for row in cur.fetchall()}
+
+    # Load reservations with optional date filter
+    q = "SELECT unit_address, arrive, depart FROM forecast_reservations WHERE 1=1"
+    params = []
+    if date_from:
+        q += " AND arrive >= %s"; params.append(date_from)
+    if date_to:
+        q += " AND depart <= %s"; params.append(date_to)
+    cur.execute(q, params)
+    reservations = cur.fetchall()
+
+    # Count turnovers per property
+    turnovers = defaultdict(int)
+    unmatched = set()
+    for r in reservations:
+        unit = r['unit_address'].lower().strip()
+        if unit in pack_list:
+            turnovers[unit] += 1
+        else:
+            unmatched.add(unit)
+
+    # Sum supply needs
+    needed = defaultdict(int)
+    breakdown = defaultdict(list)  # supply → list of (property, turnovers, qty_per_turnover, subtotal)
+    for unit, count in turnovers.items():
+        if unit not in pack_list: continue
+        supplies = pack_list[unit]
+        if isinstance(supplies, str):
+            import json
+            supplies = json.loads(supplies)
+        for supply_name, qty_per_turn in supplies.items():
+            if qty_per_turn > 0:
+                subtotal = qty_per_turn * count
+                needed[supply_name] += subtotal
+                breakdown[supply_name].append({
+                    'property': unit,
+                    'turnovers': count,
+                    'per_turnover': qty_per_turn,
+                    'subtotal': subtotal
+                })
+
+    # Load current HK inventory
+    cur.execute("SELECT name, quantity FROM hk_supply_items")
+    inventory = {row['name']: row['quantity'] for row in cur.fetchall()}
+
+    # Load pending orders for HK
+    cur.execute("""
+        SELECT soi.item_name, SUM(soi.expected_units) as on_order
+        FROM supply_order_items soi
+        JOIN supply_orders so ON so.id = soi.order_id
+        WHERE so.module = 'housekeeping' AND so.status = 'Ordered'
+        GROUP BY soi.item_name
+    """)
+    on_order = {row['item_name']: row['on_order'] for row in cur.fetchall()}
+
+    # Build results
+    results = []
+    for supply_name in sorted(needed.keys()):
+        qty_needed = needed[supply_name]
+        current_stock = inventory.get(supply_name, 0)
+        on_order_qty = on_order.get(supply_name, 0)
+        available = current_stock + on_order_qty
+        shortfall = max(0, qty_needed - available)
+        results.append({
+            'supply_name': supply_name,
+            'needed': qty_needed,
+            'current_stock': current_stock,
+            'on_order': on_order_qty,
+            'available': available,
+            'shortfall': shortfall,
+            'ok': shortfall == 0,
+            'breakdown': breakdown[supply_name][:5]  # top 5 properties
+        })
+
+    cur.close()
+    return {
+        'results': results,
+        'total_turnovers': sum(turnovers.values()),
+        'properties_matched': len(turnovers),
+        'properties_unmatched': list(unmatched)[:10],
+        'reservation_count': len(reservations)
+    }
+
+@app.route('/api/forecast/upload-packlist', methods=['POST'])
+def upload_pack_list():
+    """Upload and parse a pack list CSV."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    content = f.read().decode('utf-8-sig', errors='replace')
+    pack_list = parse_pack_list_csv(content)
+    if not pack_list:
+        return jsonify({'error': 'No valid pack list data found in file'}), 400
+    conn = get_db(); cur = conn.cursor()
+    inserted = 0
+    for addr, data in pack_list.items():
+        import json
+        cur.execute("""
+            INSERT INTO forecast_pack_list (address, property_name, supplies, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (address) DO UPDATE SET
+                property_name=EXCLUDED.property_name,
+                supplies=EXCLUDED.supplies,
+                updated_at=EXCLUDED.updated_at
+        """, (addr, data['property_name'], json.dumps(data['supplies']), now_central()))
+        inserted += 1
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'properties_loaded': inserted})
+
+@app.route('/api/forecast/upload-reservations', methods=['POST'])
+def upload_reservations():
+    """Upload and parse a reservations CSV."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    content = f.read().decode('utf-8-sig', errors='replace')
+    reservations = parse_reservations_csv(content)
+    if not reservations:
+        return jsonify({'error': 'No valid reservation data found in file'}), 400
+    conn = get_db(); cur = conn.cursor()
+    # Replace all reservations on each upload (fresh data)
+    cur.execute("DELETE FROM forecast_reservations")
+    uploaded_at = now_central()
+    for r in reservations:
+        cur.execute("""
+            INSERT INTO forecast_reservations (lease_id, arrive, depart, unit_address, area, uploaded_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (r['lease_id'], r['arrive'], r['depart'], r['unit'], r['area'], uploaded_at))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'reservations_loaded': len(reservations)})
+
+@app.route('/api/forecast/run', methods=['GET'])
+def run_forecast_api():
+    """Run the forecast calculation."""
+    date_from = request.args.get('from')
+    date_to = request.args.get('to')
+    conn = get_db()
+    try:
+        result = run_forecast(conn, date_from, date_to)
+    finally:
+        conn.close()
+    return jsonify(result)
+
+@app.route('/api/forecast/status', methods=['GET'])
+def forecast_status():
+    """Get counts of loaded pack list and reservations."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT COUNT(*) as cnt, MAX(updated_at) as last FROM forecast_pack_list")
+    pl = cur.fetchone()
+    cur.execute("SELECT COUNT(*) as cnt, MAX(uploaded_at) as last, MIN(arrive) as min_date, MAX(depart) as max_date FROM forecast_reservations")
+    res = cur.fetchone()
+    cur.close(); conn.close()
+    return jsonify({
+        'pack_list_count': pl['cnt'],
+        'pack_list_updated': pl['last'],
+        'reservation_count': res['cnt'],
+        'reservations_updated': res['last'],
+        'date_range': f"{res['min_date']} to {res['max_date']}" if res['min_date'] else None
+    })
+
+
+@app.route('/api/forecast/box-packing', methods=['GET'])
+def box_packing():
+    """Calculate how many amenity boxes can be packed vs how many are needed."""
+    BOX_CONTENTS = {
+        'Kitchen Trash Bags':      5,
+        'Round Coffee Filters':    2,
+        'Amavida Coffee Packs':    1,
+        '3oz Palmolive Bottles':   1,
+        'Dishwasher Pod Packs':    2,
+        'Kitchen Sponges':         1,
+        '10oz Tide Bottles':       1,
+        'Kitchen Amenity Boxes':   1,
+    }
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Current inventory of each box ingredient
+    names = list(BOX_CONTENTS.keys())
+    cur.execute("SELECT name, quantity FROM hk_supply_items WHERE name = ANY(%s)", (names,))
+    inventory = {row['name']: row['quantity'] for row in cur.fetchall()}
+
+    # How many boxes each ingredient can support
+    ingredient_limits = {}
+    for item, per_box in BOX_CONTENTS.items():
+        stock = inventory.get(item, 0)
+        ingredient_limits[item] = stock // per_box if per_box > 0 else 0
+
+    # Max boxes packable = minimum across all ingredients
+    can_pack = min(ingredient_limits.values()) if ingredient_limits else 0
+    bottleneck = min(ingredient_limits, key=ingredient_limits.get) if ingredient_limits else None
+
+    # Boxes needed from forecast
+    cur.execute("""
+        SELECT fp.supplies, COUNT(fr.id) as turnovers
+        FROM forecast_reservations fr
+        JOIN forecast_pack_list fp ON fp.address = fr.unit_address
+        GROUP BY fp.address, fp.supplies
+    """)
+    rows = cur.fetchall()
+    import json
+    boxes_needed = 0
+    for row in rows:
+        supplies = row['supplies'] if isinstance(row['supplies'], dict) else json.loads(row['supplies'])
+        boxes_per_turn = supplies.get('Kitchen Amenity Boxes', 0)
+        boxes_needed += boxes_per_turn * row['turnovers']
+
+    shortfall = max(0, boxes_needed - can_pack)
+
+    # Build per-ingredient detail
+    ingredients = []
+    for item, per_box in BOX_CONTENTS.items():
+        stock = inventory.get(item, 0)
+        needed_total = per_box * boxes_needed
+        can_support = ingredient_limits[item]
+        short = max(0, needed_total - stock)
+        ingredients.append({
+            'item': item,
+            'per_box': per_box,
+            'in_stock': stock,
+            'needed_total': needed_total,
+            'can_support_boxes': can_support,
+            'short': short,
+            'is_bottleneck': item == bottleneck,
+            'ok': short == 0
+        })
+
+    cur.close(); conn.close()
+    return jsonify({
+        'boxes_needed': boxes_needed,
+        'can_pack': can_pack,
+        'shortfall': shortfall,
+        'bottleneck': bottleneck,
+        'ingredients': ingredients
+    })
+
+@app.route('/api/forecast/email-sarah', methods=['POST'])
+def email_sarah_forecast():
+    """Email Sarah the forecast shortfall report."""
+    date_from = request.json.get('from') if request.json else None
+    date_to = request.json.get('to') if request.json else None
+    conn = get_db()
+    try:
+        result = run_forecast(conn, date_from, date_to)
+    finally:
+        conn.close()
+
+    shortfalls = [r for r in result['results'] if not r['ok']]
+    if not shortfalls:
+        subject = "✅ Housekeeping Supply Forecast — All Items Sufficient"
+        body_text = f"Good news! Based on {result['reservation_count']} upcoming reservations, all housekeeping supplies are sufficiently stocked."
+    else:
+        subject = f"⚠️ Housekeeping Supply Forecast — {len(shortfalls)} Items Need Ordering"
+        body_text = f"Based on {result['reservation_count']} upcoming reservations across {result['properties_matched']} properties:\n\n"
+        body_text += "ITEMS THAT NEED TO BE ORDERED:\n"
+        for r in shortfalls:
+            body_text += f"  {r['supply_name']}: need {r['needed']}, have {r['current_stock']} + {r['on_order']} on order = {r['available']} available. Short by {r['shortfall']}\n"
+
+    # Build HTML version
+    shortfall_rows = ''.join(
+        f'<tr><td style="padding:8px;border-bottom:1px solid #eee;font-weight:600">{r["supply_name"]}</td>'
+        f'<td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{r["needed"]}</td>'
+        f'<td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{r["current_stock"]}</td>'
+        f'<td style="padding:8px;border-bottom:1px solid #eee;text-align:center">{r["on_order"]}</td>'
+        f'<td style="padding:8px;border-bottom:1px solid #eee;text-align:center;color:#c0392b;font-weight:700">{r["shortfall"]}</td></tr>'
+        for r in shortfalls
+    ) if shortfalls else '<tr><td colspan="5" style="padding:16px;text-align:center;color:#2d7a4f">All items are sufficiently stocked!</td></tr>'
+
+    ok_rows = ''.join(
+        f'<tr><td style="padding:6px;border-bottom:1px solid #eee">{r["supply_name"]}</td>'
+        f'<td style="padding:6px;border-bottom:1px solid #eee;text-align:center">{r["needed"]}</td>'
+        f'<td style="padding:6px;border-bottom:1px solid #eee;text-align:center;color:#2d7a4f">✓ {r["available"]}</td></tr>'
+        for r in result['results'] if r['ok']
+    )
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:700px;margin:0 auto;padding:20px">
+      <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+        <h2 style="color:#fff;margin:0;font-size:18px">Housekeeping Supply Forecast</h2>
+        <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals · SandersCentral</p>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p style="color:#444;margin:0 0 16px">Based on <strong>{result['reservation_count']} upcoming reservations</strong> across <strong>{result['properties_matched']} properties</strong>.</p>
+        {'<div style="background:#fdecea;padding:12px;border-radius:6px;margin-bottom:16px"><strong style="color:#c0392b">⚠️ '+str(len(shortfalls))+' items need to be ordered before supply runs out.</strong></div>' if shortfalls else '<div style="background:#e8f5ee;padding:12px;border-radius:6px;margin-bottom:16px"><strong style="color:#2d7a4f">✅ All items are sufficiently stocked for the forecast period.</strong></div>'}
+        {'<h3 style="font-size:14px;margin:0 0 8px">Items to Order</h3><table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="background:#fdecea"><th style="padding:8px;text-align:left">Item</th><th style="padding:8px">Need</th><th style="padding:8px">In Stock</th><th style="padding:8px">On Order</th><th style="padding:8px;color:#c0392b">Short By</th></tr>' + shortfall_rows + '</table>' if shortfalls else ''}
+        <h3 style="font-size:14px;margin:16px 0 8px">All Items Summary</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:#f5f5f5"><th style="padding:6px;text-align:left">Item</th><th style="padding:6px">Needed</th><th style="padding:6px">Available</th></tr>
+          {ok_rows}
+        </table>
+        <p style="margin:16px 0 0;font-size:12px;color:#aaa;text-align:center">SandersCentral · ForecastCentral</p>
+      </div>
+    </div>"""
+
+    sent = send_email(subject, body_text, to=SARAH_EMAIL, html_body=html)
+    return jsonify({'success': True, 'email_sent': sent, 'shortfalls': len(shortfalls)})
 
 # ── InventoryCount ────────────────────────────────────────────────────────────
 
