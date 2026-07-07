@@ -17,7 +17,7 @@ ALERT_EMAIL          = 'accountingdepartment@sandersbeachrentals.com'
 HOUSEKEEPING_MANAGER = 'cassie@sandersbeachrentals.com'
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
-FROM_EMAIL = os.environ.get('FROM_EMAIL', 'kristin@sandersbeachrentals.com')
+FROM_EMAIL = os.environ.get('FROM_EMAIL', 'info@sandersbeachrentals.com')
 
 PO_APPROVER_1_EMAIL = 'sabrina@sandersbeachrentals.com'
 PO_APPROVER_1_NAME  = 'Sabrina Renshaw'
@@ -998,7 +998,7 @@ def supply_transaction(sid):
     conn.commit(); alert_sent=False
     if action=='take' and new_qty<=item['low_stock_threshold']:
         body=f"Low stock alert for '{item['name']}'.\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
-        alert_sent=send_email(f"LOW STOCK: {item['name']}",body)
+        alert_sent=send_email(f"LOW STOCK: {item['name']}",body,to=SARAH_EMAIL)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
 
 @app.route('/api/supplies/<int:sid>/qr', methods=['GET'])
@@ -1074,7 +1074,7 @@ def hk_supply_transaction(sid):
     conn.commit(); alert_sent=False
     if action=='take' and new_qty<=item['low_stock_threshold']:
         body=f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
-        alert_sent=send_email(f"LOW STOCK (Housekeeping): {item['name']}",body)
+        alert_sent=send_email(f"LOW STOCK (Housekeeping): {item['name']}",body,to=SARAH_EMAIL)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
 
 @app.route('/api/hk-supplies/<int:sid>/qr', methods=['GET'])
