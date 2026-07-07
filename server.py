@@ -42,6 +42,48 @@ def set_setting(key, value):
     cur.execute("INSERT INTO app_settings (key,value) VALUES (%s,%s) ON CONFLICT (key) DO UPDATE SET value=%s",(key,value,value))
     conn.commit(); cur.close(); conn.close()
 
+def log_audit(area, action, item='', performed_by='', details=''):
+    """Universal audit trail. Call this at the point of every write action
+    across the app so there's always a who/when/what record, independent of
+    whatever module-specific tracking (like staff_name on bag scans) exists."""
+    try:
+        conn=get_db(); cur=conn.cursor()
+        cur.execute("INSERT INTO audit_log (ts,area,action,item,performed_by,details) VALUES (%s,%s,%s,%s,%s,%s)",
+            (now_central(), area, action, item, performed_by or 'Unknown', details))
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e:
+        print(f'[AUDIT LOG FAILED] {area}/{action}: {e}', flush=True)
+
+def resolve_performer(data):
+    """Given a request body, figure out who's doing this action. Prefers an
+    explicit staff_name (sent by logged-in individual-PIN sessions). Falls back
+    to resolving admin_pin/pin against individual staff, then legacy shared PINs."""
+    if data.get('staff_name'):
+        return data['staff_name']
+    pin = str(data.get('admin_pin') or data.get('pin') or '')
+    if pin:
+        staff = check_staff_pin(pin)
+        if staff: return staff['name']
+        role = check_pin(pin)
+        if role: return role.capitalize()
+    return 'Unknown'
+
+def is_admin_pin(pin):
+    """True if this PIN is the legacy shared admin PIN OR belongs to an
+    individual staff member with role='admin'. Use this (not check_pin alone)
+    for every admin-gated route, so individual admin logins always work."""
+    if check_pin(pin) == 'admin': return True
+    staff = check_staff_pin(pin)
+    return bool(staff and staff.get('role') == 'admin')
+
+def resolve_role(pin):
+    """Return the effective role for a PIN — checks individual staff first,
+    then falls back to the legacy shared PINs. Use this (not check_pin alone)
+    for any route gating access by role, so individual-PIN logins always work."""
+    staff = check_staff_pin(pin)
+    if staff: return staff['role']
+    return check_pin(pin)
+
 _DB_URL = (os.environ.get('DATABASE_URL') or
            os.environ.get('DATABASE_PUBLIC_URL') or
            'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
@@ -212,6 +254,10 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY, value TEXT
+        );
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id SERIAL PRIMARY KEY, ts TEXT NOT NULL, area TEXT NOT NULL,
+            action TEXT NOT NULL, item TEXT, performed_by TEXT, details TEXT
         );
         CREATE TABLE IF NOT EXISTS po_requests (
             id SERIAL PRIMARY KEY,
@@ -455,10 +501,13 @@ def cleaner_auth():
 def save_pins():
     data = request.json or {}
     global WAREHOUSE_PIN, ADMIN_PIN, MAINTENANCE_PIN, COORDINATOR_PIN
-    if data.get('warehouse_pin'): WAREHOUSE_PIN = data['warehouse_pin']
-    if data.get('admin_pin'): ADMIN_PIN = data['admin_pin']
-    if data.get('maintenance_pin'): MAINTENANCE_PIN = data['maintenance_pin']
-    if data.get('coordinator_pin'): COORDINATOR_PIN = data['coordinator_pin']
+    changed = []
+    if data.get('warehouse_pin'): WAREHOUSE_PIN = data['warehouse_pin']; changed.append('Warehouse')
+    if data.get('admin_pin'): ADMIN_PIN = data['admin_pin']; changed.append('Admin')
+    if data.get('maintenance_pin'): MAINTENANCE_PIN = data['maintenance_pin']; changed.append('Maintenance')
+    if data.get('coordinator_pin'): COORDINATOR_PIN = data['coordinator_pin']; changed.append('Coordinator')
+    if changed:
+        log_audit('Settings', 'Changed shared PIN(s)', ', '.join(changed), resolve_performer(data))
     return jsonify({'success':True})
 
 # ── Homes ─────────────────────────────────────────────────────────────────────
@@ -478,16 +527,22 @@ def add_home():
     conn=get_db(); cur=conn.cursor()
     try:
         cur.execute('INSERT INTO homes (name,code) VALUES (%s,%s)',(name,code))
-        conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+        conn.commit(); cur.close(); conn.close()
+        log_audit('Homes', 'Added home', code, resolve_performer(data), name)
+        return jsonify({'success':True})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Home already exists'}),409
 
 @app.route('/api/homes/<int:hid>', methods=['DELETE'])
 def delete_home(hid):
-    conn=get_db(); cur=conn.cursor()
-    cur.execute('SELECT COUNT(*) FROM bags WHERE home_id=%s',(hid,)); n=cur.fetchone()[0]
+    data=request.json or {}
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute('SELECT name,code FROM homes WHERE id=%s',(hid,)); home=cur.fetchone()
+    cur.execute('SELECT COUNT(*) FROM bags WHERE home_id=%s',(hid,)); n=cur.fetchone()['count']
     if n>0: cur.close(); conn.close(); return jsonify({'error':'Remove bags first'}),400
-    cur.execute('DELETE FROM homes WHERE id=%s',(hid,)); conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    cur.execute('DELETE FROM homes WHERE id=%s',(hid,)); conn.commit(); cur.close(); conn.close()
+    log_audit('Homes', 'Removed home', home['code'] if home else str(hid), resolve_performer(data), home['name'] if home else '')
+    return jsonify({'success':True})
 
 # ── Bags ──────────────────────────────────────────────────────────────────────
 
@@ -498,7 +553,9 @@ def add_bag():
     conn=get_db(); cur=conn.cursor()
     try:
         cur.execute('INSERT INTO bags (id,home_id,status) VALUES (%s,%s,%s)',(bag_id,home_id,'in'))
-        conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'id':bag_id})
+        conn.commit(); cur.close(); conn.close()
+        log_audit('Homes', 'Added bag', bag_id, resolve_performer(data))
+        return jsonify({'success':True,'id':bag_id})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Bag ID already exists'}),409
 
@@ -639,7 +696,7 @@ def bulk_set_cleaner_emails():
     by normalized name (trim/collapse-whitespace/case-insensitive) and update
     their email. Names that don't match anything are reported back, not guessed."""
     data = request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     entries = data.get('entries', [])
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -661,6 +718,8 @@ def bulk_set_cleaner_emails():
         cur2.execute("UPDATE cleaners SET email=%s WHERE id=%s", (email, cid))
         updated.append(name)
     conn.commit(); cur2.close(); cur.close(); conn.close()
+    if updated:
+        log_audit('Cleaners', 'Bulk email import', f'{len(updated)} cleaners', resolve_performer(data), ', '.join(updated))
     return jsonify({'success': True, 'updated': updated, 'unmatched': unmatched})
 
 @app.route('/api/cleaners', methods=['GET'])
@@ -680,7 +739,9 @@ def add_cleaner():
     conn=get_db(); cur=conn.cursor()
     pin=generate_cleaner_pin(conn)
     cur.execute('INSERT INTO cleaners (name,email,phone,pin) VALUES (%s,%s,%s,%s)',(name,email or None,phone or None,pin))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'pin':pin})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('Cleaners', 'Added cleaner', name, resolve_performer(data))
+    return jsonify({'success':True,'pin':pin})
 
 @app.route('/api/cleaners/<int:cid>', methods=['PUT'])
 def update_cleaner(cid):
@@ -689,21 +750,31 @@ def update_cleaner(cid):
     cur.execute("UPDATE cleaners SET name=%s,email=%s,phone=%s WHERE id=%s",
         (data.get('name','').strip(), data.get('email','').strip() or None,
          data.get('phone','').strip() or None, cid))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('Cleaners', 'Edited cleaner', data.get('name','').strip(), resolve_performer(data))
+    return jsonify({'success':True})
 
 @app.route('/api/cleaners/<int:cid>/reset-pin', methods=['POST'])
 def reset_cleaner_pin(cid):
-    conn=get_db(); cur=conn.cursor()
+    data=request.json or {}
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name FROM cleaners WHERE id=%s",(cid,)); row=cur.fetchone()
     pin=generate_cleaner_pin(conn)
     cur.execute("UPDATE cleaners SET pin=%s WHERE id=%s",(pin,cid))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'pin':pin})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('Cleaners', 'Reset PIN', row['name'] if row else str(cid), resolve_performer(data))
+    return jsonify({'success':True,'pin':pin})
 
 @app.route('/api/cleaners/<int:cid>', methods=['DELETE'])
 def delete_cleaner(cid):
-    conn=get_db(); cur=conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM bags WHERE cleaner_id=%s AND status IN ('out','staged')",(cid,)); n=cur.fetchone()[0]
+    data=request.json or {}
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name FROM cleaners WHERE id=%s",(cid,)); row=cur.fetchone()
+    cur.execute("SELECT COUNT(*) AS count FROM bags WHERE cleaner_id=%s AND status IN ('out','staged')",(cid,)); n=cur.fetchone()['count']
     if n>0: cur.close(); conn.close(); return jsonify({'error':'Cleaner has bags out or staged'}),400
-    cur.execute('UPDATE cleaners SET active=0 WHERE id=%s',(cid,)); conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    cur.execute('UPDATE cleaners SET active=0 WHERE id=%s',(cid,)); conn.commit(); cur.close(); conn.close()
+    log_audit('Cleaners', 'Removed cleaner', row['name'] if row else str(cid), resolve_performer(data))
+    return jsonify({'success':True})
 
 # ── Activity log ──────────────────────────────────────────────────────────────
 
@@ -804,6 +875,11 @@ def export_activity_csv():
         events.append({'ts':r['created_at'] or r['started_at'],'area':'InventoryCentral','action':'Count completed',
             'item':r['areas'],'location':'','person':r['performed_by'] or '','quantity':r['item_count'],'amount':'','notes':notes})
 
+    cur.execute("""SELECT ts, area, action, item, performed_by, details FROM audit_log""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ts'],'area':r['area'],'action':r['action'],'item':r['item'] or '',
+            'location':'','person':r['performed_by'] or '','quantity':'','amount':'','notes':r['details'] or ''})
+
     cur.close(); conn.close()
 
     if start_ts: events = [e for e in events if e['ts'] and e['ts'] >= start_ts]
@@ -877,7 +953,7 @@ def get_supplies():
 @app.route('/api/supplies', methods=['POST'])
 def add_supply():
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
     name=data.get('name','').strip(); category=data.get('category','General').strip()
     quantity=int(data.get('quantity',0)); threshold=int(data.get('low_stock_threshold',5))
     unit=data.get('unit','units').strip()
@@ -887,22 +963,26 @@ def add_supply():
         cur.execute("INSERT INTO supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central()))
         sid=cur.fetchone()['id']; qr=make_supply_qr(sid)
         cur.execute("UPDATE supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
-        conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'id':sid})
+        conn.commit(); cur.close(); conn.close()
+        log_audit('SupplyCentral', 'Added supply item', name, resolve_performer(data))
+        return jsonify({'success':True,'id':sid})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Item name already exists'}),409
 
 @app.route('/api/supplies/<int:sid>', methods=['PUT'])
 def update_supply(sid):
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
     conn=get_db(); cur=conn.cursor()
     cur.execute("UPDATE supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('SupplyCentral', 'Edited supply item', data.get('name',''), resolve_performer(data))
+    return jsonify({'success':True})
 
 @app.route('/api/supplies/<int:sid>/transaction', methods=['POST'])
 def supply_transaction(sid):
     data=request.json or {}
-    role=check_pin(str(data.get('pin','')))
+    role=resolve_role(str(data.get('pin','')))
     if role not in ('admin','maintenance','coordinator'): return jsonify({'error':'Access denied'}),403
     action=data.get('action',''); qty=int(data.get('quantity',1))
     performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
@@ -949,7 +1029,7 @@ def get_hk_supplies():
 @app.route('/api/hk-supplies', methods=['POST'])
 def add_hk_supply():
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
     name=data.get('name','').strip(); category=data.get('category','General').strip()
     quantity=int(data.get('quantity',0)); threshold=int(data.get('low_stock_threshold',5))
     unit=data.get('unit','units').strip()
@@ -959,22 +1039,26 @@ def add_hk_supply():
         cur.execute("INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central()))
         sid=cur.fetchone()['id']; qr=make_hk_supply_qr(sid)
         cur.execute("UPDATE hk_supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
-        conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'id':sid})
+        conn.commit(); cur.close(); conn.close()
+        log_audit('HousekeepingSupplyCentral', 'Added supply item', name, resolve_performer(data))
+        return jsonify({'success':True,'id':sid})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Item name already exists'}),409
 
 @app.route('/api/hk-supplies/<int:sid>', methods=['PUT'])
 def update_hk_supply(sid):
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin': return jsonify({'error':'Admin PIN required'}),403
+    if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
     conn=get_db(); cur=conn.cursor()
     cur.execute("UPDATE hk_supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('HousekeepingSupplyCentral', 'Edited supply item', data.get('name',''), resolve_performer(data))
+    return jsonify({'success':True})
 
 @app.route('/api/hk-supplies/<int:sid>/transaction', methods=['POST'])
 def hk_supply_transaction(sid):
     data=request.json or {}
-    role=check_pin(str(data.get('pin','')))
+    role=resolve_role(str(data.get('pin','')))
     if role not in ('admin','warehouse'): return jsonify({'error':'Access denied'}),403
     action=data.get('action',''); qty=int(data.get('quantity',1))
     performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
@@ -1013,7 +1097,7 @@ def hk_supply_log():
 def seed_hk_supplies():
     """One-time seed of real housekeeping supply inventory. Admin PIN required."""
     data = request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
 
     items = [("Masking Tape", 2, "Maintenance", "rolls"), ("Plastic Stretch Wrap", 4, "Maintenance", "rolls"), ("Bathroom Trash Liners", 2000, "Trash & Liners", "liners"), ("Kitchen Trash Bags", 1100, "Trash & Liners", "bags"), ("10oz Tide Bottles", 96, "Laundry", "bottles"), ("Dishwasher Pod Packs", 1250, "Kitchen", "packs"), ("Kitchen Sponges", 432, "Kitchen", "sponges"), ("3oz Palmolive Bottles", 270, "Kitchen", "bottles"), ("Molton Brown Shampoo", 800, "Guest Amenities", "bottles"), ("Molton Brown Conditioner", 750, "Guest Amenities", "bottles"), ("Molton Brown Body Wash", 500, "Guest Amenities", "bottles"), ("Molton Brown Bar Soap", 480, "Guest Amenities", "bars"), ("Amavida Coffee Packs", 50, "Guest Amenities", "packs"), ("#4 Cone Coffee Filters", 400, "Guest Amenities", "filters"), ("Round Coffee Filters", 1350, "Guest Amenities", "filters"), ("Toilet Paper Rolls", 450, "Guest Amenities", "rolls"), ("Paper Towel Rolls", 174, "Guest Amenities", "rolls"), ("Kitchen Amenity Boxes", 336, "Guest Amenities", "boxes"), ("Laundry Detergent (Gallon)", 2, "Laundry", "gallons"), ("Pledge Cans", 18, "Cleaning Supplies", "cans"), ("Oven Cleaner", 4, "Cleaning Supplies", "bottles"), ("Stainless Steel Cleaner Cans", 7, "Cleaning Supplies", "cans"), ("Bar Keeper's Friend Cans", 3, "Cleaning Supplies", "cans"), ("SOS Scrub Pads", 50, "Cleaning Supplies", "pads"), ("Magic Erasers", 75, "Cleaning Supplies", "erasers"), ("Swiffer Duster Handles", 2, "Cleaning Supplies", "handles"), ("Swiffer Duster Pads", 2, "Cleaning Supplies", "pads"), ("2 Gal Ziploc Bags", 50, "Kitchen", "bags"), ("Large Floor Rollers", 0, "Cleaning Supplies", "rollers"), ("Small Lint Rollers", 21, "Cleaning Supplies", "rollers"), ("Bleach (Gallon)", 6, "Cleaning Supplies", "gallons"), ("White Vinegar (Gallon)", 2, "Cleaning Supplies", "gallons"), ("Kemzyme (Gallons)", 6, "Cleaning Supplies", "gallons"), ("Polishing Cleanser Bottles", 16, "Cleaning Supplies", "bottles"), ("Spor Go (Gallons)", 4, "Cleaning Supplies", "gallons"), ("Odorsorb (Gallons)", 6, "Cleaning Supplies", "gallons"), ("Drop N Go Glass Individual Cartridges", 94, "Cleaning Supplies", "cartridges"), ("Drop N Go Bathroom Cleaner Individual Cartridges", 144, "Cleaning Supplies", "cartridges"), ("Red Trash Bags", 200, "Trash & Liners", "bags"), ("Drop N Go Bathroom Spray Bottles", 1, "Cleaning Supplies", "bottles"), ("Drop N Go Glass Spray Bottles", 1, "Cleaning Supplies", "bottles"), ("Degreaser", 2, "Cleaning Supplies", "bottles")]
@@ -1041,6 +1125,7 @@ def seed_hk_supplies():
         except Exception as e:
             print(f'Seed error for {name}: {e}')
     conn.commit(); cur.close(); conn.close()
+    log_audit('HousekeepingSupplyCentral', 'Reset inventory to master list', f'{inserted} items', resolve_performer(data))
     return jsonify({'success':True, 'inserted':inserted})
 
 
@@ -1122,6 +1207,7 @@ def create_order():
             (order_id, name, matched_id, table if matched_id else None, cases, units_per_case, expected, unit_label, price)
         )
     conn.commit(); cur.close(); conn.close()
+    log_audit('OrdersCentral', 'Placed order', data.get('vendor','').strip() or module, ordered_by, f'{len(items)} item(s)')
     return jsonify({'success':True, 'id':order_id})
 
 @app.route('/api/orders/<int:oid>/receive', methods=['POST'])
@@ -1171,6 +1257,7 @@ def receive_order(oid):
         (ts, received_by, 1 if has_discrepancy else 0, receive_notes or None, oid)
     )
     conn.commit(); cur.close(); conn.close()
+    log_audit('OrdersCentral', 'Received order', order.get('vendor') or order.get('module') or str(oid), received_by, 'Discrepancy noted' if has_discrepancy else '')
     return jsonify({'success':True, 'has_discrepancy':has_discrepancy})
 
 @app.route('/api/orders/<int:oid>/resolve-discrepancy', methods=['POST'])
@@ -1180,19 +1267,23 @@ def resolve_discrepancy(oid):
     conn=get_db(); cur=conn.cursor()
     cur.execute("UPDATE supply_orders SET discrepancy_resolved=1, discrepancy_notes=%s WHERE id=%s", (notes, oid))
     conn.commit(); cur.close(); conn.close()
+    log_audit('OrdersCentral', 'Resolved discrepancy', str(oid), resolve_performer(data), notes)
     return jsonify({'success':True})
 
 @app.route('/api/orders/<int:oid>', methods=['DELETE'])
 def cancel_order(oid):
     """Cancel a pending order (only if not yet received)."""
+    data = request.json or {}
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT status FROM supply_orders WHERE id=%s",(oid,))
+    cur.execute("SELECT status,vendor,module FROM supply_orders WHERE id=%s",(oid,))
     row=cur.fetchone()
     if not row: cur.close(); conn.close(); return jsonify({'error':'Not found'}),404
     if row['status']=='Received': cur.close(); conn.close(); return jsonify({'error':'Cannot cancel a received order'}),400
     cur.execute("DELETE FROM supply_order_items WHERE order_id=%s",(oid,))
     cur.execute("DELETE FROM supply_orders WHERE id=%s",(oid,))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('OrdersCentral', 'Cancelled order', row['vendor'] or row['module'] or str(oid), resolve_performer(data))
+    return jsonify({'success':True})
 
 
 
@@ -1239,7 +1330,7 @@ def get_staff():
 def reveal_staff_pins():
     """Admin-only: returns staff list WITH real PINs included."""
     data = request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT id,name,role,email,active,created_at,pin FROM staff_members ORDER BY role,name")
@@ -1263,7 +1354,7 @@ def sync_known_emails():
     """Admin-only, one-time: backfill emails for staff whose email is missing,
     using the known map above. Does not overwrite an email that's already set."""
     data = request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor()
     updated = []
@@ -1275,6 +1366,8 @@ def sync_known_emails():
         if cur.rowcount > 0:
             updated.append(name)
     conn.commit(); cur.close(); conn.close()
+    if updated:
+        log_audit('Staff', 'Synced known emails', f'{len(updated)} staff', resolve_performer(data), ', '.join(updated))
     return jsonify({'success': True, 'updated': updated})
 
 @app.route('/api/settings/cleaner-emails-enabled', methods=['GET'])
@@ -1286,16 +1379,17 @@ def set_cleaner_emails_setting():
     """Admin-only: turn real overdue-alert emails to cleaners on/off.
     Housekeeping manager always still gets notified either way."""
     data = request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     enabled = bool(data.get('enabled'))
     set_setting('cleaner_emails_enabled', 'true' if enabled else 'false')
+    log_audit('Settings', 'Toggled cleaner emails', 'ON' if enabled else 'OFF', resolve_performer(data))
     return jsonify({'success': True, 'enabled': enabled})
 
 @app.route('/api/staff', methods=['POST'])
 def add_staff():
     data=request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin' and not check_staff_pin(str(data.get('admin_pin',''))) :
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     name=data.get('name','').strip()
     role=data.get('role','warehouse')
@@ -1308,6 +1402,7 @@ def add_staff():
         cur.execute("INSERT INTO staff_members (name,role,pin,email,active,created_at) VALUES (%s,%s,%s,%s,1,%s)",
             (name,role,pin,email,now_central()))
         conn.commit(); cur.close(); conn.close()
+        log_audit('Staff', 'Added staff member', name, resolve_performer(data), f'role: {role}')
         return jsonify({'success':True})
     except Exception as e:
         conn.rollback(); cur.close(); conn.close()
@@ -1316,9 +1411,10 @@ def add_staff():
 @app.route('/api/staff/<int:sid>', methods=['PUT'])
 def update_staff(sid):
     data=request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
-    conn=get_db(); cur=conn.cursor()
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name FROM staff_members WHERE id=%s",(sid,)); existing=cur.fetchone()
     fields=[]; params=[]
     if 'name' in data: fields.append('name=%s'); params.append(data['name'].strip())
     if 'role' in data: fields.append('role=%s'); params.append(data['role'])
@@ -1334,6 +1430,7 @@ def update_staff(sid):
     try:
         cur.execute(f"UPDATE staff_members SET {','.join(fields)} WHERE id=%s", params)
         conn.commit(); cur.close(); conn.close()
+        log_audit('Staff', 'Edited staff member', (existing['name'] if existing else str(sid)), resolve_performer(data), ', '.join(fields))
         return jsonify({'success':True})
     except Exception as e:
         conn.rollback(); cur.close(); conn.close()
@@ -1343,21 +1440,23 @@ def update_staff(sid):
 def delete_staff(sid):
     """Admin-only: permanently remove a single staff record (e.g. an accidental duplicate)."""
     data = request.json or {}
-    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
-    conn=get_db(); cur=conn.cursor()
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name FROM staff_members WHERE id=%s",(sid,)); existing=cur.fetchone()
     cur.execute("DELETE FROM staff_members WHERE id=%s", (sid,))
     deleted = cur.rowcount
     conn.commit(); cur.close(); conn.close()
     if not deleted:
         return jsonify({'error':'Staff member not found'}), 404
+    log_audit('Staff', 'Removed staff member', existing['name'] if existing else str(sid), resolve_performer(data))
     return jsonify({'success':True})
 
 @app.route('/api/seed-staff', methods=['POST'])
 def seed_staff():
     """Seed staff members. Admin PIN required."""
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor()
     cur.execute("DELETE FROM staff_members")
@@ -1371,6 +1470,7 @@ def seed_staff():
         except Exception as e:
             print(f"Seed error for {name}: {e}")
     conn.commit(); cur.close(); conn.close()
+    log_audit('Staff', 'Reset to master list', f'{inserted} staff members', resolve_performer({'pin':data.get('pin','')}))
     return jsonify({'success':True,'inserted':inserted})
 
 # ── StoreCentral ──────────────────────────────────────────────────────────────
@@ -1449,7 +1549,7 @@ def get_store_items():
 @app.route('/api/store/items', methods=['POST'])
 def add_store_item():
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     name=data.get('name','').strip()
     if not name: return jsonify({'error':'Name required'}), 400
@@ -1458,17 +1558,19 @@ def add_store_item():
         (name, data.get('category','General'), int(data.get('quantity',0)), float(data.get('price',0)), now_central()))
     sid=cur.fetchone()['id']
     conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Added store item', name, resolve_performer(data))
     return jsonify({'success':True,'id':sid})
 
 @app.route('/api/store/items/<int:sid>', methods=['PUT'])
 def update_store_item(sid):
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor()
     cur.execute("UPDATE store_items SET name=%s,category=%s,price=%s WHERE id=%s",
         (data.get('name'), data.get('category','General'), float(data.get('price',0)), sid))
     conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Edited store item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
 
 @app.route('/api/store/checkout', methods=['POST'])
@@ -1627,7 +1729,7 @@ def check_store_overdue():
 def seed_store():
     """Seed store inventory. Admin PIN required."""
     data=request.json or {}
-    if check_pin(str(data.get('pin',''))) != 'admin':
+    if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor()
     cur.execute("DELETE FROM store_transactions")
@@ -1639,6 +1741,7 @@ def seed_store():
             (name,category,qty,price,now_central()))
         inserted+=1
     conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Reset inventory to master list', f'{inserted} items', resolve_performer(data))
     return jsonify({'success':True,'inserted':inserted})
 
 # ── ForecastCentral ───────────────────────────────────────────────────────────
@@ -1856,6 +1959,7 @@ def upload_pack_list():
         """, (addr, data['property_name'], json.dumps(data['supplies']), now_central()))
         inserted += 1
     conn.commit(); cur.close(); conn.close()
+    log_audit('ForecastCentral', 'Uploaded pack list', f'{inserted} properties', request.form.get('staff_name','Unknown'))
     return jsonify({'success': True, 'properties_loaded': inserted})
 
 @app.route('/api/forecast/upload-reservations', methods=['POST'])
@@ -1878,6 +1982,7 @@ def upload_reservations():
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (r['lease_id'], r['arrive'], r['depart'], r['unit'], r['area'], uploaded_at))
     conn.commit(); cur.close(); conn.close()
+    log_audit('ForecastCentral', 'Uploaded reservations', f'{len(reservations)} reservations', request.form.get('staff_name','Unknown'))
     return jsonify({'success': True, 'reservations_loaded': len(reservations)})
 
 @app.route('/api/forecast/run', methods=['GET'])
@@ -2056,6 +2161,7 @@ def email_sarah_forecast():
     </div>"""
 
     sent = send_email(subject, body_text, to=SARAH_EMAIL, html_body=html)
+    log_audit('ForecastCentral', 'Emailed Sarah forecast', f'{len(shortfalls)} shortfalls', resolve_performer(request.json or {}))
     return jsonify({'success': True, 'email_sent': sent, 'shortfalls': len(shortfalls)})
 
 
