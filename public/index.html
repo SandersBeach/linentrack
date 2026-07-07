@@ -1232,7 +1232,7 @@ async function renderInventoryCount() {
     pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
       pastCounts.slice(0,10).map(c=>{
         const variances = c.variances || 0;
-        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at} — ${c.areas}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button></div>`;
+        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at} — ${c.areas}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button></div>`;
       }).join('') + '</div>';
   }
   document.getElementById('main-content').innerHTML = `
@@ -1367,7 +1367,7 @@ async function finalizeCount() {
     }
   });
   const totalCounted = s.items.length;
-  const payload = { areas:s.areas.join(', '), started_at:s.startedAt, item_count:totalCounted, variances:variances.length, details:JSON.stringify({counts:s.counts,items:s.items,variances}) };
+  const payload = { areas:s.areas.join(', '), started_at:s.startedAt, item_count:totalCounted, variances:variances.length, details:JSON.stringify({counts:s.counts,items:s.items,variances}), performed_by:_currentStaffName };
   try {
     const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
@@ -1382,7 +1382,7 @@ function renderCountReport(data) {
   const overs = v.filter(x=>x.diff>0);
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
-      <div style="font-size:15px;font-weight:600">📋 Count Report — ${data.started_at}</div>
+      <div style="font-size:15px;font-weight:600">📋 Count Report — ${data.started_at}${data.performed_by?` <span style="font-size:12px;color:var(--gray-400);font-weight:400">by ${data.performed_by}</span>`:''}</div>
       <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})">📧 Email to accounting</button>
     </div>
     <div class="report-stat-grid">
