@@ -1,5 +1,5 @@
-import os, json, qrcode, io, base64, random, string, urllib.request, threading, time
-from flask import Flask, request, jsonify, send_from_directory
+import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv
+from flask import Flask, request, jsonify, send_from_directory, Response
 from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
@@ -719,6 +719,105 @@ def get_activity():
         FROM loaner_transactions lt LEFT JOIN homes h ON h.id=lt.home_id LEFT JOIN loaner_staff s ON s.id=lt.staff_id
         ORDER BY ts DESC LIMIT 500""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/activity/export', methods=['GET'])
+def export_activity_csv():
+    """Full-history CSV export covering activity from every module — LinenCentral,
+    LoanerCentral, SupplyCentral, HousekeepingSupplyCentral, StoreCentral,
+    OrdersCentral, POCentral, and InventoryCentral — optionally bounded by
+    ?start=YYYY-MM-DD and/or ?end=YYYY-MM-DD. No row cap."""
+    start = request.args.get('start', '').strip()
+    end = request.args.get('end', '').strip()
+    start_ts = start + " 00:00:00" if start else None
+    end_ts = end + " 23:59:59" if end else None
+
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    events = []
+
+    cur.execute("""SELECT t.timestamp AS ts, t.action, t.bag_id, h.name AS home_name,
+        t.staff_name, c.name AS cleaner_name, t.notes
+        FROM transactions t JOIN homes h ON h.id=t.home_id LEFT JOIN cleaners c ON c.id=t.cleaner_id""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ts'],'area':'LinenCentral','action':r['action'],'item':r['bag_id'],
+            'location':r['home_name'] or '','person':r['staff_name'] or r['cleaner_name'] or '',
+            'quantity':'','amount':'','notes':r['notes'] or ''})
+
+    cur.execute("""SELECT lt.timestamp AS ts, lt.action, lt.loaner_id, h.name AS home_name,
+        lt.performed_by_name, s.name AS staff_name, lt.notes
+        FROM loaner_transactions lt LEFT JOIN homes h ON h.id=lt.home_id LEFT JOIN loaner_staff s ON s.id=lt.staff_id""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ts'],'area':'LoanerCentral','action':r['action'],'item':r['loaner_id'],
+            'location':r['home_name'] or '','person':r['performed_by_name'] or r['staff_name'] or '',
+            'quantity':'','amount':'','notes':r['notes'] or ''})
+
+    cur.execute("""SELECT st.timestamp AS ts, st.action, si.name AS item_name, st.performed_by, st.quantity, st.notes
+        FROM supply_transactions st JOIN supply_items si ON si.id=st.supply_id""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ts'],'area':'SupplyCentral','action':(r['action'] or '').capitalize(),'item':r['item_name'],
+            'location':'','person':r['performed_by'] or '','quantity':r['quantity'],'amount':'','notes':r['notes'] or ''})
+
+    cur.execute("""SELECT st.timestamp AS ts, st.action, si.name AS item_name, st.performed_by, st.quantity, st.notes
+        FROM hk_supply_transactions st JOIN hk_supply_items si ON si.id=st.supply_id""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ts'],'area':'HousekeepingSupplyCentral','action':(r['action'] or '').capitalize(),'item':r['item_name'],
+            'location':'','person':r['performed_by'] or '','quantity':r['quantity'],'amount':'','notes':r['notes'] or ''})
+
+    cur.execute("""SELECT st.timestamp AS ts, st.action, si.name AS item_name, st.property_address,
+        st.performed_by, st.quantity, st.notes, st.transaction_type
+        FROM store_transactions st JOIN store_items si ON si.id=st.item_id""")
+    for r in cur.fetchall():
+        notes = r['notes'] or ''
+        if r['transaction_type']: notes = (notes + f" [{r['transaction_type']}]").strip()
+        events.append({'ts':r['ts'],'area':'StoreCentral','action':r['action'],'item':r['item_name'],
+            'location':r['property_address'] or '','person':r['performed_by'] or '',
+            'quantity':r['quantity'],'amount':'','notes':notes})
+
+    cur.execute("""SELECT module, ordered_by, vendor, notes, ordered_at, received_at, received_by,
+        has_discrepancy, discrepancy_notes FROM supply_orders""")
+    for r in cur.fetchall():
+        events.append({'ts':r['ordered_at'],'area':'OrdersCentral','action':'Ordered',
+            'item':r['vendor'] or r['module'] or '','location':r['module'] or '','person':r['ordered_by'] or '',
+            'quantity':'','amount':'','notes':r['notes'] or ''})
+        if r['received_at']:
+            notes = r['discrepancy_notes'] or ''
+            if r['has_discrepancy']: notes = ('Discrepancy noted. ' + notes).strip()
+            events.append({'ts':r['received_at'],'area':'OrdersCentral','action':'Received',
+                'item':r['vendor'] or r['module'] or '','location':r['module'] or '','person':r['received_by'] or '',
+                'quantity':'','amount':'','notes':notes})
+
+    cur.execute("""SELECT employee_name, vendor, amount, category, description, status,
+        approver_notes, approved_by, submitted_at, decided_at FROM po_requests""")
+    for r in cur.fetchall():
+        events.append({'ts':r['submitted_at'],'area':'POCentral','action':'Submitted',
+            'item':r['vendor'],'location':r['category'] or '','person':r['employee_name'] or '',
+            'quantity':'','amount':r['amount'],'notes':r['description'] or ''})
+        if r['decided_at']:
+            events.append({'ts':r['decided_at'],'area':'POCentral','action':r['status'],
+                'item':r['vendor'],'location':r['category'] or '','person':r['approved_by'] or '',
+                'quantity':'','amount':r['amount'],'notes':r['approver_notes'] or ''})
+
+    cur.execute("""SELECT areas, started_at, item_count, variances, details, created_at FROM inventory_counts""")
+    for r in cur.fetchall():
+        notes = f"{r['variances']} variance(s)"
+        if r['details']: notes += f" — {r['details']}"
+        events.append({'ts':r['created_at'] or r['started_at'],'area':'InventoryCentral','action':'Count completed',
+            'item':r['areas'],'location':'','person':'','quantity':r['item_count'],'amount':'','notes':notes})
+
+    cur.close(); conn.close()
+
+    if start_ts: events = [e for e in events if e['ts'] and e['ts'] >= start_ts]
+    if end_ts: events = [e for e in events if e['ts'] and e['ts'] <= end_ts]
+    events.sort(key=lambda e: e['ts'] or '', reverse=True)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Date/Time', 'Area', 'Action', 'Item', 'Location/Category', 'Person', 'Quantity', 'Amount', 'Notes'])
+    for e in events:
+        writer.writerow([e['ts'], e['area'], e['action'], e['item'], e['location'], e['person'], e['quantity'], e['amount'], e['notes']])
+
+    filename = f"activity_log_{start or 'all'}_to_{end or now_central()[:10]}.csv"
+    return Response(output.getvalue(), mimetype='text/csv',
+                     headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 # ── Maintenance staff ─────────────────────────────────────────────────────────
 
