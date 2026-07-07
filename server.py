@@ -217,6 +217,9 @@ def init_db():
         "ALTER TABLE bags ADD COLUMN IF NOT EXISTS staged_at TEXT",
         "ALTER TABLE bags ADD COLUMN IF NOT EXISTS picked_up_at TEXT",
         "ALTER TABLE bags ADD COLUMN IF NOT EXISTS overdue_alerted INTEGER DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS staff_name TEXT",
+        "ALTER TABLE loaner_transactions ADD COLUMN IF NOT EXISTS performed_by_name TEXT",
+        "ALTER TABLE loaners ADD COLUMN IF NOT EXISTS checked_out_by TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e: print(f'Migration note: {e}')
@@ -493,7 +496,7 @@ def get_bag(bag_id):
 @app.route('/api/bag/<path:bag_id>/checkout', methods=['POST'])
 def checkout(bag_id):
     """Linen attendant stages a bag for a cleaner (status: in → staged)."""
-    data=request.json or {}; cleaner_id=data.get('cleaner_id')
+    data=request.json or {}; cleaner_id=data.get('cleaner_id'); staff_name=data.get('staff_name','').strip()
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT b.*,h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id WHERE b.id=%s",(bag_id.upper(),))
     bag=cur.fetchone()
@@ -501,7 +504,7 @@ def checkout(bag_id):
     if bag['status'] in ('out','staged'): cur.close(); conn.close(); return jsonify({'error':'Already staged or checked out'}),400
     ts=now_central()
     cur.execute("UPDATE bags SET status='staged',cleaner_id=%s,staged_at=%s,picked_up_at=NULL,overdue_alerted=0 WHERE id=%s",(cleaner_id,ts,bag_id.upper()))
-    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp) VALUES (%s,%s,%s,'Staged',%s)",(bag_id.upper(),bag['home_id'],cleaner_id,ts))
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,staff_name) VALUES (%s,%s,%s,'Staged',%s,%s)",(bag_id.upper(),bag['home_id'],cleaner_id,ts,staff_name or None))
     conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'home':bag['home_name'],'status':'staged'})
 
 @app.route('/api/bag/<path:bag_id>/pickup', methods=['POST'])
@@ -535,14 +538,14 @@ def pickup_bag(bag_id):
 
 @app.route('/api/bag/<path:bag_id>/checkin', methods=['POST'])
 def checkin(bag_id):
-    data=request.json or {}; notes=data.get('notes','')
+    data=request.json or {}; notes=data.get('notes',''); staff_name=data.get('staff_name','').strip()
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT b.*,h.name AS home_name,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s",(bag_id.upper(),))
     bag=cur.fetchone()
     if not bag: cur.close(); conn.close(); return jsonify({'error':'Bag not found'}),404
     if bag['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already checked in'}),400
     ts=now_central()
-    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes) VALUES (%s,%s,%s,'Returned',%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes))
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,'Returned',%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None))
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
     conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—'})
 
@@ -641,11 +644,11 @@ def get_activity():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT t.id,'bag' AS activity_type, t.bag_id, h.name AS home_name,
-               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes
+               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes, t.staff_name
         FROM transactions t JOIN homes h ON h.id=t.home_id LEFT JOIN cleaners c ON c.id=t.cleaner_id
         UNION ALL
         SELECT lt.id,'loaner' AS activity_type, lt.loaner_id AS bag_id, h.name AS home_name,
-               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes
+               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes, lt.performed_by_name AS staff_name
         FROM loaner_transactions lt LEFT JOIN homes h ON h.id=lt.home_id LEFT JOIN loaner_staff s ON s.id=lt.staff_id
         ORDER BY ts DESC LIMIT 500""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
@@ -670,29 +673,30 @@ def get_loaners():
 
 @app.route('/api/loaner/<path:loaner_id>/deploy', methods=['POST'])
 def deploy_loaner(loaner_id):
-    data=request.json or {}; staff_id=data.get('staff_id'); home_id=data.get('home_id')
+    data=request.json or {}; staff_id=data.get('staff_id'); home_id=data.get('home_id'); performed_by_name=data.get('staff_name','').strip()
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT l.*,s.name AS sname,h.name AS hname FROM loaners l LEFT JOIN loaner_staff s ON s.id=%s LEFT JOIN homes h ON h.id=%s WHERE l.id=%s",(staff_id,home_id,loaner_id.upper()))
     row=cur.fetchone()
     if not row: cur.close(); conn.close(); return jsonify({'error':'Item not found'}),404
     if row['status']=='out': cur.close(); conn.close(); return jsonify({'error':'Already deployed'}),400
     ts=now_central()
-    cur.execute("UPDATE loaners SET status='out',staff_id=%s,home_id=%s,checked_out=%s WHERE id=%s",(staff_id,home_id,ts,loaner_id.upper()))
-    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp) VALUES (%s,%s,%s,'Deployed',%s)",(loaner_id.upper(),staff_id,home_id,ts))
+    cur.execute("UPDATE loaners SET status='out',staff_id=%s,home_id=%s,checked_out=%s,checked_out_by=%s WHERE id=%s",(staff_id,home_id,ts,performed_by_name or None,loaner_id.upper()))
+    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Deployed',%s,%s)",(loaner_id.upper(),staff_id,home_id,ts,performed_by_name or None))
     conn.commit()
     staff_name=row.get('sname','Staff'); home_name=row.get('hname','Unknown')
-    cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'staff':staff_name,'home':home_name})
+    cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'staff':performed_by_name or staff_name,'home':home_name})
 
 @app.route('/api/loaner/<path:loaner_id>/retrieve', methods=['POST'])
 def retrieve_loaner(loaner_id):
+    data=request.json or {}; performed_by_name=data.get('staff_name','').strip()
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT l.*,h.name AS home_name FROM loaners l LEFT JOIN homes h ON h.id=l.home_id WHERE l.id=%s",(loaner_id.upper(),))
     row=cur.fetchone()
     if not row: cur.close(); conn.close(); return jsonify({'error':'Item not found'}),404
     if row['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already in warehouse'}),400
     ts=now_central()
-    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp) VALUES (%s,%s,%s,'Retrieved',%s)",(loaner_id.upper(),row['staff_id'],row['home_id'],ts))
-    cur.execute("UPDATE loaners SET status='in',staff_id=NULL,home_id=NULL,checked_out=NULL WHERE id=%s",(loaner_id.upper(),))
+    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Retrieved',%s,%s)",(loaner_id.upper(),row['staff_id'],row['home_id'],ts,performed_by_name or None))
+    cur.execute("UPDATE loaners SET status='in',staff_id=NULL,home_id=NULL,checked_out=NULL,checked_out_by=NULL WHERE id=%s",(loaner_id.upper(),))
     conn.commit(); home_name=row.get('home_name','Unknown'); cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'home':home_name})
 
 # ── SupplyTrack ───────────────────────────────────────────────────────────────
