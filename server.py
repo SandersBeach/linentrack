@@ -220,9 +220,12 @@ def init_db():
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS staff_name TEXT",
         "ALTER TABLE loaner_transactions ADD COLUMN IF NOT EXISTS performed_by_name TEXT",
         "ALTER TABLE loaners ADD COLUMN IF NOT EXISTS checked_out_by TEXT",
+        "ALTER TABLE loaners ADD COLUMN IF NOT EXISTS checked_out TEXT",
     ]:
         try: cur.execute(col_sql)
-        except Exception as e: print(f'Migration note: {e}')
+        except Exception as e:
+            print(f'Migration note: {e}')
+            conn.rollback()
     conn.commit(); cur.close(); conn.close()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
