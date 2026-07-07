@@ -1058,7 +1058,7 @@ def staff_auth():
     pin = str(data.get('pin', ''))
     staff = check_staff_pin(pin)
     if staff:
-        return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id']})
+        return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id'], 'email': staff.get('email') or ''})
     legacy_role = check_pin(pin)
     if legacy_role:
         return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'is_master': legacy_role == 'admin'})
@@ -1081,6 +1081,37 @@ def reveal_staff_pins():
     cur.execute("SELECT id,name,role,email,active,created_at,pin FROM staff_members ORDER BY role,name")
     rows=cur.fetchall(); cur.close(); conn.close()
     return jsonify(rows)
+
+# One-time known emails, carried over from the old hardcoded inspector list,
+# used to backfill staff_members.email so overdue-loan alerts keep working
+# once StoreCentral switches to login-based attribution.
+KNOWN_STAFF_EMAILS = {
+    "Laura Durrance": "laura@sandersbeachrentals.com",
+    "Stephanie Pierantoni": "stephanie@sandersbeachrentals.com",
+    "Alexis Rains": "alexis@sandersbeachrentals.com",
+    "Dawn Bailey": "dawn@sandersbeachrentals.com",
+    "Cassie Sloan": "cassie@sandersbeachrentals.com",
+    "Micah Haigler": "micah@sandersbeachrentals.com",
+}
+
+@app.route('/api/staff/sync-known-emails', methods=['POST'])
+def sync_known_emails():
+    """Admin-only, one-time: backfill emails for staff whose email is missing,
+    using the known map above. Does not overwrite an email that's already set."""
+    data = request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    updated = []
+    for name, email in KNOWN_STAFF_EMAILS.items():
+        cur.execute(
+            "UPDATE staff_members SET email=%s WHERE name=%s AND (email IS NULL OR email='')",
+            (email, name)
+        )
+        if cur.rowcount > 0:
+            updated.append(name)
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'updated': updated})
 
 @app.route('/api/staff', methods=['POST'])
 def add_staff():
