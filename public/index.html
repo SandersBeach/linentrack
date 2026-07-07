@@ -559,14 +559,14 @@ async function processScan() {
     if (!cleaner_id) { scanState.sessionLog.push({id, home:'—', msg:'Select a cleaner first', error:true, action:'out'}); renderSessionLog(); focusScanInput(); return; }
     scanState.selectedCleaner = cleaner_id;
     try {
-      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cleaner_id: parseInt(cleaner_id)}) });
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cleaner_id: parseInt(cleaner_id), staff_name: _currentStaffName}) });
       const data = await r.json();
       if (r.ok) { const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name||''; scanState.sessionLog.push({id, home:data.home, msg:`Staged for ${cname} — awaiting pickup`, error:false, action:'out'}); }
       else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'}); }
     } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'}); }
   } else {
     try {
-      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:''}) });
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:'', staff_name: _currentStaffName}) });
       const data = await r.json();
       if (r.ok) { scanState.sessionLog.push({id, home:data.home, msg:`Returned by ${data.cleaner}`, error:false, action:'in'}); }
       else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'in'}); }
@@ -652,7 +652,7 @@ async function renderLog() {
   const log = await fetch('/api/activity').then(r => r.json());
   if (!log.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No activity yet</div>'; return; }
   let html = '<div class="card" style="padding:0.75rem 1.25rem">';
-  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
+  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
   html += '</div>';
   document.getElementById('main-content').innerHTML = html;
 }
@@ -898,9 +898,9 @@ async function processLoanerScan() {
     if(!staff_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a staff member first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
     if(!home_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a home first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
     loanerScanState.selectedStaff=staff_id;
-    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_id:parseInt(staff_id),home_id:parseInt(home_id)})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Deployed to ${data.home} by ${data.staff}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_id:parseInt(staff_id),home_id:parseInt(home_id),staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Deployed to ${data.home} by ${data.staff}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
   }else{
-    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:''})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Retrieved from ${data.home}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:'',staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Retrieved from ${data.home}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
   }
   renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus();
 }
@@ -915,7 +915,7 @@ async function renderLoanerStatus() {
   const loaners=await fetch('/api/loaners').then(r=>r.json());
   const out=loaners.filter(l=>l.status==='out'); const inW=loaners.filter(l=>l.status==='in');
   let html=`<div class="stat-grid"><div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div></div>`;
-  if(out.length){html+='<div class="card"><div class="card-title">Currently deployed</div>';out.forEach(l=>{const since=l.deployed_at?new Date(l.deployed_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${l.staff_name?' · '+l.staff_name:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
+  if(out.length){html+='<div class="card"><div class="card-title">Currently deployed</div>';out.forEach(l=>{const since=l.deployed_at?new Date(l.deployed_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';const who=l.checked_out_by||l.staff_name;html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${who?' · '+who:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
   if(inW.length){html+='<div class="card"><div class="card-title">At warehouse</div>';const cats={};inW.forEach(l=>{if(!cats[l.category])cats[l.category]=[];cats[l.category].push(l);});Object.entries(cats).sort().forEach(([cat,items])=>{html+=`<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;items.forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><span class="badge badge-in">In</span></div>`;});});html+='</div>';}
   document.getElementById('main-content').innerHTML=html;
 }
@@ -925,7 +925,7 @@ async function renderLoanerLog() {
   const loanerLog=log.filter(e=>e.activity_type==='loaner');
   if(!loanerLog.length){document.getElementById('main-content').innerHTML='<div class="empty">No loaner activity yet</div>';return;}
   let html='<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
-  loanerLog.forEach(e=>{const isReturn=e.action==='Retrieved';html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div><div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}</div></div></div>`;});
+  loanerLog.forEach(e=>{const isReturn=e.action==='Retrieved';html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div><div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}</div></div></div>`;});
   html+='</div>'; document.getElementById('main-content').innerHTML=html;
 }
 
