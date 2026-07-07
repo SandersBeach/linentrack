@@ -243,6 +243,7 @@ def init_db():
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_approved_by TEXT",
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_notes TEXT",
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
+        "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS performed_by TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -796,12 +797,12 @@ def export_activity_csv():
                 'item':r['vendor'],'location':r['category'] or '','person':r['approved_by'] or '',
                 'quantity':'','amount':r['amount'],'notes':r['approver_notes'] or ''})
 
-    cur.execute("""SELECT areas, started_at, item_count, variances, details, created_at FROM inventory_counts""")
+    cur.execute("""SELECT areas, started_at, item_count, variances, details, created_at, performed_by FROM inventory_counts""")
     for r in cur.fetchall():
         notes = f"{r['variances']} variance(s)"
         if r['details']: notes += f" — {r['details']}"
         events.append({'ts':r['created_at'] or r['started_at'],'area':'InventoryCentral','action':'Count completed',
-            'item':r['areas'],'location':'','person':'','quantity':r['item_count'],'amount':'','notes':notes})
+            'item':r['areas'],'location':'','person':r['performed_by'] or '','quantity':r['item_count'],'amount':'','notes':notes})
 
     cur.close(); conn.close()
 
@@ -2108,15 +2109,15 @@ def pack_home():
 @app.route('/api/inventory-counts', methods=['GET'])
 def get_inventory_counts():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,areas,started_at,item_count,variances,created_at FROM inventory_counts ORDER BY created_at DESC LIMIT 50")
+    cur.execute("SELECT id,areas,started_at,item_count,variances,created_at,performed_by FROM inventory_counts ORDER BY created_at DESC LIMIT 50")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
 @app.route('/api/inventory-counts', methods=['POST'])
 def save_inventory_count():
     data=request.json or {}
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("INSERT INTO inventory_counts (areas,started_at,item_count,variances,details,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-        (data.get('areas',''), data.get('started_at',''), int(data.get('item_count',0)), int(data.get('variances',0)), data.get('details','{}'), now_central()))
+    cur.execute("INSERT INTO inventory_counts (areas,started_at,item_count,variances,details,created_at,performed_by) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (data.get('areas',''), data.get('started_at',''), int(data.get('item_count',0)), int(data.get('variances',0)), data.get('details','{}'), now_central(), data.get('performed_by','').strip() or None))
     row=cur.fetchone(); conn.commit(); cur.close(); conn.close(); return jsonify({'id':row['id']})
 
 @app.route('/api/inventory-counts/<int:cid>', methods=['GET'])
@@ -2134,7 +2135,7 @@ def email_inventory_count(cid):
     cur.close(); conn.close()
     if not row: return jsonify({'error':'Not found'}),404
     details=json.loads(row['details'] or '{}'); variances=details.get('variances',[])
-    lines=['SBR Linens — Inventory Count Report','='*40,f"Date: {row['started_at']}","Areas counted: "+row['areas'],f"Total items counted: {row['item_count']}",f"Variances found: {row['variances']}",""]
+    lines=['SBR Linens — Inventory Count Report','='*40,f"Date: {row['started_at']}","Areas counted: "+row['areas'],f"Counted by: {row.get('performed_by') or 'Not recorded'}",f"Total items counted: {row['item_count']}",f"Variances found: {row['variances']}",""]
     if variances:
         lines.append("VARIANCES:")
         for v in variances:
