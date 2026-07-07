@@ -1160,6 +1160,20 @@ def update_staff(sid):
         conn.rollback(); cur.close(); conn.close()
         return jsonify({'error':'PIN already in use by another staff member'}), 409
 
+@app.route('/api/staff/<int:sid>', methods=['DELETE'])
+def delete_staff(sid):
+    """Admin-only: permanently remove a single staff record (e.g. an accidental duplicate)."""
+    data = request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("DELETE FROM staff_members WHERE id=%s", (sid,))
+    deleted = cur.rowcount
+    conn.commit(); cur.close(); conn.close()
+    if not deleted:
+        return jsonify({'error':'Staff member not found'}), 404
+    return jsonify({'success':True})
+
 @app.route('/api/seed-staff', methods=['POST'])
 def seed_staff():
     """Seed staff members. Admin PIN required."""
