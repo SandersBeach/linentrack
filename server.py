@@ -1063,6 +1063,17 @@ def get_staff():
     rows=cur.fetchall(); cur.close(); conn.close()
     return jsonify(rows)
 
+@app.route('/api/staff/reveal', methods=['POST'])
+def reveal_staff_pins():
+    """Admin-only: returns staff list WITH real PINs included."""
+    data = request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,name,role,email,active,created_at,pin FROM staff_members ORDER BY role,name")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
 @app.route('/api/staff', methods=['POST'])
 def add_staff():
     data=request.json or {}
