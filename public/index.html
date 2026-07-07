@@ -662,7 +662,7 @@ async function renderLog() {
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">From (optional)</label><input type="date" id="log-export-start"></div>
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">To (optional)</label><input type="date" id="log-export-end"></div>
     <button class="btn btn-primary" onclick="exportActivityCSV()">📥 Export CSV</button>
-    <div style="font-size:11px;color:var(--gray-400);width:100%">This screen only shows linen bag & loaner activity (${log.length} most recent). The CSV export covers <strong>everything</strong> — bags, loaners, supplies, HK supplies, StoreCentral, orders, POs, and inventory counts — for the date range you pick (or all-time if left blank).</div>
+    <div style="font-size:11px;color:var(--gray-400);width:100%">This screen only shows linen bag & loaner activity (${log.length} most recent). The CSV export covers <strong>everything</strong> — bags, loaners, supplies, HK supplies, StoreCentral, orders, POs, inventory counts, and every admin action (adding/editing homes, cleaners, staff, catalog items, PIN changes, settings toggles) — for the date range you pick (or all-time if left blank).</div>
   </div>`;
   if (!log.length) { html += '<div class="empty">No activity yet</div>'; document.getElementById('main-content').innerHTML = html; return; }
   html += '<div class="card" style="padding:0.75rem 1.25rem">';
@@ -786,7 +786,7 @@ async function addCleaner() {
   const email=document.getElementById('new-cleaner-email')?.value?.trim();
   const phone=document.getElementById('new-cleaner-phone')?.value?.trim();
   if(!name){alert('Name is required');return;}
-  const r=await fetch('/api/cleaners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone})});
+  const r=await fetch('/api/cleaners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone,staff_name:_currentStaffName})});
   const d=await r.json();
   if(!r.ok){alert(d.error);return;}
   const msg=document.getElementById('add-cleaner-msg');
@@ -806,19 +806,19 @@ async function saveCleanerEdit() {
   const email=document.getElementById('edit-cleaner-email').value.trim();
   const phone=document.getElementById('edit-cleaner-phone').value.trim();
   if(!name){alert('Name required');return;}
-  const r=await fetch('/api/cleaners/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone})});
+  const r=await fetch('/api/cleaners/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,phone,staff_name:_currentStaffName})});
   if(!r.ok){const d=await r.json();alert(d.error);return;}
   document.getElementById('modal-cleaner-edit').style.display='none';
   renderCleaners();
 }
 async function resetPin(id,name) {
   if(!confirm(`Reset PIN for ${name}? Their current PIN will stop working immediately.`))return;
-  const r=await fetch('/api/cleaners/'+id+'/reset-pin',{method:'POST'});
+  const r=await fetch('/api/cleaners/'+id+'/reset-pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})});
   const d=await r.json();
   if(d.pin)alert(`New PIN for ${name}: ${d.pin}\n\nMake sure to give them this new PIN!`);
   renderCleaners();
 }
-async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/cleaners/'+id,{method:'DELETE'}); const d=await r.json(); if(!r.ok)alert(d.error); renderCleaners(); }
+async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/cleaners/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok)alert(d.error); renderCleaners(); }
 
 // ── Settings Tab ───────────────────────────────────────────────────────────────
 async function renderSettings() {
@@ -913,12 +913,12 @@ async function seedHKSupplies() {
 async function savePins() {
   const w=document.getElementById('wpin')?.value; const a=document.getElementById('apin')?.value; const m=document.getElementById('mpin')?.value; const c=document.getElementById('cpin')?.value;
   if((w&&w.length!==4)||(a&&a.length!==4)||(m&&m.length!==4)||(c&&c.length!==4)){alert('PINs must be exactly 4 digits');return;}
-  await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined})});
+  await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined,staff_name:_currentStaffName})});
   document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
-async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
-async function deleteHome(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/homes/'+id,{method:'DELETE'}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
-async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){alert('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id)})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} document.getElementById('bag-msg').textContent=`✓ Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
+async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+async function deleteHome(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/homes/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){alert('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id),staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} document.getElementById('bag-msg').textContent=`✓ Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
 
 document.addEventListener('click', e => { if(currentTab==='scan'&&!e.target.closest('input, select, button'))document.getElementById('scan-input')?.focus(); });
 
@@ -1668,8 +1668,7 @@ function openReceiveModal(orderId) {
       <h3>Receive Order #${order.id}</h3>
       <p style="font-size:13px;color:var(--gray-400);margin-bottom:1rem">Enter the actual quantity received for each item. Defaults to what was expected — change if different.</p>
       ${rows}
-      <label style="margin-top:1rem">Your name</label>
-      <input type="text" id="recv-by" placeholder="Who is checking this in?">
+      <div style="font-size:13px;color:var(--gray-700);margin:0.75rem 0;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Received by <strong>${_currentStaffName || 'Unknown (please log out and back in)'}</strong></div>
       <label style="margin-top:0.5rem">Overall notes (optional)</label>
       <input type="text" id="recv-order-notes" placeholder="e.g. partial shipment, damaged box, etc.">
       <div class="modal-actions">
@@ -1682,8 +1681,8 @@ function openReceiveModal(orderId) {
 }
 
 async function submitReceiveOrder(orderId) {
-  const receivedBy = document.getElementById('recv-by')?.value?.trim();
-  if (!receivedBy) { alert('Please enter your name.'); return; }
+  const receivedBy = _currentStaffName;
+  if (!receivedBy) { alert('Could not determine who is logged in — please log out and back in.'); return; }
   const order = await fetch(`/api/orders/${orderId}`).then(r=>r.json());
   const items = order.items.map(it => ({
     id: it.id,
@@ -1723,9 +1722,9 @@ async function renderPlaceOrderForm() {
     <div class="card">
       <div class="card-title">New order — ${_ordersModuleFilter === 'housekeeping' ? 'Housekeeping Supplies' : 'Maintenance Supplies'}</div>
       <div class="form-row">
-        <div><label>Ordered by</label><input type="text" id="po-ordered-by" placeholder="Your name"></div>
         <div><label>Vendor (optional)</label><input type="text" id="po-vendor" placeholder="e.g. Amazon, Sam's Club"></div>
       </div>
+      <div style="font-size:13px;color:var(--gray-700);margin-bottom:0.75rem;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Ordered by <strong>${_currentStaffName || 'Unknown (please log out and back in)'}</strong></div>
       <label>Notes (optional)</label>
       <input type="text" id="po-order-notes" placeholder="Any notes about this order">
       <div id="order-items-list" style="margin-top:1rem"></div>
@@ -1773,6 +1772,13 @@ function addOrderItemRow() {
   _placeOrderItems.push({ item_name:'', matched_supply_id:'', cases_ordered:1, units_per_case:1, unit_label:'units', price:'' });
   renderOrderItemRows();
 }
+async function cancelOrder(orderId) {
+  if (!confirm('Cancel this order? This cannot be undone.')) return;
+  const res = await fetch(`/api/orders/${orderId}`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({staff_name:_currentStaffName}) });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  renderOrders();
+}
 function removeOrderItemRow(idx) {
   _placeOrderItems.splice(idx,1);
   renderOrderItemRows();
@@ -1806,13 +1812,13 @@ function onVendorSelect(val) {
   }
 }
 async function submitPlaceOrder() {
-  const orderedBy = document.getElementById('po-ordered-by')?.value?.trim();
+  const orderedBy = _currentStaffName;
   const vendorSel = document.getElementById('po-vendor-select')?.value;
   const vendor = vendorSel === '__other__'
     ? document.getElementById('po-vendor')?.value?.trim()
     : vendorSel || document.getElementById('po-vendor')?.value?.trim();
   const notes = document.getElementById('po-order-notes')?.value?.trim();
-  if (!orderedBy) { alert('Please enter who is placing this order.'); return; }
+  if (!orderedBy) { alert('Could not determine who is logged in — please log out and back in.'); return; }
   const validItems = _placeOrderItems.filter(it => it.item_name.trim());
   if (!validItems.length) { alert('Please add at least one item.'); return; }
 
@@ -1836,7 +1842,6 @@ async function submitPlaceOrder() {
 
   document.getElementById('place-order-msg').textContent = '✅ Order placed! It will show under Pending until received.';
   _placeOrderItems = [];
-  document.getElementById('po-ordered-by').value = '';
   document.getElementById('po-vendor').value = '';
   document.getElementById('po-order-notes').value = '';
   setTimeout(() => ordersSubtab('pending'), 1200);
@@ -1894,7 +1899,7 @@ async function renderDiscrepancies() {
 
 async function resolveOrderDiscrepancy(orderId) {
   const notes = document.getElementById(`resolve-note-${orderId}`)?.value?.trim() || '';
-  await fetch(`/api/orders/${orderId}/resolve-discrepancy`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes}) });
+  await fetch(`/api/orders/${orderId}/resolve-discrepancy`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes, staff_name:_currentStaffName}) });
   renderDiscrepancies();
 }
 
@@ -2394,7 +2399,7 @@ async function emailSarahForecast(from, to) {
   try {
     const res = await fetch('/api/forecast/email-sarah', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({from: from||null, to: to||null})
+      body: JSON.stringify({from: from||null, to: to||null, staff_name:_currentStaffName})
     });
     const data = await res.json();
     if (data.email_sent) {
@@ -2563,6 +2568,7 @@ async function uploadPackList() {
   msg.textContent = 'Uploading...'; msg.style.color = 'var(--gray-400)';
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('staff_name', _currentStaffName);
   try {
     const res = await fetch('/api/forecast/upload-packlist', { method:'POST', body: formData });
     const data = await res.json();
@@ -2583,6 +2589,7 @@ async function uploadReservations() {
   msg.textContent = 'Uploading...'; msg.style.color = 'var(--gray-400)';
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('staff_name', _currentStaffName);
   try {
     const res = await fetch('/api/forecast/upload-reservations', { method:'POST', body: formData });
     const data = await res.json();
