@@ -166,6 +166,13 @@ function statusBadge(s) {
   return '<span class="badge badge-pending">⏳ Pending</span>';
 }
 
+function stageBadge(req) {
+  if (req.status !== 'Pending') return '';
+  if (req.stage === 'chuck') return '<span class="badge" style="background:var(--amber-light);color:var(--amber)">⏳ Awaiting Chuck Howard</span>';
+  if (req.stage1_approved_by) return '<span class="badge" style="background:var(--teal-light);color:var(--teal-dark)">✓ Chuck approved — awaiting final sign-off</span>';
+  return '';
+}
+
 function renderRequests() {
   const filtered = _filter==='All' ? _requests : _requests.filter(r=>r.status===_filter);
   const area = document.getElementById('requests-area');
@@ -189,16 +196,18 @@ function renderRequests() {
         ${statusBadge(req.status)}
         ${urgencyBadge(req.urgency)}
         <span class="badge badge-cat">${req.category}</span>
+        ${stageBadge(req)}
       </div>
       <div class="req-detail"><strong>Description:</strong> ${req.description}</div>
       <div class="req-detail"><strong>Date needed:</strong> ${req.date_needed}</div>
+      ${req.stage1_approved_by ? `<div class="req-detail"><strong>Chuck's notes:</strong> ${req.stage1_notes || '(none)'}</div>` : ''}
       ${req.approver_notes ? `<div class="req-detail"><strong>Notes:</strong> ${req.approver_notes}</div>` : ''}
       ${req.approved_by ? `<div class="req-detail"><strong>${req.status==='Approved'?'Approved':'Denied'} by:</strong> ${req.approved_by}</div>` : ''}
       <div class="req-footer">Submitted ${date}${decidedStr}</div>
       ${isPending ? `
       <div class="req-actions">
-        <button class="btn btn-approve" data-action="Approved" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}">✅ Approve</button>
-        <button class="btn btn-deny" data-action="Denied" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}">❌ Deny</button>
+        <button class="btn btn-approve" data-action="Approved" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}" data-stage="${req.stage}">✅ Approve</button>
+        <button class="btn btn-deny" data-action="Denied" data-id="${req.id}" data-vendor="${escapeHtml(req.vendor)}" data-amount="${req.amount}" data-stage="${req.stage}">❌ Deny</button>
       </div>` : `<div class="decided-note">This request has already been ${req.status.toLowerCase()}.</div>`}
     </div>`;
   }).join('');
@@ -218,15 +227,21 @@ document.getElementById('requests-area').addEventListener('click', (e) => {
   const action = btn.dataset.action;
   const vendor = btn.dataset.vendor;
   const amount = parseFloat(btn.dataset.amount);
-  openDecide(id, action, vendor, amount);
+  const stage = btn.dataset.stage;
+  openDecide(id, action, vendor, amount, stage);
 });
 
-function openDecide(id, action, vendor, amount) {
+function openDecide(id, action, vendor, amount, stage) {
   document.getElementById('modal-req-id').value = id;
   document.getElementById('modal-action').value = action;
   document.getElementById('modal-title').textContent = action==='Approved' ? '✅ Approve Request' : '❌ Deny Request';
-  document.getElementById('modal-sub').textContent = `${vendor} — $${parseFloat(amount).toFixed(2)}`;
-  document.getElementById('modal-approver').value = '';
+  const stageNote = stage === 'chuck' ? ' — Level 1 (Chuck Howard)' : '';
+  document.getElementById('modal-sub').textContent = `${vendor} — $${parseFloat(amount).toFixed(2)}${stageNote}`;
+  const approverSel = document.getElementById('modal-approver');
+  approverSel.innerHTML = stage === 'chuck'
+    ? '<option value="">Select your name...</option><option value="Chuck Howard">Chuck Howard</option>'
+    : '<option value="">Select your name...</option><option value="Sabrina Renshaw">Sabrina Renshaw</option><option value="Sarah Jordan">Sarah Jordan</option>';
+  approverSel.value = '';
   document.getElementById('modal-notes').value = '';
   document.getElementById('modal-confirm-btn').textContent = action==='Approved' ? 'Confirm Approval' : 'Confirm Denial';
   document.getElementById('modal-confirm-btn').style.background = action==='Approved' ? 'var(--green)' : 'var(--coral)';
