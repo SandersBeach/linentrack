@@ -473,6 +473,16 @@ def send_po_decision_email(req):
     plain = f"Your purchase request has been {status}.\n\nVendor: {req['vendor']}\nAmount: ${req['amount']:.2f}\nDecision by: {req.get('approved_by','Sanders Beach Rentals Management')}\n{('Notes: '+req['approver_notes']) if req.get('approver_notes') else ''}"
     return send_email(subject, plain, to=req['employee_email'], html_body=html)
 
+def make_bag_qr(bag_id):
+    """QR encodes the literal bag ID text (not a URL) — the physical Bluetooth
+    scanner types whatever the code contains straight into the Scan Bag field,
+    so this has to match the ID exactly, not a link."""
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(bag_id); qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO(); img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+
 def make_supply_qr(supply_id):
     url = f'https://sbrlinens.up.railway.app?supply={supply_id}'
     qr = qrcode.QRCode(box_size=6, border=2)
@@ -582,6 +592,20 @@ def add_bag():
         return jsonify({'success':True,'id':bag_id})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Bag ID already exists'}),409
+
+@app.route('/api/bags/qr-sheet', methods=['GET'])
+def bags_qr_sheet():
+    """Generate printable QR codes for bags — literal bag ID encoded, for the
+    physical Bluetooth scanner. Optionally filter to one home via ?home_id=."""
+    home_id = request.args.get('home_id')
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if home_id:
+        cur.execute("SELECT b.id, h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id WHERE b.home_id=%s ORDER BY b.id", (home_id,))
+    else:
+        cur.execute("SELECT b.id, h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id ORDER BY h.code, b.id")
+    rows = cur.fetchall(); cur.close(); conn.close()
+    result = [{'id': r['id'], 'home_name': r['home_name'], 'qr_code': make_bag_qr(r['id'])} for r in rows]
+    return jsonify(result)
 
 @app.route('/api/inventory', methods=['GET'])
 def get_inventory():
@@ -997,8 +1021,12 @@ def add_supply():
 def update_supply(sid):
     data=request.json or {}
     if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
-    conn=get_db(); cur=conn.cursor()
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("UPDATE supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
+    cur.execute("SELECT qr_code FROM supply_items WHERE id=%s",(sid,)); row=cur.fetchone()
+    if row and not row['qr_code']:
+        qr = make_supply_qr(sid)
+        cur.execute("UPDATE supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
     conn.commit(); cur.close(); conn.close()
     log_audit('SupplyCentral', 'Edited supply item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
@@ -1073,8 +1101,12 @@ def add_hk_supply():
 def update_hk_supply(sid):
     data=request.json or {}
     if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
-    conn=get_db(); cur=conn.cursor()
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("UPDATE hk_supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
+    cur.execute("SELECT qr_code FROM hk_supply_items WHERE id=%s",(sid,)); row=cur.fetchone()
+    if row and not row['qr_code']:
+        qr = make_hk_supply_qr(sid)
+        cur.execute("UPDATE hk_supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
     conn.commit(); cur.close(); conn.close()
     log_audit('HousekeepingSupplyCentral', 'Edited supply item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
