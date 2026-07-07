@@ -321,10 +321,7 @@
     <p id="tx-item-info" style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:1rem;padding:10px;background:var(--gray-50);border-radius:var(--radius-sm)"></p>
     <label>Quantity</label>
     <input id="tx-qty" type="number" min="1" value="1">
-    <label>Your name</label>
-    <select id="tx-performer">
-      <option value="">Select your name...</option>
-    </select>
+    <div id="tx-performer-display" style="font-size:13px;color:var(--gray-700);margin:0.5rem 0;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Logged in as <strong></strong></div>
     <label>Notes (optional)</label>
     <input id="tx-notes" type="text" placeholder="e.g. used at HOME-12">
     <div class="modal-actions">
@@ -353,6 +350,7 @@ let pinVal = '';
 let _currentPin = '';
 let _currentStaffName = '';
 let _currentStaffId = null;
+let _currentStaffEmail = '';
 let _supplies = [];
 let _hkSupplies = [];
 let _ordersModuleFilter = 'housekeeping';
@@ -405,6 +403,7 @@ async function submitPin() {
     _currentPin = pinVal;
     _currentStaffName = data.name || '';
     _currentStaffId = data.id || null;
+    _currentStaffEmail = data.email || '';
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     document.getElementById('role-label').textContent =
@@ -429,7 +428,7 @@ async function submitPin() {
     checkPendingSupplyScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
-function logout() { role = null; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+function logout() { role = null; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
@@ -772,8 +771,10 @@ async function renderSettings() {
       <button class="btn btn-primary btn-sm" onclick="showAddStaffModal()">+ Add Staff Member</button>
       <button class="btn btn-ghost btn-sm" onclick="seedStaffMembers()">🔄 Reset to Master List</button>
       <button class="btn btn-ghost btn-sm" id="toggle-pins-btn" onclick="togglePinsVisible()">👁️ Show PINs</button>
+      <button class="btn btn-ghost btn-sm" onclick="syncKnownEmails()">📧 Sync Inspector Emails</button>
     </div>
     <div id="seed-staff-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    <div id="sync-emails-msg" style="font-size:12px;color:var(--teal);margin-top:4px;min-height:18px"></div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
     <div class="card"><div class="card-title">Load real inventory</div>
@@ -1077,10 +1078,8 @@ function showSupplyTxModal(supplyId, action) {
   document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
   document.getElementById('tx-qty').value = 1;
   document.getElementById('tx-notes').value = '';
-  const sel = document.getElementById('tx-performer');
-  sel.innerHTML = '<option value="">Select your name...</option>';
-  _loanerStaff.forEach(s=>{ sel.innerHTML+=`<option value="${s.name}">${s.name}</option>`; });
-  if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
+  const disp = document.getElementById('tx-performer-display');
+  disp.querySelector('strong').textContent = _currentStaffName || 'Unknown (please log out and back in)';
   document.getElementById('modal-supply-tx').dataset.target = 'supply';
   document.getElementById('modal-supply-tx').style.display = 'flex';
 }
@@ -1090,11 +1089,11 @@ async function submitSupplyTx() {
   const supplyId = document.getElementById('tx-supply-id').value;
   const action = document.getElementById('tx-action').value;
   const qty = parseInt(document.getElementById('tx-qty').value);
-  const performedBy = document.getElementById('tx-performer').value;
+  const performedBy = _currentStaffName;
   const notes = document.getElementById('tx-notes').value;
   const target = document.getElementById('modal-supply-tx').dataset.target || 'supply';
   const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
-  if (!performedBy) { alert('Please select your name.'); return; }
+  if (!performedBy) { alert('Could not determine who is logged in — please log out and back in.'); return; }
   if (!qty||qty<1) { alert('Please enter a valid quantity.'); return; }
   const res = await fetch(`${endpoint}/${supplyId}/transaction`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, action, quantity:qty, performed_by:performedBy, notes}) });
   const data = await res.json();
@@ -1468,15 +1467,8 @@ function showHKTxModal(supplyId, action) {
   document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
   document.getElementById('tx-qty').value = 1;
   document.getElementById('tx-notes').value = '';
-  const sel = document.getElementById('tx-performer');
-  sel.innerHTML = '<option value="">Select your name...</option>';
-  scanState.cleaners.forEach(c=>{ sel.innerHTML+=`<option value="${c.name}">${c.name}</option>`; });
-  if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
-  // Auto-select current staff member
-  if (_currentStaffName) {
-    const opt = [...sel.options].find(o => o.value === _currentStaffName);
-    if (opt) sel.value = _currentStaffName;
-  }
+  const disp = document.getElementById('tx-performer-display');
+  disp.querySelector('strong').textContent = _currentStaffName || 'Unknown (please log out and back in)';
   document.getElementById('modal-supply-tx').dataset.target = 'hk';
   document.getElementById('modal-supply-tx').style.display = 'flex';
 }
@@ -1820,15 +1812,6 @@ async function resolveOrderDiscrepancy(orderId) {
 
 let _storeItems = [];
 
-const INSPECTOR_STAFF = [
-  {name:"Laura Durrance", email:"laura@sandersbeachrentals.com"},
-  {name:"Stephanie Pierantoni", email:"stephanie@sandersbeachrentals.com"},
-  {name:"Alexis Rains", email:"alexis@sandersbeachrentals.com"},
-  {name:"Dawn Bailey", email:"dawn@sandersbeachrentals.com"},
-  {name:"Cassie Sloan", email:"cassie@sandersbeachrentals.com"},
-  {name:"Micah Haigler", email:"micah@sandersbeachrentals.com"},
-];
-
 async function renderStore() {
   const res = await fetch('/api/store/items');
   _storeItems = await res.json();
@@ -1898,11 +1881,6 @@ function showStoreCheckoutModal(itemId) {
   const item = _storeItems.find(i=>i.id===itemId);
   if (!item) return;
 
-  // staffOptions built below
-const staffOptions = INSPECTOR_STAFF.map(s=>
-    `<option value="${s.name}" data-email="${s.email}">${s.name}</option>`
-  ).join('');
-
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.id = 'modal-store-checkout';
@@ -1916,14 +1894,7 @@ const staffOptions = INSPECTOR_STAFF.map(s=>
     <label style="margin-top:0.75rem">Quantity</label>
     <input type="number" id="co-qty" value="1" min="1" max="${item.quantity}">
 
-    <label style="margin-top:0.75rem">Checked out by</label>
-    <select id="co-staff" onchange="onStoreStaffSelect(this)">
-      <option value="">Select staff member...</option>
-      ${staffOptions}
-      <option value="__other__">Other (maintenance)</option>
-    </select>
-    <input type="text" id="co-staff-other" placeholder="Enter name" style="display:none;margin-top:6px">
-    <input type="email" id="co-staff-email" placeholder="Email (for overdue alerts)" style="display:none;margin-top:6px">
+    <div style="font-size:13px;color:var(--gray-700);margin:0.75rem 0;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Checked out by <strong>${_currentStaffName || 'Unknown (please log out and back in)'}</strong>${_currentStaffEmail?'':' — <span style="color:var(--coral-dark)">no email on file, overdue alerts won\'t be able to reach this person until one is added in Settings</span>'}</div>
 
     <label style="margin-top:0.75rem">Type</label>
     <div style="display:flex;gap:8px;margin-top:4px">
@@ -1956,32 +1927,16 @@ function setCheckoutType(type) {
   document.getElementById('co-return-date-row').style.display = type==='loan' ? 'block' : 'none';
 }
 
-function onStoreStaffSelect(sel) {
-  const otherInput = document.getElementById('co-staff-other');
-  const emailInput = document.getElementById('co-staff-email');
-  if (sel.value === '__other__') {
-    otherInput.style.display='block'; emailInput.style.display='block';
-    otherInput.focus();
-  } else {
-    otherInput.style.display='none'; emailInput.style.display='none';
-    const opt = sel.options[sel.selectedIndex];
-    if (opt) emailInput.value = opt.dataset.email || '';
-  }
-}
-
 async function submitStoreCheckout(itemId) {
   const property = document.getElementById('co-property')?.value?.trim();
   const qty = parseInt(document.getElementById('co-qty')?.value || 1);
-  const staffSel = document.getElementById('co-staff')?.value;
-  const staffOther = document.getElementById('co-staff-other')?.value?.trim();
-  const staffEmail = document.getElementById('co-staff-email')?.value?.trim() ||
-    document.getElementById('co-staff')?.options[document.getElementById('co-staff')?.selectedIndex]?.dataset?.email || '';
-  const performedBy = staffSel === '__other__' ? staffOther : staffSel;
+  const performedBy = _currentStaffName;
+  const staffEmail = _currentStaffEmail;
   const returnDate = document.getElementById('co-return-date')?.value;
   const notes = document.getElementById('co-notes')?.value?.trim();
 
   if (!property) { alert('Please enter a property address.'); return; }
-  if (!performedBy) { alert('Please select who is checking this out.'); return; }
+  if (!performedBy) { alert('Could not determine who is logged in — please log out and back in.'); return; }
   if (_checkoutType === 'loan' && !returnDate) { alert('Please set an expected return date.'); return; }
 
   const btn = document.getElementById('co-submit-btn');
@@ -2874,5 +2829,18 @@ async function seedStaffMembers() {
   document.getElementById('seed-staff-msg').textContent=`✓ ${data.inserted} staff members loaded.`;
   btn.textContent='🔄 Reset to Master List';btn.disabled=false;
   loadStaffList();
+}
+
+async function syncKnownEmails() {
+  const btn=event.target; const orig=btn.textContent; btn.textContent='Syncing...'; btn.disabled=true;
+  try {
+    const res=await fetch('/api/staff/sync-known-emails',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_pin:_currentPin})});
+    const data=await res.json();
+    if(data.error){alert(data.error);btn.textContent=orig;btn.disabled=false;return;}
+    const msg = data.updated.length ? `✓ Added emails for: ${data.updated.join(', ')}` : 'No changes — everyone already has an email on file.';
+    document.getElementById('sync-emails-msg').textContent=msg;
+    btn.textContent=orig;btn.disabled=false;
+    loadStaffList();
+  } catch(e) { alert('Connection error — please try again.'); btn.textContent=orig; btn.disabled=false; }
 }
 </script>
