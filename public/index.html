@@ -351,6 +351,8 @@
 let role = null;
 let pinVal = '';
 let _currentPin = '';
+let _currentStaffName = '';
+let _currentStaffId = null;
 let _supplies = [];
 let _hkSupplies = [];
 let _ordersModuleFilter = 'housekeeping';
@@ -360,9 +362,10 @@ let _loanerStaff = [];
 
 const TABS = {
   warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'hk_supply', 'orders', 'forecast', 'po_request'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'po_request'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'store', 'po_request'],
+  inspector: ['store', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'forecast', 'store', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -373,7 +376,8 @@ const TAB_LABELS = {
   po_request: '📝 POCentral',
   hk_supply: '🧴 Housekeeping Supplies',
   orders: '📦 Orders',
-  forecast: '🔮 Forecast'
+  forecast: '🔮 Forecast',
+  store: '🏪 Store'
 };
 let currentTab = 'scan';
 
@@ -448,7 +452,8 @@ const MODULE_NAMES = {
   po_request: 'POCentral',
   hk_supply: 'HousekeepingSupplyCentral',
   orders: 'OrdersCentral',
-  forecast: 'ForecastCentral'
+  forecast: 'ForecastCentral',
+  store: 'StoreCentral'
 };
 function showTab(t) {
   currentTab = t;
@@ -468,7 +473,8 @@ function showTab(t) {
     po_request: renderPORequest,
     hk_supply: renderHKSupply,
     orders: renderOrders,
-    forecast: renderForecast
+    forecast: renderForecast,
+    store: renderStore
   };
   if (fns[t]) fns[t]();
 }
@@ -748,19 +754,48 @@ async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; c
 // ── Settings Tab ───────────────────────────────────────────────────────────────
 async function renderSettings() {
   const homes = await fetch('/api/homes').then(r => r.json());
-  let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
+  let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
     <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
     <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="card"><div class="card-title">All homes</div>`;
   homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>`:''}</div>`;});
   html+=`</div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Staff & PINs</h2></div>
+    <div class="card"><div class="card-title">Staff members</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Manage individual staff PINs. Each person logs in with their own 4-digit PIN.</p>
+    <div id="staff-list-area"><button class="btn btn-ghost btn-sm" onclick="loadStaffList()">Load Staff List</button></div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="showAddStaffModal()">+ Add Staff Member</button>
+      <button class="btn btn-ghost btn-sm" onclick="seedStaffMembers()">🔄 Reset to Master List</button>
+    </div>
+    <div id="seed-staff-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
     <div class="card"><div class="card-title">Load real inventory</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the current housekeeping supply inventory from the master list. <strong>This will replace all existing HK supply quantities.</strong> Only do this once, or when resetting to baseline.</p>
-    <button class="btn btn-primary" onclick="seedHKSupplies()">Load HK Inventory</button>
+    <button class="btn btn-primary" onclick="seedHKSupplies()">Load HK Inventory</button></div></div>
+    <div class="section-header" style="margin-top:1rem"><h2>Store Inventory</h2></div>
+    <div class="card"><div class="card-title">Load store inventory</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the SBR store inventory from the master list. <strong>This will replace all existing store items.</strong></p>
+    <button class="btn btn-primary" onclick="seedStoreInventory()">Load Store Inventory</button>
+    <div id="seed-store-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div
     <div id="seed-hk-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div></div>`;
   document.getElementById('main-content').innerHTML = html;
+}
+async function seedStoreInventory() {
+  if (!confirm('This will replace all current store items with the master list. Continue?')) return;
+  const btn = event.target;
+  btn.textContent = 'Loading...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/seed-store', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:_currentPin})});
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent='Load Store Inventory'; btn.disabled=false; return; }
+    document.getElementById('seed-store-msg').textContent = `✓ ${data.inserted} items loaded successfully!`;
+    btn.textContent='Load Store Inventory'; btn.disabled=false;
+  } catch(e) {
+    alert('Connection error'); btn.textContent='Load Store Inventory'; btn.disabled=false;
+  }
 }
 async function seedHKSupplies() {
   if (!confirm('This will replace all current HK supply quantities with the master list. Continue?')) return;
@@ -1433,6 +1468,11 @@ function showHKTxModal(supplyId, action) {
   sel.innerHTML = '<option value="">Select your name...</option>';
   scanState.cleaners.forEach(c=>{ sel.innerHTML+=`<option value="${c.name}">${c.name}</option>`; });
   if (role==='admin') sel.innerHTML+='<option value="Admin">Admin</option>';
+  // Auto-select current staff member
+  if (_currentStaffName) {
+    const opt = [...sel.options].find(o => o.value === _currentStaffName);
+    if (opt) sel.value = _currentStaffName;
+  }
   document.getElementById('modal-supply-tx').dataset.target = 'hk';
   document.getElementById('modal-supply-tx').style.display = 'flex';
 }
@@ -1510,7 +1550,10 @@ async function renderPendingOrders() {
         <span class="badge badge-warn">Pending</span>
       </div>
       ${o.items.map(it=>`<div style="font-size:13px;padding:4px 0;color:var(--gray-700)">${it.item_name} — expecting <strong>${it.expected_units} ${it.unit_label}</strong> (${it.cases_ordered} case${it.cases_ordered!=1?'s':''} × ${it.units_per_case})</div>`).join('')}
-      <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="openReceiveModal(${o.id})">✅ Receive This Order</button>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary" style="flex:1" onclick="openReceiveModal(${o.id})">✅ Receive This Order</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelOrder(${o.id})" title="Cancel order">🗑️</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1518,7 +1561,7 @@ async function renderPendingOrders() {
 function openReceiveModal(orderId) {
   fetch(`/api/orders/${orderId}`).then(r=>r.json()).then(order => {
     const rows = order.items.map(it => `
-      <div class="count-row">
+      <div class="count-row" style="flex-wrap:wrap;gap:6px">
         <div class="count-row-left">
           <div style="font-size:13px;font-weight:500">${it.item_name}</div>
           <div style="font-size:11px;color:var(--gray-400)">Expected: ${it.expected_units} ${it.unit_label}</div>
@@ -1526,6 +1569,7 @@ function openReceiveModal(orderId) {
         <div class="count-row-right">
           <input class="count-input" type="number" min="0" id="recv-${it.id}" value="${it.expected_units}" style="width:90px">
         </div>
+        <input type="text" id="recv-note-${it.id}" placeholder="Notes (e.g. 2 arrived damaged)" style="width:100%;font-size:12px;margin-top:2px;padding:5px 8px">
       </div>`).join('');
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
@@ -1536,6 +1580,8 @@ function openReceiveModal(orderId) {
       ${rows}
       <label style="margin-top:1rem">Your name</label>
       <input type="text" id="recv-by" placeholder="Who is checking this in?">
+      <label style="margin-top:0.5rem">Overall notes (optional)</label>
+      <input type="text" id="recv-order-notes" placeholder="e.g. partial shipment, damaged box, etc.">
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="document.getElementById('modal-receive-order').remove()">Cancel</button>
         <button class="btn btn-primary" onclick="submitReceiveOrder(${order.id})">Confirm Receipt</button>
@@ -1551,11 +1597,13 @@ async function submitReceiveOrder(orderId) {
   const order = await fetch(`/api/orders/${orderId}`).then(r=>r.json());
   const items = order.items.map(it => ({
     id: it.id,
-    received_units: parseInt(document.getElementById(`recv-${it.id}`)?.value || it.expected_units)
+    received_units: parseInt(document.getElementById(`recv-${it.id}`)?.value || it.expected_units),
+    notes: document.getElementById(`recv-note-${it.id}`)?.value?.trim() || ''
   }));
+  const orderNotes = document.getElementById('recv-order-notes')?.value?.trim() || '';
   const res = await fetch(`/api/orders/${orderId}/receive`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ received_by: receivedBy, items })
+    body: JSON.stringify({ received_by: receivedBy, notes: orderNotes, items })
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
@@ -1655,9 +1703,24 @@ function onOrderItemMatch(idx, supplyId) {
   renderOrderItemRows();
 }
 
+
+function onVendorSelect(val) {
+  const custom = document.getElementById('po-vendor');
+  if (!custom) return;
+  if (val === '__other__') {
+    custom.style.display = 'block';
+    custom.focus();
+  } else {
+    custom.style.display = 'none';
+    custom.value = val;
+  }
+}
 async function submitPlaceOrder() {
   const orderedBy = document.getElementById('po-ordered-by')?.value?.trim();
-  const vendor = document.getElementById('po-vendor')?.value?.trim();
+  const vendorSel = document.getElementById('po-vendor-select')?.value;
+  const vendor = vendorSel === '__other__'
+    ? document.getElementById('po-vendor')?.value?.trim()
+    : vendorSel || document.getElementById('po-vendor')?.value?.trim();
   const notes = document.getElementById('po-order-notes')?.value?.trim();
   if (!orderedBy) { alert('Please enter who is placing this order.'); return; }
   const validItems = _placeOrderItems.filter(it => it.item_name.trim());
@@ -1705,7 +1768,7 @@ async function renderOrderHistory() {
         <span class="badge ${o.status==='Received'?(o.has_discrepancy?'badge-warn':'badge-ok'):'badge-warn'}">${o.status}${o.has_discrepancy?' ⚠️':''}</span>
       </div>
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:8px">Ordered by ${o.ordered_by} · ${date}${recvDate?` · Received ${recvDate} by ${o.received_by}`:''}</div>
-      ${o.items.map(it=>`<div style="font-size:12px;padding:2px 0;color:var(--gray-700)">${it.item_name} — ${it.expected_units} ${it.unit_label} expected${it.received_units!=null?`, ${it.received_units} received`:''}${it.line_discrepancy?' <strong style="color:var(--coral-dark)">⚠ mismatch</strong>':''}</div>`).join('')}
+      ${o.items.map(it=>`<div style="font-size:12px;padding:2px 0;color:var(--gray-700)">${it.item_name} — ${it.expected_units} ${it.unit_label} expected${it.received_units!=null?`, ${it.received_units} received`:''}${it.line_discrepancy?' <strong style="color:var(--coral-dark)">⚠ mismatch</strong>':''}${it.receive_notes?` <em style="color:var(--gray-400)">(${it.receive_notes})</em>`:''}</div>`).join('')}
     </div>`;
   }).join('');
 }
@@ -1745,6 +1808,323 @@ async function resolveOrderDiscrepancy(orderId) {
   renderDiscrepancies();
 }
 
+
+
+// ══════════════════════════════════════════════════════════════
+// ── StoreCentral ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+let _storeItems = [];
+
+const INSPECTOR_STAFF = [
+  {name:"Laura Durrance", email:"laura@sandersbeachrentals.com"},
+  {name:"Stephanie Pierantoni", email:"stephanie@sandersbeachrentals.com"},
+  {name:"Alexis Rains", email:"alexis@sandersbeachrentals.com"},
+  {name:"Dawn Bailey", email:"dawn@sandersbeachrentals.com"},
+  {name:"Cassie Sloan", email:"cassie@sandersbeachrentals.com"},
+  {name:"Micah Haigler", email:"micah@sandersbeachrentals.com"},
+];
+
+async function renderStore() {
+  const res = await fetch('/api/store/items');
+  _storeItems = await res.json();
+
+  document.getElementById('main-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-size:15px;font-weight:600">🏪 StoreCentral</div>
+      ${role==='admin' ? `<button class="btn btn-primary btn-sm" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
+    </div>
+    <div class="subtab-bar">
+      <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
+      <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
+      <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
+    </div>
+    <div id="store-body"></div>`;
+  storeSubtab('inventory');
+}
+
+function storeSubtab(tab) {
+  document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('st-t-'+tab)?.classList.add('active');
+  if (tab==='inventory') renderStoreInventory();
+  else if (tab==='loans') renderActiveLoans();
+  else if (tab==='log') renderStoreLog();
+}
+
+// ── Inventory ────────────────────────────────────────────────
+
+function renderStoreInventory() {
+  const cats = [...new Set(_storeItems.map(i=>i.category))].sort();
+  const body = document.getElementById('store-body');
+  body.innerHTML = `
+    <select id="st-cat-filter" onchange="renderStoreCards()" style="margin-bottom:12px">
+      <option value="">All categories</option>
+      ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
+    </select>
+    <div id="store-cards" class="supply-grid"></div>`;
+  renderStoreCards();
+}
+
+function renderStoreCards() {
+  const filter = document.getElementById('st-cat-filter')?.value || '';
+  const items = filter ? _storeItems.filter(i=>i.category===filter) : _storeItems;
+  const grid = document.getElementById('store-cards');
+  if (!grid) return;
+  if (!items.length) { grid.innerHTML='<div class="empty" style="grid-column:1/-1">No items found.</div>'; return; }
+  grid.innerHTML = items.map(item => `
+    <div class="supply-card ${item.quantity===0?'low-stock':''}">
+      <div class="supply-card-top">
+        <div class="supply-name">${item.name}</div>
+        ${item.quantity===0?'<span class="badge badge-out" style="font-size:10px">OUT</span>':''}
+      </div>
+      <div class="supply-cat">${item.category}</div>
+      <div class="supply-qty" style="color:${item.quantity===0?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
+      <div class="supply-unit">in stock</div>
+      ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
+      <div class="supply-actions" style="flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
+        ${role==='admin'?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
+      </div>
+    </div>`).join('');
+}
+
+// ── Checkout Modal ────────────────────────────────────────────
+
+function showStoreCheckoutModal(itemId) {
+  const item = _storeItems.find(i=>i.id===itemId);
+  if (!item) return;
+
+  // staffOptions built below
+const staffOptions = INSPECTOR_STAFF.map(s=>
+    `<option value="${s.name}" data-email="${s.email}">${s.name}</option>`
+  ).join('');
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'modal-store-checkout';
+  modal.innerHTML = `<div class="modal-box" style="max-width:480px">
+    <h3>Check Out: ${item.name}</h3>
+    <p style="font-size:13px;color:var(--gray-400);margin-bottom:1rem">${item.quantity} in stock${item.price ? ` · $${parseFloat(item.price).toFixed(2)} each` : ''}</p>
+
+    <label>Property address</label>
+    <input type="text" id="co-property" placeholder="e.g. 22 Flatwood Street" list="homes-datalist">
+
+    <label style="margin-top:0.75rem">Quantity</label>
+    <input type="number" id="co-qty" value="1" min="1" max="${item.quantity}">
+
+    <label style="margin-top:0.75rem">Checked out by</label>
+    <select id="co-staff" onchange="onStoreStaffSelect(this)">
+      <option value="">Select staff member...</option>
+      ${staffOptions}
+      <option value="__other__">Other (maintenance)</option>
+    </select>
+    <input type="text" id="co-staff-other" placeholder="Enter name" style="display:none;margin-top:6px">
+    <input type="email" id="co-staff-email" placeholder="Email (for overdue alerts)" style="display:none;margin-top:6px">
+
+    <label style="margin-top:0.75rem">Type</label>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-primary" id="co-type-loan" onclick="setCheckoutType('loan')" style="flex:1">📤 On Loan</button>
+      <button class="btn btn-ghost" id="co-type-sold" onclick="setCheckoutType('sold_out')" style="flex:1">💰 Sold Out</button>
+    </div>
+
+    <div id="co-return-date-row" style="margin-top:0.75rem">
+      <label>Expected return date</label>
+      <input type="date" id="co-return-date">
+    </div>
+
+    <label style="margin-top:0.75rem">Notes (optional)</label>
+    <input type="text" id="co-notes" placeholder="Any notes about this checkout">
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-store-checkout').remove()">Cancel</button>
+      <button class="btn btn-primary" id="co-submit-btn" onclick="submitStoreCheckout(${item.id})">Confirm Checkout</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setCheckoutType('loan');
+}
+
+let _checkoutType = 'loan';
+function setCheckoutType(type) {
+  _checkoutType = type;
+  document.getElementById('co-type-loan').className = `btn ${type==='loan'?'btn-primary':'btn-ghost'}`;
+  document.getElementById('co-type-sold').className = `btn ${type==='sold_out'?'btn-primary':'btn-ghost'}`;
+  document.getElementById('co-return-date-row').style.display = type==='loan' ? 'block' : 'none';
+}
+
+function onStoreStaffSelect(sel) {
+  const otherInput = document.getElementById('co-staff-other');
+  const emailInput = document.getElementById('co-staff-email');
+  if (sel.value === '__other__') {
+    otherInput.style.display='block'; emailInput.style.display='block';
+    otherInput.focus();
+  } else {
+    otherInput.style.display='none'; emailInput.style.display='none';
+    const opt = sel.options[sel.selectedIndex];
+    if (opt) emailInput.value = opt.dataset.email || '';
+  }
+}
+
+async function submitStoreCheckout(itemId) {
+  const property = document.getElementById('co-property')?.value?.trim();
+  const qty = parseInt(document.getElementById('co-qty')?.value || 1);
+  const staffSel = document.getElementById('co-staff')?.value;
+  const staffOther = document.getElementById('co-staff-other')?.value?.trim();
+  const staffEmail = document.getElementById('co-staff-email')?.value?.trim() ||
+    document.getElementById('co-staff')?.options[document.getElementById('co-staff')?.selectedIndex]?.dataset?.email || '';
+  const performedBy = staffSel === '__other__' ? staffOther : staffSel;
+  const returnDate = document.getElementById('co-return-date')?.value;
+  const notes = document.getElementById('co-notes')?.value?.trim();
+
+  if (!property) { alert('Please enter a property address.'); return; }
+  if (!performedBy) { alert('Please select who is checking this out.'); return; }
+  if (_checkoutType === 'loan' && !returnDate) { alert('Please set an expected return date.'); return; }
+
+  const btn = document.getElementById('co-submit-btn');
+  btn.textContent = 'Submitting...'; btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/store/checkout', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        item_id: itemId, quantity: qty, property_address: property,
+        performed_by: performedBy, performed_by_email: staffEmail,
+        transaction_type: _checkoutType,
+        expected_return_date: returnDate || null, notes
+      })
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent='Confirm Checkout'; btn.disabled=false; return; }
+    document.getElementById('modal-store-checkout')?.remove();
+    if (_checkoutType === 'sold_out') {
+      alert('✅ Checked out as sold out. Accounting has been notified by email.');
+    } else {
+      alert(`✅ Checked out on loan. Expected return: ${returnDate}`);
+    }
+    const storeRes = await fetch('/api/store/items');
+    _storeItems = await storeRes.json();
+    renderStoreCards();
+  } catch(e) {
+    alert('Connection error.'); btn.textContent='Confirm Checkout'; btn.disabled=false;
+  }
+}
+
+// ── Active Loans ──────────────────────────────────────────────
+
+async function renderActiveLoans() {
+  const body = document.getElementById('store-body');
+  body.innerHTML = '<div class="card">Loading...</div>';
+  const loans = await fetch('/api/store/loans').then(r=>r.json());
+  if (!loans.length) {
+    body.innerHTML = '<div class="empty">No items currently out on loan.</div>';
+    return;
+  }
+  const today = new Date().toISOString().split('T')[0];
+  body.innerHTML = loans.map(loan => {
+    const overdue = loan.expected_return_date && loan.expected_return_date < today;
+    return `<div class="card" style="${overdue?'border-color:var(--coral);border-width:1.5px':''}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:14px;font-weight:600">${loan.item_name}</div>
+        ${overdue ? '<span class="badge badge-out">⚠️ Overdue</span>' : '<span class="badge badge-warn">On Loan</span>'}
+      </div>
+      <div style="font-size:12px;color:var(--gray-700);margin-bottom:2px">📍 ${loan.property_address}</div>
+      <div style="font-size:12px;color:var(--gray-400);margin-bottom:2px">Qty: ${loan.quantity} · Out by: ${loan.performed_by}</div>
+      <div style="font-size:12px;color:${overdue?'var(--coral-dark)':'var(--gray-400)'}">Return by: ${loan.expected_return_date || 'not set'}</div>
+      ${loan.notes ? `<div style="font-size:11px;color:var(--gray-400);margin-top:4px;font-style:italic">${loan.notes}</div>` : ''}
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:10px" onclick="returnLoanItem(${loan.id}, '${loan.item_name}')">✅ Mark Returned</button>
+    </div>`;
+  }).join('');
+}
+
+async function returnLoanItem(txId, itemName) {
+  const notes = prompt(`Any notes about the return of "${itemName}"? (optional)`);
+  const res = await fetch(`/api/store/return/${txId}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({notes: notes||''})
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  alert('✅ Item marked as returned. Inventory updated.');
+  const storeRes = await fetch('/api/store/items');
+  _storeItems = await storeRes.json();
+  renderActiveLoans();
+}
+
+// ── History ───────────────────────────────────────────────────
+
+async function renderStoreLog() {
+  const body = document.getElementById('store-body');
+  body.innerHTML = '<div class="card">Loading...</div>';
+  const log = await fetch('/api/store/log?limit=200').then(r=>r.json());
+  if (!log.length) { body.innerHTML = '<div class="empty">No transactions yet.</div>'; return; }
+  body.innerHTML = `<div class="card" style="padding:0.75rem 1.25rem">` + log.map(tx => {
+    const isSold = tx.transaction_type === 'sold_out';
+    const isReturned = tx.returned_at;
+    return `<div class="row">
+      <div class="row-main">
+        <div class="row-title">
+          <span class="badge ${isSold?'badge-out':'badge-warn'}" style="margin-right:6px">${isSold?'💰 Sold Out':'📤 Loan'}</span>
+          ${tx.item_name}${isReturned?' <span style="color:var(--green);font-size:11px">✓ Returned</span>':''}
+        </div>
+        <div class="row-sub">${tx.timestamp} · ${tx.performed_by} · qty ${tx.quantity} · ${tx.property_address}${tx.price&&isSold?` · $${(parseFloat(tx.price)*tx.quantity).toFixed(2)}`:''}</div>
+        ${tx.notes?`<div class="row-sub" style="font-style:italic">${tx.notes}</div>`:''}
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+// ── Admin: Add/Edit Items ─────────────────────────────────────
+
+function showAddStoreItemModal() {
+  showStoreItemModal(null);
+}
+function showEditStoreItemModal(itemId) {
+  showStoreItemModal(_storeItems.find(i=>i.id===itemId));
+}
+
+function showStoreItemModal(item) {
+  const isEdit = !!item;
+  const CATS = ['Bedroom/Bath','Bathrooms','Kitchen','Kitchen/Flatware','Kitchen/Glasses','Kitchen/Dishware','Additional Housewares'];
+  const modal = document.createElement('div');
+  modal.className='modal-overlay'; modal.id='modal-store-item';
+  modal.innerHTML = `<div class="modal-box" style="max-width:400px">
+    <h3>${isEdit?'Edit':'Add'} Store Item</h3>
+    <label>Item name</label>
+    <input type="text" id="si-name" value="${item?.name||''}">
+    <label style="margin-top:0.75rem">Category</label>
+    <select id="si-category">
+      ${CATS.map(c=>`<option value="${c}" ${item?.category===c?'selected':''}>${c}</option>`).join('')}
+    </select>
+    <label style="margin-top:0.75rem">Price per unit ($)</label>
+    <input type="number" id="si-price" min="0" step="0.01" value="${item?.price||'0'}">
+    ${!isEdit?`<label style="margin-top:0.75rem">Starting quantity</label>
+    <input type="number" id="si-qty" min="0" value="0">`:''}
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-store-item').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStoreItem(${item?.id||'null'})">${isEdit?'Save':'Add Item'}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function saveStoreItem(itemId) {
+  const name = document.getElementById('si-name')?.value?.trim();
+  const category = document.getElementById('si-category')?.value;
+  const price = parseFloat(document.getElementById('si-price')?.value||0);
+  const qty = parseInt(document.getElementById('si-qty')?.value||0);
+  if (!name) { alert('Please enter an item name.'); return; }
+  const isEdit = itemId !== null;
+  const url = isEdit ? `/api/store/items/${itemId}` : '/api/store/items';
+  const body = {pin:_currentPin, name, category, price};
+  if (!isEdit) body.quantity = qty;
+  const res = await fetch(url, {method:isEdit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('modal-store-item')?.remove();
+  const storeRes = await fetch('/api/store/items');
+  _storeItems = await storeRes.json();
+  renderStoreInventory();
+}
 
 // ══════════════════════════════════════════════════════════════
 // ── ForecastCentral ──────────────────────────────────────────
@@ -2355,3 +2735,123 @@ async function submitPOFromTab() {
 </script>
 </body>
 </html>
+<script>
+// Staff management functions (appended)
+async function loadStaffList() {
+  const area = document.getElementById('staff-list-area');
+  if (!area) return;
+  area.innerHTML = 'Loading...';
+  const staff = await fetch('/api/staff').then(r=>r.json());
+  if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
+  const roles = [...new Set(staff.map(s=>s.role))].sort();
+  area.innerHTML = roles.map(role => `
+    <div style="margin-bottom:1rem">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:6px">${role}</div>
+      ${staff.filter(s=>s.role===role).map(s=>`
+        <div class="row" style="align-items:center">
+          <div class="row-main">
+            <div class="row-title" style="font-size:13px">${s.name} ${!s.active?'<span style="color:var(--coral-dark);font-size:11px">(inactive)</span>':''}</div>
+            <div class="row-sub">${s.email||'no email'} · PIN: ****</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="showEditStaffModal(${s.id},'${s.name.replace(/'/g,"\\'")}','${s.role}','${s.email||''}',${s.active})">Edit</button>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+function showAddStaffModal() {
+  const modal = document.createElement('div');
+  modal.className='modal-overlay'; modal.id='modal-staff';
+  modal.innerHTML=`<div class="modal-box" style="max-width:400px">
+    <h3>Add Staff Member</h3>
+    <label>Full name</label><input type="text" id="sm-name" placeholder="e.g. Jane Smith">
+    <label style="margin-top:0.75rem">Role</label>
+    <select id="sm-role">
+      <option value="warehouse">Warehouse</option>
+      <option value="maintenance">Maintenance</option>
+      <option value="inspector">Inspector</option>
+      <option value="coordinator">Coordinator</option>
+      <option value="admin">Admin</option>
+    </select>
+    <label style="margin-top:0.75rem">PIN (4 digits)</label>
+    <input type="text" id="sm-pin" maxlength="4" placeholder="e.g. 1234">
+    <label style="margin-top:0.75rem">Email (for alerts)</label>
+    <input type="email" id="sm-email" placeholder="e.g. jane@sandersbeachrentals.com">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-staff').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddStaff()">Add Staff Member</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitAddStaff() {
+  const name=document.getElementById('sm-name')?.value?.trim();
+  const role=document.getElementById('sm-role')?.value;
+  const pin=document.getElementById('sm-pin')?.value?.trim();
+  const email=document.getElementById('sm-email')?.value?.trim();
+  if(!name||!pin){alert('Name and PIN are required.');return;}
+  if(pin.length!==4||!/^\d+$/.test(pin)){alert('PIN must be exactly 4 digits.');return;}
+  const res=await fetch('/api/staff',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({admin_pin:_currentPin,name,role,pin,email})});
+  const data=await res.json();
+  if(data.error){alert(data.error);return;}
+  document.getElementById('modal-staff')?.remove();
+  loadStaffList();
+}
+
+function showEditStaffModal(id, name, role, email, active) {
+  const modal = document.createElement('div');
+  modal.className='modal-overlay'; modal.id='modal-staff-edit';
+  modal.innerHTML=`<div class="modal-box" style="max-width:400px">
+    <h3>Edit: ${name}</h3>
+    <label>New PIN (leave blank to keep current)</label>
+    <input type="text" id="se-pin" maxlength="4" placeholder="4 digits">
+    <label style="margin-top:0.75rem">Email</label>
+    <input type="email" id="se-email" value="${email}">
+    <label style="margin-top:0.75rem">Role</label>
+    <select id="se-role">
+      <option value="warehouse" ${role==='warehouse'?'selected':''}>Warehouse</option>
+      <option value="maintenance" ${role==='maintenance'?'selected':''}>Maintenance</option>
+      <option value="inspector" ${role==='inspector'?'selected':''}>Inspector</option>
+      <option value="coordinator" ${role==='coordinator'?'selected':''}>Coordinator</option>
+      <option value="admin" ${role==='admin'?'selected':''}>Admin</option>
+    </select>
+    <label style="margin-top:0.75rem">Status</label>
+    <select id="se-active">
+      <option value="1" ${active?'selected':''}>Active</option>
+      <option value="0" ${!active?'selected':''}>Inactive</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-staff-edit').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditStaff(${id})">Save Changes</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitEditStaff(id) {
+  const pin=document.getElementById('se-pin')?.value?.trim();
+  const email=document.getElementById('se-email')?.value?.trim();
+  const role=document.getElementById('se-role')?.value;
+  const active=parseInt(document.getElementById('se-active')?.value);
+  if(pin&&(pin.length!==4||!/^\d+$/.test(pin))){alert('PIN must be 4 digits.');return;}
+  const body={admin_pin:_currentPin,email,role,active};
+  if(pin) body.pin=pin;
+  const res=await fetch(`/api/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(data.error){alert(data.error);return;}
+  document.getElementById('modal-staff-edit')?.remove();
+  loadStaffList();
+}
+
+async function seedStaffMembers() {
+  if(!confirm('This will reset ALL staff PINs to the master list. Continue?'))return;
+  const btn=event.target; btn.textContent='Resetting...'; btn.disabled=true;
+  const res=await fetch('/api/seed-staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:_currentPin})});
+  const data=await res.json();
+  if(data.error){alert(data.error);btn.textContent='🔄 Reset to Master List';btn.disabled=false;return;}
+  document.getElementById('seed-staff-msg').textContent=`✓ ${data.inserted} staff members loaded.`;
+  btn.textContent='🔄 Reset to Master List';btn.disabled=false;
+  loadStaffList();
+}
+</script>
