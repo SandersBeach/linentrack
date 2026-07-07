@@ -139,6 +139,46 @@ def init_db():
             receive_notes TEXT
         );
         ALTER TABLE supply_order_items ADD COLUMN IF NOT EXISTS receive_notes TEXT;
+        CREATE TABLE IF NOT EXISTS staff_members (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL,
+            pin TEXT NOT NULL UNIQUE,
+            email TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS email TEXT;
+        CREATE TABLE IF NOT EXISTS store_items (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'General',
+            quantity INTEGER NOT NULL DEFAULT 0,
+            price NUMERIC(10,2) DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS store_transactions (
+            id SERIAL PRIMARY KEY,
+            item_id INTEGER NOT NULL REFERENCES store_items(id),
+            action TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            quantity_after INTEGER NOT NULL DEFAULT 0,
+            property_address TEXT,
+            performed_by TEXT NOT NULL,
+            performed_by_email TEXT,
+            transaction_type TEXT NOT NULL DEFAULT 'sold_out',
+            expected_return_date TEXT,
+            returned_at TEXT,
+            is_overdue INTEGER DEFAULT 0,
+            overdue_alerted INTEGER DEFAULT 0,
+            notes TEXT,
+            timestamp TEXT NOT NULL
+        );
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS performed_by_email TEXT;
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS expected_return_date TEXT;
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS returned_at TEXT;
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS is_overdue INTEGER DEFAULT 0;
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS overdue_alerted INTEGER DEFAULT 0;
         CREATE TABLE IF NOT EXISTS forecast_pack_list (
             id SERIAL PRIMARY KEY,
             address TEXT NOT NULL UNIQUE,
@@ -983,6 +1023,377 @@ def cancel_order(oid):
     cur.execute("DELETE FROM supply_orders WHERE id=%s",(oid,))
     conn.commit(); cur.close(); conn.close(); return jsonify({'success':True})
 
+
+
+
+# ── Staff PIN Management ──────────────────────────────────────────────────────
+
+STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'inspector', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Warehouse Staff 1', 'warehouse', '6460'], ['Warehouse Staff 2', 'warehouse', '1544']]
+
+def check_staff_pin(pin):
+    """Check PIN against staff table. Returns dict with name, role or None."""
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM staff_members WHERE pin=%s AND active=1", (str(pin),))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[STAFF PIN ERROR] {e}")
+        return None
+
+@app.route('/api/staff/auth', methods=['POST'])
+def staff_auth():
+    """Authenticate a staff PIN. Returns name, role."""
+    data = request.json or {}
+    pin = str(data.get('pin', ''))
+    # Check master admin PIN first
+    admin_pin = os.environ.get('ADMIN_PIN', '2468')
+    if pin == admin_pin:
+        return jsonify({'success': True, 'name': 'Admin', 'role': 'admin', 'is_master': True})
+    staff = check_staff_pin(pin)
+    if not staff:
+        return jsonify({'error': 'Invalid PIN'}), 401
+    return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id']})
+
+@app.route('/api/staff', methods=['GET'])
+def get_staff():
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,name,role,email,active,created_at FROM staff_members ORDER BY role,name")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/staff', methods=['POST'])
+def add_staff():
+    data=request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin' and not check_staff_pin(str(data.get('admin_pin',''))) :
+        return jsonify({'error':'Admin PIN required'}), 403
+    name=data.get('name','').strip()
+    role=data.get('role','warehouse')
+    pin=str(data.get('pin','')).strip()
+    email=data.get('email','').strip() or None
+    if not name or not pin: return jsonify({'error':'Name and PIN required'}), 400
+    if len(pin) != 4 or not pin.isdigit(): return jsonify({'error':'PIN must be exactly 4 digits'}), 400
+    conn=get_db(); cur=conn.cursor()
+    try:
+        cur.execute("INSERT INTO staff_members (name,role,pin,email,active,created_at) VALUES (%s,%s,%s,%s,1,%s)",
+            (name,role,pin,email,now_central()))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({'success':True})
+    except Exception as e:
+        conn.rollback(); cur.close(); conn.close()
+        return jsonify({'error':'PIN already in use'}), 409
+
+@app.route('/api/staff/<int:sid>', methods=['PUT'])
+def update_staff(sid):
+    data=request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    fields=[]; params=[]
+    if 'name' in data: fields.append('name=%s'); params.append(data['name'].strip())
+    if 'role' in data: fields.append('role=%s'); params.append(data['role'])
+    if 'email' in data: fields.append('email=%s'); params.append(data['email'].strip() or None)
+    if 'pin' in data:
+        new_pin=str(data['pin']).strip()
+        if len(new_pin)!=4 or not new_pin.isdigit():
+            cur.close(); conn.close(); return jsonify({'error':'PIN must be 4 digits'}), 400
+        fields.append('pin=%s'); params.append(new_pin)
+    if 'active' in data: fields.append('active=%s'); params.append(int(data['active']))
+    if not fields: cur.close(); conn.close(); return jsonify({'error':'Nothing to update'}), 400
+    params.append(sid)
+    try:
+        cur.execute(f"UPDATE staff_members SET {','.join(fields)} WHERE id=%s", params)
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({'success':True})
+    except Exception as e:
+        conn.rollback(); cur.close(); conn.close()
+        return jsonify({'error':'PIN already in use by another staff member'}), 409
+
+@app.route('/api/seed-staff', methods=['POST'])
+def seed_staff():
+    """Seed staff members. Admin PIN required."""
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("DELETE FROM staff_members")
+    conn.commit()
+    inserted=0
+    for name, role, pin in STAFF_SEED:
+        try:
+            cur.execute("INSERT INTO staff_members (name,role,pin,email,active,created_at) VALUES (%s,%s,%s,NULL,1,%s)",
+                (name, role, pin, now_central()))
+            inserted+=1
+        except Exception as e:
+            print(f"Seed error for {name}: {e}")
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True,'inserted':inserted})
+
+# ── StoreCentral ──────────────────────────────────────────────────────────────
+
+ACCOUNTING_EMAIL = 'accountingdepartment@sandersbeachrentals.com'
+
+STORE_ITEMS_SEED = [
+    # (name, category, quantity, price)
+    ("King Duvet Insert", "Bedroom/Bath", 7, 0),
+    ("Queen Duvet Insert", "Bedroom/Bath", 4, 0),
+    ("Twin Duvet Insert", "Bedroom/Bath", 4, 0),
+    ("King Mattress Pad", "Bedroom/Bath", 2, 0),
+    ("Queen Mattress Pad", "Bedroom/Bath", 2, 0),
+    ("Twin Mattress Pad", "Bedroom/Bath", 15, 0),
+    ("Standard Pillows", "Bedroom/Bath", 4, 0),
+    ("King Pillows", "Bedroom/Bath", 12, 0),
+    ("Toilet Brushes", "Bathrooms", 2, 0),
+    ("Hair Dryers", "Bathrooms", 1, 0),
+    ("Shower Liners 72x72", "Bathrooms", 2, 0),
+    ("Shower Liners 72x78", "Bathrooms", 1, 0),
+    ("Shower Liners 72x84", "Bathrooms", 2, 0),
+    ("Shower Curtain", "Bathrooms", 2, 0),
+    ("Shower Curtain Hooks", "Bathrooms", 0, 0),
+    ("Blenders", "Kitchen", 0, 0),
+    ("Hand Mixer", "Kitchen", 1, 0),
+    ("Toaster", "Kitchen", 2, 0),
+    ("Cookie Sheets", "Kitchen", 6, 0),
+    ("Muffin Tins", "Kitchen", 1, 0),
+    ("Cutting Boards", "Kitchen", 4, 0),
+    ("Glass Bakeware (Pyrex)", "Kitchen", 17, 0),
+    ("Can Opener", "Kitchen", 2, 0),
+    ("Wine Opener", "Kitchen", 1, 0),
+    ("Cheese Grater", "Kitchen", 1, 0),
+    ("Knife Set", "Kitchen", 1, 0),
+    ("Knife Sharpener", "Kitchen", 1, 0),
+    ("Kettle", "Kitchen", 1, 0),
+    ("Keurig", "Kitchen", 1, 0),
+    ("Cuisinart Coffee Maker", "Kitchen", 1, 0),
+    ("Cuisinart Carafe 12 Cup", "Kitchen", 6, 0),
+    ("Cuisinart Carafe 14 Cup", "Kitchen", 2, 0),
+    ("Skillets", "Kitchen", 1, 0),
+    ("Cooking Pots", "Kitchen", 3, 0),
+    ("Roasting Pans", "Kitchen", 2, 0),
+    ("Cooking Utensil Sets", "Kitchen", 2, 0),
+    ("Convection Oven", "Kitchen", 2, 0),
+    ("Salad Forks", "Kitchen/Flatware", 36, 0),
+    ("Dinner Forks", "Kitchen/Flatware", 48, 0),
+    ("Teaspoon", "Kitchen/Flatware", 48, 0),
+    ("Tablespoon", "Kitchen/Flatware", 48, 0),
+    ("Butter Knife", "Kitchen/Flatware", 108, 0),
+    ("Steak Knife", "Kitchen/Flatware", 84, 0),
+    ("Tall Drinking Glasses", "Kitchen/Glasses", 111, 0),
+    ("Short Drinking Glasses", "Kitchen/Glasses", 86, 0),
+    ("Wine Glasses", "Kitchen/Glasses", 21, 0),
+    ("Coffee Mugs", "Kitchen/Glasses", 22, 0),
+    ("Serving Plates", "Kitchen/Dishware", 0, 0),
+    ("Serving Bowls", "Kitchen/Dishware", 10, 0),
+    ("Dinner Plates", "Kitchen/Dishware", 0, 0),
+    ("Salad Plates", "Kitchen/Dishware", 0, 0),
+    ("Bowls", "Kitchen/Dishware", 2, 0),
+    ("Broom & Dust Pan Set", "Additional Housewares", 2, 0),
+    ("Vacuum", "Additional Housewares", 1, 0),
+    ("Iron", "Additional Housewares", 1, 0),
+    ("Ironing Board", "Additional Housewares", 1, 0),
+    ("Ironing Board Cover", "Additional Housewares", 2, 0),
+    ("Wooden Hangers", "Additional Housewares", 105, 0),
+]
+
+@app.route('/api/store/items', methods=['GET'])
+def get_store_items():
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM store_items ORDER BY category, name")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/store/items', methods=['POST'])
+def add_store_item():
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    name=data.get('name','').strip()
+    if not name: return jsonify({'error':'Name required'}), 400
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("INSERT INTO store_items (name,category,quantity,price,created_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (name, data.get('category','General'), int(data.get('quantity',0)), float(data.get('price',0)), now_central()))
+    sid=cur.fetchone()['id']
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True,'id':sid})
+
+@app.route('/api/store/items/<int:sid>', methods=['PUT'])
+def update_store_item(sid):
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("UPDATE store_items SET name=%s,category=%s,price=%s WHERE id=%s",
+        (data.get('name'), data.get('category','General'), float(data.get('price',0)), sid))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True})
+
+@app.route('/api/store/checkout', methods=['POST'])
+def store_checkout():
+    """Check out a store item as loan or sold_out."""
+    data=request.json or {}
+    item_id=data.get('item_id')
+    qty=int(data.get('quantity',1))
+    property_address=data.get('property_address','').strip()
+    performed_by=data.get('performed_by','').strip()
+    performed_by_email=data.get('performed_by_email','').strip()
+    transaction_type=data.get('transaction_type','sold_out')
+    expected_return=data.get('expected_return_date','').strip() or None
+    notes=data.get('notes','').strip() or None
+
+    if not item_id or not performed_by or not property_address:
+        return jsonify({'error':'item_id, performed_by, and property_address required'}), 400
+    if transaction_type not in ('loan','sold_out'):
+        return jsonify({'error':'transaction_type must be loan or sold_out'}), 400
+    if transaction_type == 'loan' and not expected_return:
+        return jsonify({'error':'expected_return_date required for loans'}), 400
+
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM store_items WHERE id=%s",(item_id,))
+    item=cur.fetchone()
+    if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+    if item['quantity'] < qty:
+        cur.close(); conn.close()
+        return jsonify({'error':f'Only {item["quantity"]} in stock'}), 400
+
+    new_qty = item['quantity'] - qty
+    cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, item_id))
+    cur.execute("""INSERT INTO store_transactions
+        (item_id,action,quantity,quantity_after,property_address,performed_by,performed_by_email,
+         transaction_type,expected_return_date,notes,timestamp)
+        VALUES (%s,'checkout',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (item_id,qty,new_qty,property_address,performed_by,performed_by_email,
+         transaction_type,expected_return,notes,now_central()))
+    tx_id=cur.fetchone()['id']
+    conn.commit()
+
+    # Send accounting email if sold out
+    if transaction_type == 'sold_out':
+        total_value = float(item['price'] or 0) * qty
+        price_line = f"\nUnit Price: ${item['price']:.2f}\nTotal to Bill: ${total_value:.2f}" if item['price'] else "\n(No price on file — please confirm billing amount)"
+        body = f"""STORE ITEM SOLD OUT — BILLING REQUIRED
+
+Property: {property_address}
+Item: {item['name']}
+Category: {item['category']}
+Quantity: {qty}
+{price_line}
+
+Checked out by: {performed_by}
+Date: {now_central()}
+{f'Notes: {notes}' if notes else ''}
+
+This item has been marked as sold out and will remain at the property. Please bill the homeowner accordingly.
+
+— SandersCentral StoreCentral"""
+
+        html = f"""
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+            <h2 style="color:#fff;margin:0;font-size:18px">🏪 StoreCentral — Billing Required</h2>
+            <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals · SandersCentral</p>
+          </div>
+          <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+            <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px">
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600;width:40%">Property</td><td style="padding:8px;border-bottom:1px solid #eee">{property_address}</td></tr>
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Item</td><td style="padding:8px;border-bottom:1px solid #eee">{item['name']}</td></tr>
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Category</td><td style="padding:8px;border-bottom:1px solid #eee">{item['category']}</td></tr>
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Quantity</td><td style="padding:8px;border-bottom:1px solid #eee">{qty}</td></tr>
+              {'<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Unit Price</td><td style="padding:8px;border-bottom:1px solid #eee">$'+f"{item['price']:.2f}"+'</td></tr><tr><td style="padding:8px;background:#fef9e7;font-weight:700;color:#c0392b">Total to Bill</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#c0392b;font-size:16px">$'+f"{total_value:.2f}"+'</td></tr>' if item['price'] else '<tr><td style="padding:8px;background:#fef9e7;font-weight:600;color:#c0392b">Billing Amount</td><td style="padding:8px;border-bottom:1px solid #eee;color:#c0392b">No price on file — please confirm</td></tr>'}
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Checked out by</td><td style="padding:8px;border-bottom:1px solid #eee">{performed_by}</td></tr>
+              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Date</td><td style="padding:8px;border-bottom:1px solid #eee">{now_central()}</td></tr>
+              {f'<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Notes</td><td style="padding:8px;border-bottom:1px solid #eee">{notes}</td></tr>' if notes else ''}
+            </table>
+            <div style="background:#fdecea;padding:12px;border-radius:6px;font-size:13px;color:#c0392b">
+              <strong>Action required:</strong> Please bill the homeowner for this item.
+            </div>
+            <p style="margin:16px 0 0;font-size:11px;color:#aaa;text-align:center">SandersCentral · StoreCentral</p>
+          </div>
+        </div>"""
+
+        send_email(
+            f"BILLING REQUIRED: {item['name']} → {property_address}",
+            body, to=ACCOUNTING_EMAIL, html_body=html
+        )
+
+    cur.close(); conn.close()
+    return jsonify({'success':True,'transaction_id':tx_id,'new_quantity':new_qty})
+
+@app.route('/api/store/loans', methods=['GET'])
+def get_active_loans():
+    """Get all currently active (unreturned) loans."""
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT st.*, si.name as item_name, si.category, si.price
+        FROM store_transactions st
+        JOIN store_items si ON si.id=st.item_id
+        WHERE st.transaction_type='loan' AND st.returned_at IS NULL
+        ORDER BY st.expected_return_date ASC""")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/store/return/<int:tx_id>', methods=['POST'])
+def return_store_item(tx_id):
+    """Mark a loaned item as returned."""
+    data=request.json or {}
+    notes=data.get('notes','').strip() or None
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM store_transactions WHERE id=%s",(tx_id,))
+    tx=cur.fetchone()
+    if not tx: cur.close(); conn.close(); return jsonify({'error':'Not found'}), 404
+    if tx['returned_at']: cur.close(); conn.close(); return jsonify({'error':'Already returned'}), 400
+    # Add quantity back to inventory
+    cur.execute("UPDATE store_items SET quantity=quantity+%s WHERE id=%s",(tx['quantity'],tx['item_id']))
+    cur.execute("UPDATE store_transactions SET returned_at=%s, notes=COALESCE(notes||' | '||%s,%s) WHERE id=%s",
+        (now_central(), notes, notes, tx_id))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True})
+
+@app.route('/api/store/log', methods=['GET'])
+def store_log():
+    limit=int(request.args.get('limit',200))
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT st.*, si.name as item_name, si.category, si.price
+        FROM store_transactions st JOIN store_items si ON si.id=st.item_id
+        ORDER BY st.timestamp DESC LIMIT %s""",(limit,))
+    rows=cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/store/check-overdue', methods=['POST'])
+def check_store_overdue():
+    """Flag loans past their expected return date and email the inspector."""
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT st.*, si.name as item_name
+        FROM store_transactions st JOIN store_items si ON si.id=st.item_id
+        WHERE st.transaction_type='loan' AND st.returned_at IS NULL
+        AND st.overdue_alerted=0 AND st.expected_return_date < %s""",(now_central()[:10],))
+    overdue=cur.fetchall()
+    alerted=0
+    for tx in overdue:
+        body = f"OVERDUE LOAN ALERT\n\nItem: {tx['item_name']}\nProperty: {tx['property_address']}\nExpected return: {tx['expected_return_date']}\nChecked out by: {tx['performed_by']}\n\nPlease follow up to arrange return of this item.\n\n— SandersCentral StoreCentral"
+        if tx['performed_by_email']:
+            send_email(f"OVERDUE: {tx['item_name']} from {tx['property_address']}", body, to=tx['performed_by_email'])
+        cur.execute("UPDATE store_transactions SET is_overdue=1, overdue_alerted=1 WHERE id=%s",(tx['id'],))
+        alerted+=1
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True,'alerted':alerted})
+
+@app.route('/api/seed-store', methods=['POST'])
+def seed_store():
+    """Seed store inventory. Admin PIN required."""
+    data=request.json or {}
+    if check_pin(str(data.get('pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("DELETE FROM store_transactions")
+    cur.execute("DELETE FROM store_items")
+    conn.commit()
+    inserted=0
+    for name,category,qty,price in STORE_ITEMS_SEED:
+        cur.execute("INSERT INTO store_items (name,category,quantity,price,created_at) VALUES (%s,%s,%s,%s,%s)",
+            (name,category,qty,price,now_central()))
+        inserted+=1
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True,'inserted':inserted})
 
 # ── ForecastCentral ───────────────────────────────────────────────────────────
 
