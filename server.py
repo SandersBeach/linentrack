@@ -1,4 +1,4 @@
-import os, json, qrcode, io, base64, random, string, urllib.request
+import os, json, qrcode, io, base64, random, string, urllib.request, threading, time
 from flask import Flask, request, jsonify, send_from_directory
 from datetime import datetime, timedelta
 import psycopg2
@@ -581,8 +581,7 @@ def get_staged_bags(cleaner_id):
 
 # ── Overdue check (called on a schedule or manually) ─────────────────────────
 
-@app.route('/api/check-overdue', methods=['POST'])
-def check_overdue():
+def run_bag_overdue_check():
     """Find bags picked up 24+ hours ago and send overdue emails if not already alerted."""
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""SELECT b.id, b.picked_up_at, b.overdue_alerted,
@@ -609,7 +608,11 @@ def check_overdue():
         except Exception as e:
             print(f'Overdue check error for {bag["id"]}: {e}')
     cur.close(); conn.close()
-    return jsonify({'checked':len(bags),'alerted':alerted})
+    return {'checked':len(bags),'alerted':alerted}
+
+@app.route('/api/check-overdue', methods=['POST'])
+def check_overdue():
+    return jsonify(run_bag_overdue_check())
 
 # ── Cleaners ──────────────────────────────────────────────────────────────────
 
@@ -1437,9 +1440,8 @@ def store_log():
     rows=cur.fetchall(); cur.close(); conn.close()
     return jsonify(rows)
 
-@app.route('/api/store/check-overdue', methods=['POST'])
-def check_store_overdue():
-    """Flag loans past their expected return date and email the inspector."""
+def run_store_overdue_check():
+    """Flag loans past their expected return date and email the person who checked it out."""
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""SELECT st.*, si.name as item_name
         FROM store_transactions st JOIN store_items si ON si.id=st.item_id
@@ -1454,7 +1456,11 @@ def check_store_overdue():
         cur.execute("UPDATE store_transactions SET is_overdue=1, overdue_alerted=1 WHERE id=%s",(tx['id'],))
         alerted+=1
     conn.commit(); cur.close(); conn.close()
-    return jsonify({'success':True,'alerted':alerted})
+    return {'success':True,'alerted':alerted}
+
+@app.route('/api/store/check-overdue', methods=['POST'])
+def check_store_overdue():
+    return jsonify(run_store_overdue_check())
 
 @app.route('/api/seed-store', methods=['POST'])
 def seed_store():
@@ -2060,9 +2066,31 @@ def decide_po_request(rid):
     return jsonify({'success':True})
 
 
+# ── Overdue check scheduler ─────────────────────────────────────────────────
+# Runs both overdue checks automatically on a fixed interval, so alerts fire
+# on their own instead of relying on someone opening the right page.
+OVERDUE_CHECK_INTERVAL_SECONDS = 1800  # 30 minutes
+
+def background_overdue_loop():
+    while True:
+        try:
+            result = run_bag_overdue_check()
+            if result['alerted']:
+                print(f"[Overdue Scheduler] Linen bag alerts sent: {result['alerted']}", flush=True)
+        except Exception as e:
+            print(f"[Overdue Scheduler] Bag check failed: {e}", flush=True)
+        try:
+            result = run_store_overdue_check()
+            if result['alerted']:
+                print(f"[Overdue Scheduler] Store loan alerts sent: {result['alerted']}", flush=True)
+        except Exception as e:
+            print(f"[Overdue Scheduler] Store check failed: {e}", flush=True)
+        time.sleep(OVERDUE_CHECK_INTERVAL_SECONDS)
+
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     init_db()
+    threading.Thread(target=background_overdue_loop, daemon=True).start()
     port=int(os.environ.get('PORT',3000))
     app.run(host='0.0.0.0', port=port, debug=False)
