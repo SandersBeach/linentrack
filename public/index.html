@@ -768,6 +768,7 @@ async function renderSettings() {
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="showAddStaffModal()">+ Add Staff Member</button>
       <button class="btn btn-ghost btn-sm" onclick="seedStaffMembers()">🔄 Reset to Master List</button>
+      <button class="btn btn-ghost btn-sm" id="toggle-pins-btn" onclick="togglePinsVisible()">👁️ Show PINs</button>
     </div>
     <div id="seed-staff-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     </div>`;
@@ -2737,11 +2738,28 @@ async function submitPOFromTab() {
 </html>
 <script>
 // Staff management functions (appended)
+let _pinsVisible = false;
+
+async function togglePinsVisible() {
+  _pinsVisible = !_pinsVisible;
+  const btn = document.getElementById('toggle-pins-btn');
+  if (btn) btn.textContent = _pinsVisible ? '🙈 Hide PINs' : '👁️ Show PINs';
+  loadStaffList();
+}
+
 async function loadStaffList() {
   const area = document.getElementById('staff-list-area');
   if (!area) return;
   area.innerHTML = 'Loading...';
-  const staff = await fetch('/api/staff').then(r=>r.json());
+  let staff;
+  if (_pinsVisible) {
+    const res = await fetch('/api/staff/reveal', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin}) });
+    const data = await res.json();
+    if (data.error) { alert(data.error); _pinsVisible = false; const btn=document.getElementById('toggle-pins-btn'); if(btn) btn.textContent='👁️ Show PINs'; staff = await fetch('/api/staff').then(r=>r.json()); }
+    else { staff = data; }
+  } else {
+    staff = await fetch('/api/staff').then(r=>r.json());
+  }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
   const roles = [...new Set(staff.map(s=>s.role))].sort();
   area.innerHTML = roles.map(role => `
@@ -2751,7 +2769,7 @@ async function loadStaffList() {
         <div class="row" style="align-items:center">
           <div class="row-main">
             <div class="row-title" style="font-size:13px">${s.name} ${!s.active?'<span style="color:var(--coral-dark);font-size:11px">(inactive)</span>':''}</div>
-            <div class="row-sub">${s.email||'no email'} · PIN: ****</div>
+            <div class="row-sub">${s.email||'no email'} · PIN: ${_pinsVisible && s.pin ? `<strong style="font-family:monospace;letter-spacing:2px;color:var(--teal-dark)">${s.pin}</strong>` : '****'}</div>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="showEditStaffModal(${s.id},'${s.name.replace(/'/g,"\\'")}','${s.role}','${s.email||''}',${s.active})">Edit</button>
         </div>`).join('')}
