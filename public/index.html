@@ -398,17 +398,20 @@ function updateDots() {
 async function submitPin() {
   document.getElementById('login-err').textContent = '';
   try {
-    const r = await fetch('/api/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ pin: pinVal }) });
+    const r = await fetch('/api/staff/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ pin: pinVal }) });
     const data = await r.json();
-    if (!r.ok) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
+    if (!r.ok || !data.success) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
     role = data.role;
     _currentPin = pinVal;
+    _currentStaffName = data.name || '';
+    _currentStaffId = data.id || null;
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     document.getElementById('role-label').textContent =
       role === 'admin' ? '🔑 Admin' :
       role === 'maintenance' ? '🔧 Maintenance' :
-      role === 'coordinator' ? '📋 Coordinator' : '📦 Warehouse';
+      role === 'coordinator' ? '📋 Coordinator' :
+      role === 'inspector' ? '🔍 Inspector' : '📦 Warehouse';
     buildTabs();
     fetch('/api/maintenance_staff').then(r=>r.json()).then(d => { _loanerStaff = d; });
     const defaultView = sessionStorage.getItem('defaultView');
@@ -426,7 +429,7 @@ async function submitPin() {
     checkPendingSupplyScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
-function logout() { role = null; pinVal = ''; _currentPin = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+function logout() { role = null; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
