@@ -904,6 +904,28 @@ async function renderSettings() {
     <button class="btn btn-primary" onclick="seedStoreInventory()">Load Store Inventory</button>
     <div id="seed-store-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div
     <div id="seed-hk-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div></div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>QR Code Sheets</h2></div>
+    <div class="card"><div class="card-title">Print QR codes in bulk</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Every item's QR code is permanent — it never changes, so reprinting a lost or damaged sticker is exactly the same as printing it the first time. New items you add automatically show up here too, no need to come back for a new batch.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('supply')">🖨️ Print All SupplyCentral QR Codes</button>
+      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('hk')">🖨️ Print All Housekeeping Supply QR Codes</button>
+    </div>
+    <div id="qr-bulk-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
+    </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Linen Bag Labels</h2></div>
+    <div class="card"><div class="card-title">Print bag QR labels</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the bag ID directly into the Scan Bag field, same as your existing labels. Good for replacing a lost/damaged label or labeling a brand-new home's bags.</p>
+    <label>Print for one home</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+      <select id="bag-qr-home-sel" style="flex:1;min-width:200px">${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select>
+      <button class="btn btn-primary btn-sm" onclick="printBagQRCodes(document.getElementById('bag-qr-home-sel').value)">🖨️ Print This Home's Labels</button>
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-ghost btn-sm" onclick="printBagQRCodes(null)">🖨️ Print ALL Bag Labels (every home)</button>
+    </div>
+    <div id="bag-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
+    </div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 async function toggleCleanerEmails() {
@@ -920,6 +942,58 @@ async function toggleCleanerEmails() {
     document.getElementById('cleaner-email-toggle-msg').textContent = data.enabled ? '✓ Cleaners will now receive real overdue emails.' : '✓ Cleaner emails are now suppressed — only Cassie gets notified.';
     renderSettings();
   } catch(e) { alert('Connection error — please try again.'); btn.disabled=false; }
+}
+
+async function printAllQRCodes(kind) {
+  const msg = document.getElementById('qr-bulk-msg');
+  msg.style.color = 'var(--gray-400)'; msg.textContent = 'Loading...';
+  const endpoint = kind === 'hk' ? '/api/hk-supplies' : '/api/supplies';
+  const label = kind === 'hk' ? 'Housekeeping Supplies' : 'SupplyCentral';
+  try {
+    const items = await fetch(endpoint).then(r=>r.json());
+    const withQR = items.filter(i => i.qr_code);
+    const missing = items.filter(i => !i.qr_code);
+    if (!withQR.length) { msg.textContent = 'No QR codes found for these items.'; return; }
+    const win = window.open('', '_blank');
+    const cards = withQR.map(i => `
+      <div style="display:inline-block;width:220px;text-align:center;padding:16px;margin:8px;border:1px solid #ddd;border-radius:8px;page-break-inside:avoid">
+        <img src="${i.qr_code}" style="width:160px;height:160px">
+        <div style="font-size:13px;font-weight:600;margin-top:8px">${i.name}</div>
+        <div style="font-size:11px;color:#888">Scan to Take or Restock</div>
+      </div>`).join('');
+    win.document.write(`<html><head><title>${label} QR Codes</title><style>body{font-family:sans-serif;text-align:center;padding:20px}</style></head><body><h2>${label} — QR Codes (${withQR.length})</h2>${cards}<script>window.onload=()=>window.print()<\/script></body></html>`);
+    win.document.close();
+    msg.style.color = 'var(--teal)';
+    msg.textContent = missing.length ? `Opened print view for ${withQR.length} items. ⚠️ ${missing.length} item(s) have no QR code yet — probably added before this feature existed. Edit and re-save them to generate one.` : `Opened print view for ${withQR.length} items.`;
+  } catch (e) {
+    msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the QR codes — please try again.';
+  }
+}
+
+async function printBagQRCodes(homeId) {
+  const msg = document.getElementById('bag-qr-msg');
+  msg.style.color = 'var(--gray-400)'; msg.textContent = 'Loading...';
+  if (!homeId) {
+    if (!confirm('This will generate labels for every bag across every home — potentially hundreds of pages. Continue?')) { msg.textContent = ''; return; }
+  }
+  try {
+    const url = homeId ? `/api/bags/qr-sheet?home_id=${homeId}` : '/api/bags/qr-sheet';
+    const bags = await fetch(url).then(r=>r.json());
+    if (!bags.length) { msg.textContent = 'No bags found.'; return; }
+    const win = window.open('', '_blank');
+    const cards = bags.map(b => `
+      <div style="display:inline-block;width:200px;text-align:center;padding:14px;margin:6px;border:1px solid #ddd;border-radius:8px;page-break-inside:avoid">
+        <img src="${b.qr_code}" style="width:140px;height:140px">
+        <div style="font-size:14px;font-weight:700;margin-top:6px;font-family:monospace">${b.id}</div>
+        <div style="font-size:11px;color:#888">${b.home_name}</div>
+      </div>`).join('');
+    win.document.write(`<html><head><title>Linen Bag Labels</title><style>body{font-family:sans-serif;text-align:center;padding:20px}</style></head><body><h2>Linen Bag Labels (${bags.length})</h2>${cards}<script>window.onload=()=>window.print()<\/script></body></html>`);
+    win.document.close();
+    msg.style.color = 'var(--teal)';
+    msg.textContent = `Opened print view for ${bags.length} bag label${bags.length!==1?'s':''}.`;
+  } catch (e) {
+    msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the labels — please try again.';
+  }
 }
 
 async function seedStoreInventory() {
@@ -992,7 +1066,7 @@ function checkPendingSupplyScan() {
   const pending = sessionStorage.getItem('pendingSupplyScan');
   if (!pending) return;
   sessionStorage.removeItem('pendingSupplyScan');
-  if (role !== 'maintenance' && role !== 'admin') return;
+  if (!userRoles.includes('maintenance') && !userRoles.includes('admin')) return;
   setTimeout(() => { showTab('supply_scan'); setTimeout(() => { const id = parseInt(pending); if (id) openSupplyTxFromScan(id); }, 300); }, 300);
 }
 
@@ -1622,8 +1696,8 @@ async function showHKQR(supplyId) {
 
 async function renderOrders() {
   // Determine which modules this role can see
-  const canSeeHK = (role === 'warehouse' || role === 'admin');
-  const canSeeMaint = (role === 'maintenance' || role === 'admin');
+  const canSeeHK = (userRoles.includes('warehouse') || userRoles.includes('admin'));
+  const canSeeMaint = (userRoles.includes('maintenance') || userRoles.includes('admin'));
   if (!_ordersModuleFilter) _ordersModuleFilter = canSeeHK ? 'housekeeping' : 'maintenance';
 
   let moduleToggle = '';
