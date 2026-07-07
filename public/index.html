@@ -709,12 +709,12 @@ async function renderCleaners() {
           <div style="margin-top:8px;display:flex;align-items:center;gap:8px;background:var(--gray-50);padding:6px 10px;border-radius:var(--radius-sm);width:fit-content">
             <span style="font-size:11px;color:var(--gray-400)">PIN:</span>
             <span style="font-size:16px;font-weight:700;font-family:monospace;letter-spacing:3px;color:var(--teal-dark)">${c.pin||'—'}</span>
-            <button class="btn btn-ghost btn-sm" onclick="resetPin(${c.id},'${c.name.replace(/'/g,"&#39;")}')" style="font-size:11px;padding:3px 8px">Reset</button>
+            <button class="btn btn-ghost btn-sm" onclick="resetPin(${c.id},'${c.name.replace(/'/g,"\\'")}')" style="font-size:11px;padding:3px 8px">Reset</button>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex-shrink:0">
-          <button class="btn btn-ghost btn-sm" onclick="editCleaner(${c.id},'${c.name.replace(/'/g,"&#39;")}','${(c.email||'').replace(/'/g,"&#39;")}','${(c.phone||'').replace(/'/g,"&#39;")}')">Edit</button>
-          ${c.bags_out===0?`<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name.replace(/'/g,"&#39;")}')">Remove</button>`:'<span class="badge badge-out" style="font-size:10px">Has bags</span>'}
+          <button class="btn btn-ghost btn-sm" onclick="editCleaner(${c.id},'${c.name.replace(/'/g,"\\'")}','${(c.email||'').replace(/'/g,"\\'")}','${(c.phone||'').replace(/'/g,"\\'")}')">Edit</button>
+          ${c.bags_out===0?`<button class="btn btn-danger btn-sm" onclick="deleteCleaner(${c.id},'${c.name.replace(/'/g,"\\'")}')">Remove</button>`:'<span class="badge badge-out" style="font-size:10px">Has bags</span>'}
         </div>
       </div>`;
     });
@@ -829,7 +829,7 @@ async function renderSettings() {
     <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
     <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="card"><div class="card-title">All homes</div>`;
-  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name}')">Remove</button>`:''}</div>`;});
+  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div>`;});
   html+=`</div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Staff & PINs</h2></div>
     <div class="card"><div class="card-title">Staff members</div>
@@ -2089,7 +2089,7 @@ async function renderActiveLoans() {
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:2px">Qty: ${loan.quantity} · Out by: ${loan.performed_by}</div>
       <div style="font-size:12px;color:${overdue?'var(--coral-dark)':'var(--gray-400)'}">Return by: ${loan.expected_return_date || 'not set'}</div>
       ${loan.notes ? `<div style="font-size:11px;color:var(--gray-400);margin-top:4px;font-style:italic">${loan.notes}</div>` : ''}
-      <button class="btn btn-primary btn-sm btn-full" style="margin-top:10px" onclick="returnLoanItem(${loan.id}, '${loan.item_name}')">✅ Mark Returned</button>
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:10px" onclick="returnLoanItem(${loan.id}, '${loan.item_name.replace(/'/g,"\\'")}')">✅ Mark Returned</button>
     </div>`;
   }).join('');
 }
