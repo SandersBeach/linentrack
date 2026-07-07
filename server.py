@@ -31,6 +31,17 @@ TWO_STAGE_CATEGORIES = {'FL Repairs/Service Calls'}
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
+def get_setting(key, default=None):
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("SELECT value FROM app_settings WHERE key=%s",(key,))
+    row=cur.fetchone(); cur.close(); conn.close()
+    return row[0] if row else default
+
+def set_setting(key, value):
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("INSERT INTO app_settings (key,value) VALUES (%s,%s) ON CONFLICT (key) DO UPDATE SET value=%s",(key,value,value))
+    conn.commit(); cur.close(); conn.close()
+
 _DB_URL = (os.environ.get('DATABASE_URL') or
            os.environ.get('DATABASE_PUBLIC_URL') or
            'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
@@ -199,6 +210,9 @@ def init_db():
             area TEXT,
             uploaded_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY, value TEXT
+        );
         CREATE TABLE IF NOT EXISTS po_requests (
             id SERIAL PRIMARY KEY,
             employee_name TEXT NOT NULL, employee_email TEXT NOT NULL,
@@ -314,7 +328,9 @@ Please return this bag to the warehouse as soon as possible.
 Sanders Beach Rentals"""
 
     recipients = []
-    if cleaner.get('email'): recipients.append(cleaner['email'])
+    cleaner_emails_on = get_setting('cleaner_emails_enabled', 'false') == 'true'
+    if cleaner_emails_on and cleaner.get('email'):
+        recipients.extend([e.strip() for e in cleaner['email'].split(',') if e.strip()])
     recipients.append(HOUSEKEEPING_MANAGER)
     if recipients:
         return send_email(subject, plain, to=recipients, html_body=html)
@@ -615,6 +631,36 @@ def check_overdue():
     return jsonify(run_bag_overdue_check())
 
 # ── Cleaners ──────────────────────────────────────────────────────────────────
+
+@app.route('/api/cleaners/bulk-set-emails', methods=['POST'])
+def bulk_set_cleaner_emails():
+    """Admin-only: match a pasted list of {name, email} against existing cleaners
+    by normalized name (trim/collapse-whitespace/case-insensitive) and update
+    their email. Names that don't match anything are reported back, not guessed."""
+    data = request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    entries = data.get('entries', [])
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name FROM cleaners WHERE active=1")
+    cleaners = cur.fetchall()
+    def norm(s): return ' '.join(s.strip().lower().split())
+    by_norm_name = {norm(c['name']): c['id'] for c in cleaners}
+    updated = []
+    unmatched = []
+    cur2 = conn.cursor()
+    for entry in entries:
+        name = (entry.get('name') or '').strip()
+        email = (entry.get('email') or '').strip()
+        if not name or not email: continue
+        cid = by_norm_name.get(norm(name))
+        if cid is None:
+            unmatched.append(name)
+            continue
+        cur2.execute("UPDATE cleaners SET email=%s WHERE id=%s", (email, cid))
+        updated.append(name)
+    conn.commit(); cur2.close(); cur.close(); conn.close()
+    return jsonify({'success': True, 'updated': updated, 'unmatched': unmatched})
 
 @app.route('/api/cleaners', methods=['GET'])
 def get_cleaners():
@@ -1130,6 +1176,21 @@ def sync_known_emails():
             updated.append(name)
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success': True, 'updated': updated})
+
+@app.route('/api/settings/cleaner-emails-enabled', methods=['GET'])
+def get_cleaner_emails_setting():
+    return jsonify({'enabled': get_setting('cleaner_emails_enabled', 'false') == 'true'})
+
+@app.route('/api/settings/cleaner-emails-enabled', methods=['POST'])
+def set_cleaner_emails_setting():
+    """Admin-only: turn real overdue-alert emails to cleaners on/off.
+    Housekeeping manager always still gets notified either way."""
+    data = request.json or {}
+    if check_pin(str(data.get('admin_pin',''))) != 'admin':
+        return jsonify({'error':'Admin PIN required'}), 403
+    enabled = bool(data.get('enabled'))
+    set_setting('cleaner_emails_enabled', 'true' if enabled else 'false')
+    return jsonify({'success': True, 'enabled': enabled})
 
 @app.route('/api/staff', methods=['POST'])
 def add_staff():
