@@ -658,11 +658,26 @@ function filterHomes() { const q=(document.getElementById('home-q')?.value||'').
 async function renderLog() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const log = await fetch('/api/activity').then(r => r.json());
-  if (!log.length) { document.getElementById('main-content').innerHTML = '<div class="empty">No activity yet</div>'; return; }
-  let html = '<div class="card" style="padding:0.75rem 1.25rem">';
+  let html = `<div class="card" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">From (optional)</label><input type="date" id="log-export-start"></div>
+    <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">To (optional)</label><input type="date" id="log-export-end"></div>
+    <button class="btn btn-primary" onclick="exportActivityCSV()">📥 Export CSV</button>
+    <div style="font-size:11px;color:var(--gray-400);width:100%">This screen only shows linen bag & loaner activity (${log.length} most recent). The CSV export covers <strong>everything</strong> — bags, loaners, supplies, HK supplies, StoreCentral, orders, POs, and inventory counts — for the date range you pick (or all-time if left blank).</div>
+  </div>`;
+  if (!log.length) { html += '<div class="empty">No activity yet</div>'; document.getElementById('main-content').innerHTML = html; return; }
+  html += '<div class="card" style="padding:0.75rem 1.25rem">';
   log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
   html += '</div>';
   document.getElementById('main-content').innerHTML = html;
+}
+function exportActivityCSV() {
+  const start = document.getElementById('log-export-start')?.value || '';
+  const end = document.getElementById('log-export-end')?.value || '';
+  if (start && end && start > end) { alert('"From" date must be before "To" date.'); return; }
+  const params = new URLSearchParams();
+  if (start) params.set('start', start);
+  if (end) params.set('end', end);
+  window.location.href = '/api/activity/export' + (params.toString() ? '?' + params.toString() : '');
 }
 
 // ── Cleaners Tab ───────────────────────────────────────────────────────────────
