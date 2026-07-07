@@ -23,6 +23,10 @@ PO_APPROVER_1_EMAIL = 'sabrina@sandersbeachrentals.com'
 PO_APPROVER_1_NAME  = 'Sabrina Renshaw'
 PO_APPROVER_2_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
 PO_APPROVER_2_NAME  = 'Sarah Jordan'
+CHUCK_EMAIL = 'chuck@sandersbeachrentals.com'
+CHUCK_NAME  = 'Chuck Howard'
+# PO categories that require Chuck's approval first, before going to final approval.
+TWO_STAGE_CATEGORIES = {'FL Repairs/Service Calls'}
 
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
@@ -221,6 +225,10 @@ def init_db():
         "ALTER TABLE loaner_transactions ADD COLUMN IF NOT EXISTS performed_by_name TEXT",
         "ALTER TABLE loaners ADD COLUMN IF NOT EXISTS checked_out_by TEXT",
         "ALTER TABLE loaners ADD COLUMN IF NOT EXISTS checked_out TEXT",
+        "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'final'",
+        "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_approved_by TEXT",
+        "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_notes TEXT",
+        "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -314,8 +322,11 @@ Sanders Beach Rentals"""
 
 def send_po_approver_email(req):
     urgency_emoji = {'Routine': '📋', 'At Risk': '⚠️', 'Unstayable': '🚨'}.get(req['urgency'], '📋')
-    subject = f"{urgency_emoji} New PO Request — {req['vendor']} (${req['amount']:.2f})"
+    is_chuck_stage = req.get('stage') == 'chuck'
+    subject_prefix = "Level 1 Approval Needed — " if is_chuck_stage else ""
+    subject = f"{urgency_emoji} {subject_prefix}New PO Request — {req['vendor']} (${req['amount']:.2f})"
     approvals_url = 'https://sbrlinens.up.railway.app/po-approvals'
+    stage_note = '<p style="margin:0 0 16px;color:#444;font-weight:600">This is a maintenance repair/service request — your approval is needed before it goes to final sign-off.</p>' if is_chuck_stage else ''
     html = f"""
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
       <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
@@ -323,6 +334,7 @@ def send_po_approver_email(req):
         <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals</p>
       </div>
       <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        {stage_note}
         <p style="margin:0 0 16px;color:#444">A new purchase request has been submitted and needs your approval.</p>
         <table style="width:100%;border-collapse:collapse;font-size:14px">
           <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888;width:140px">Employee</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">{req['employee_name']}</td></tr>
@@ -339,7 +351,8 @@ def send_po_approver_email(req):
       </div>
     </div>"""
     plain = f"New PO Request — {req['vendor']} (${req['amount']:.2f})\n\nEmployee: {req['employee_name']}\nVendor: {req['vendor']}\nAmount: ${req['amount']:.2f}\nCategory: {req['category']}\nUrgency: {req['urgency']}\nDate Needed: {req['date_needed']}\nDescription: {req['description']}\n\nReview and approve: {approvals_url}"
-    return send_email(subject, plain, to=[PO_APPROVER_1_EMAIL, PO_APPROVER_2_EMAIL], html_body=html)
+    recipients = [CHUCK_EMAIL] if is_chuck_stage else [PO_APPROVER_1_EMAIL, PO_APPROVER_2_EMAIL]
+    return send_email(subject, plain, to=recipients, html_body=html)
 
 def send_po_decision_email(req):
     status = req['status']
@@ -348,6 +361,7 @@ def send_po_decision_email(req):
     color = '#2d7a4f' if status == 'Approved' else '#c0392b'
     bg = '#e8f5ee' if status == 'Approved' else '#fdecea'
     notes_html = f'<tr><td style="padding:8px 0;color:#888;vertical-align:top">Notes</td><td style="padding:8px 0">{req["approver_notes"]}</td></tr>' if req.get('approver_notes') else ''
+    stage1_html = f'<tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Initial Approval</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req["stage1_approved_by"]}</td></tr>' if req.get('stage1_approved_by') else ''
     html = f"""
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
       <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
@@ -364,6 +378,7 @@ def send_po_decision_email(req):
           <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Amount</td><td style="padding:8px 0;border-bottom:1px solid #eee;font-weight:600">${req['amount']:.2f}</td></tr>
           <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Category</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req['category']}</td></tr>
           <tr><td style="padding:8px 0;border-bottom:1px solid #eee;color:#888">Decision by</td><td style="padding:8px 0;border-bottom:1px solid #eee">{req.get('approved_by','Sanders Beach Rentals Management')}</td></tr>
+          {stage1_html}
           {notes_html}
         </table>
       </div>
@@ -1979,14 +1994,16 @@ def create_po_request():
         if not data.get(f): return jsonify({'error':f'{f} is required'}),400
     try: amount=float(data['amount'])
     except: return jsonify({'error':'Invalid amount'}),400
+    category = data['category'].strip()
+    initial_stage = 'chuck' if category in TWO_STAGE_CATEGORIES else 'final'
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""INSERT INTO po_requests
-        (employee_name,employee_email,vendor,amount,category,description,date_needed,urgency,status,submitted_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'Pending',%s) RETURNING id""",
+        (employee_name,employee_email,vendor,amount,category,description,date_needed,urgency,status,submitted_at,stage)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'Pending',%s,%s) RETURNING id""",
         (data['employee_name'].strip(), data['employee_email'].strip().lower(),
-         data['vendor'].strip(), amount, data['category'].strip(),
+         data['vendor'].strip(), amount, category,
          data['description'].strip(), data['date_needed'].strip(),
-         data.get('urgency','Routine'), now_central()))
+         data.get('urgency','Routine'), now_central(), initial_stage))
     row=cur.fetchone(); conn.commit(); req_id=row['id']
     cur.execute("SELECT * FROM po_requests WHERE id=%s",(req_id,)); req=cur.fetchone()
     cur.close(); conn.close()
@@ -2003,13 +2020,38 @@ def decide_po_request(rid):
     data=request.json or {}
     status=data.get('status','')
     if status not in ('Approved','Denied'): return jsonify({'error':'Status must be Approved or Denied'}),400
-    approver_name=data.get('approver_name','Sanders Beach Rentals Management').strip()
+    approver_name=data.get('approver_name','').strip()
     notes=data.get('notes','').strip()
+    if not approver_name: return jsonify({'error':'Approver name is required'}),400
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); req=cur.fetchone()
     if not req: cur.close(); conn.close(); return jsonify({'error':'Request not found'}),404
     if req['status'] != 'Pending': cur.close(); conn.close(); return jsonify({'error':'Already decided'}),400
+    stage = req.get('stage') or 'final'
     ts=now_central()
+
+    if stage == 'chuck':
+        if approver_name != CHUCK_NAME:
+            cur.close(); conn.close(); return jsonify({'error':'Only Chuck Howard can decide this stage'}),403
+        if status == 'Denied':
+            cur.execute("UPDATE po_requests SET status='Denied',approver_notes=%s,approved_by=%s,decided_at=%s WHERE id=%s",(notes,approver_name,ts,rid))
+            conn.commit()
+            cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); updated=cur.fetchone()
+            cur.close(); conn.close()
+            send_po_decision_email(updated)
+            return jsonify({'success':True})
+        # Chuck approved -> advance to final stage, notify Sabrina + Sarah, request stays Pending
+        cur.execute("UPDATE po_requests SET stage='final',stage1_approved_by=%s,stage1_notes=%s,stage1_decided_at=%s WHERE id=%s",(approver_name,notes,ts,rid))
+        conn.commit()
+        cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); updated=cur.fetchone()
+        cur.close(); conn.close()
+        try: send_po_approver_email(updated)
+        except Exception as e: print(f'[PO STAGE2 EMAIL FAILED] {e}', flush=True)
+        return jsonify({'success':True})
+
+    # stage == 'final'
+    if approver_name not in (PO_APPROVER_1_NAME, PO_APPROVER_2_NAME):
+        cur.close(); conn.close(); return jsonify({'error':'Only Sabrina Renshaw or Sarah Jordan can decide this stage'}),403
     cur.execute("UPDATE po_requests SET status=%s,approver_notes=%s,approved_by=%s,decided_at=%s WHERE id=%s",(status,notes,approver_name,ts,rid))
     conn.commit()
     cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); updated=cur.fetchone()
