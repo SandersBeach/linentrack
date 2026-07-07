@@ -1044,17 +1044,18 @@ def check_staff_pin(pin):
 
 @app.route('/api/staff/auth', methods=['POST'])
 def staff_auth():
-    """Authenticate a staff PIN. Returns name, role."""
+    """Authenticate a PIN — checks individual staff PINs first, then falls
+    back to the legacy shared role PINs (admin/warehouse/maintenance/coordinator)
+    so anyone not yet migrated to an individual PIN still works."""
     data = request.json or {}
     pin = str(data.get('pin', ''))
-    # Check master admin PIN first
-    admin_pin = os.environ.get('ADMIN_PIN', '2468')
-    if pin == admin_pin:
-        return jsonify({'success': True, 'name': 'Admin', 'role': 'admin', 'is_master': True})
     staff = check_staff_pin(pin)
-    if not staff:
-        return jsonify({'error': 'Invalid PIN'}), 401
-    return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id']})
+    if staff:
+        return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id']})
+    legacy_role = check_pin(pin)
+    if legacy_role:
+        return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'is_master': legacy_role == 'admin'})
+    return jsonify({'error': 'Invalid PIN'}), 401
 
 @app.route('/api/staff', methods=['GET'])
 def get_staff():
