@@ -378,6 +378,7 @@ const TAB_LABELS = {
   store: '🏪 Store'
 };
 let currentTab = 'scan';
+let userRoles = [];
 
 // ── PIN ────────────────────────────────────────────────────────────────────────
 function pinPress(d) {
@@ -400,26 +401,24 @@ async function submitPin() {
     const data = await r.json();
     if (!r.ok || !data.success) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
     role = data.role;
+    userRoles = data.roles && data.roles.length ? data.roles : (role ? [role] : []);
     _currentPin = pinVal;
     _currentStaffName = data.name || '';
     _currentStaffId = data.id || null;
     _currentStaffEmail = data.email || '';
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    document.getElementById('role-label').textContent =
-      role === 'admin' ? '🔑 Admin' :
-      role === 'maintenance' ? '🔧 Maintenance' :
-      role === 'coordinator' ? '📋 Coordinator' :
-      role === 'inspector' ? '🔍 Inspector' : '📦 Warehouse';
+    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse' };
+    document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
     fetch('/api/maintenance_staff').then(r=>r.json()).then(d => { _loanerStaff = d; });
     const defaultView = sessionStorage.getItem('defaultView');
-    if (defaultView === 'loaners' && (role === 'maintenance' || role === 'admin')) {
+    if (defaultView === 'loaners' && (userRoles.includes('maintenance') || userRoles.includes('admin'))) {
       sessionStorage.removeItem('defaultView');
       showTab('loaner_scan');
-    } else if (role === 'coordinator') {
+    } else if (userRoles.includes('coordinator') && !userRoles.includes('admin') && !userRoles.includes('warehouse')) {
       showTab('inventory_count');
-    } else if (role === 'maintenance') {
+    } else if (userRoles.includes('maintenance') && !userRoles.includes('admin') && !userRoles.includes('warehouse')) {
       showTab('loaner_scan');
     } else {
       showTab('scan');
@@ -428,11 +427,12 @@ async function submitPin() {
     checkPendingSupplyScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
-function logout() { role = null; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+function logout() { role = null; userRoles = []; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
-  const tabs = TABS[role] || [];
+  const seen = new Set(); const tabs = [];
+  userRoles.forEach(r => (TABS[r] || []).forEach(t => { if (!seen.has(t)) { seen.add(t); tabs.push(t); } }));
   document.getElementById('tab-bar').innerHTML = tabs.map(t =>
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
   ).join('');
@@ -1080,7 +1080,7 @@ async function renderSupplyScan() {
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">🧰 SupplyCentral</div>
-      ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="showAddSupplyModal()">+ Add Item</button>`:''}
+      ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddSupplyModal()">+ Add Item</button>`:''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="st-inventory" onclick="supplySubtab('inventory')">Inventory</button>
@@ -1107,7 +1107,7 @@ function renderSupplyCards() {
   const items = filter ? _supplies.filter(s=>s.category===filter) : _supplies;
   const grid = document.getElementById('supply-cards');
   if (!grid) return;
-  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(role==='admin'?'Add one above.':'')+'</p>'; return; }
+  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(userRoles.includes('admin')?'Add one above.':'')+'</p>'; return; }
   grid.innerHTML = items.map(item => {
     const low = item.quantity <= item.low_stock_threshold;
     return `<div class="supply-card ${low?'low-stock':''}">
@@ -1123,7 +1123,7 @@ function renderSupplyCards() {
         <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">📤 Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button>
         <button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">🔲</button>
-        ${role==='admin'?`<button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1490,7 +1490,7 @@ async function renderHKSupply() {
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">🧴 Housekeeping Supplies</div>
-      ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
+      ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="hkt-inventory" onclick="hkSubtab('inventory')">Inventory</button>
@@ -1517,7 +1517,7 @@ function renderHKCards() {
   const items = filter ? _hkSupplies.filter(s=>s.category===filter) : _hkSupplies;
   const grid = document.getElementById('hk-cards');
   if (!grid) return;
-  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(role==='admin'?'Add one above.':'')+'</p>'; return; }
+  if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(userRoles.includes('admin')?'Add one above.':'')+'</p>'; return; }
   grid.innerHTML = items.map(item => {
     const low = item.quantity <= item.low_stock_threshold;
     return `<div class="supply-card ${low?'low-stock':''}">
@@ -1533,7 +1533,7 @@ function renderHKCards() {
         <button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
         <button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button>
-        ${role==='admin'?`<button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1928,7 +1928,7 @@ async function renderDiscrepancies() {
       </div>
       ${mismatched.map(it=>`<div class="row"><div class="row-main"><div class="row-title">${it.item_name}</div><div class="row-sub">Expected ${it.expected_units} ${it.unit_label} · Received ${it.received_units} ${it.unit_label}</div></div></div>`).join('')}
       ${o.discrepancy_notes?`<div style="font-size:12px;color:var(--gray-400);margin-top:8px"><em>Note: ${o.discrepancy_notes}</em></div>`:''}
-      ${!o.discrepancy_resolved && role==='admin' ? `
+      ${!o.discrepancy_resolved && userRoles.includes('admin') ? `
         <div style="margin-top:10px;display:flex;gap:8px">
           <input type="text" id="resolve-note-${o.id}" placeholder="Resolution note (optional)" style="flex:1;margin-bottom:0">
           <button class="btn btn-primary btn-sm" onclick="resolveOrderDiscrepancy(${o.id})">Mark Resolved</button>
@@ -1958,7 +1958,7 @@ async function renderStore() {
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">🏪 StoreCentral</div>
-      ${role==='admin' ? `<button class="btn btn-primary btn-sm" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
+      ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
@@ -2009,7 +2009,7 @@ function renderStoreCards() {
       ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
-        ${role==='admin'?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`).join('');
 }
@@ -2375,7 +2375,7 @@ function renderForecastResults(data, from, to) {
     html += `<div class="card" style="border-color:var(--coral);border-width:1.5px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
         <div class="card-title" style="margin-bottom:0;color:var(--coral-dark)">⚠️ Items to Order (${shortfalls.length})</div>
-        ${role==='admin'?`<button class="btn btn-primary btn-sm" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
       </div>`;
     html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--gray-400)">
@@ -2400,7 +2400,7 @@ function renderForecastResults(data, from, to) {
       <div style="font-size:32px;margin-bottom:8px">✅</div>
       <div style="font-size:15px;font-weight:600;color:var(--teal-dark)">All items sufficiently stocked!</div>
       <div style="font-size:13px;color:var(--gray-400);margin-top:4px">Current inventory covers all ${data.reservation_count} upcoming reservations.</div>
-      ${role==='admin'?`<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+      ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
     </div>`;
   }
 
@@ -2866,19 +2866,43 @@ async function loadStaffList() {
     staff = await fetch('/api/staff').then(r=>r.json());
   }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
-  const roles = [...new Set(staff.map(s=>s.role))].sort();
-  area.innerHTML = roles.map(role => `
+  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector' };
+  const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector'];
+  const byRole = {};
+  staff.forEach(s => {
+    (s.role||'').split(',').map(r=>r.trim()).filter(Boolean).forEach(r => {
+      if (!byRole[r]) byRole[r] = [];
+      byRole[r].push(s);
+    });
+  });
+  const rolesPresent = roleOrder.filter(r => byRole[r]);
+  area.innerHTML = rolesPresent.map(role => `
     <div style="margin-bottom:1rem">
-      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:6px">${role}</div>
-      ${staff.filter(s=>s.role===role).map(s=>`
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:6px">${ROLE_LABELS[role]||role}</div>
+      ${byRole[role].map(s=>{
+        const allRoles = (s.role||'').split(',').map(r=>r.trim()).filter(Boolean);
+        const otherRoles = allRoles.filter(r=>r!==role);
+        return `
         <div class="row" style="align-items:center">
           <div class="row-main">
-            <div class="row-title" style="font-size:13px">${s.name} ${!s.active?'<span style="color:var(--coral-dark);font-size:11px">(inactive)</span>':''}</div>
+            <div class="row-title" style="font-size:13px">${s.name} ${!s.active?'<span style="color:var(--coral-dark);font-size:11px">(inactive)</span>':''}${otherRoles.length?` <span class="tag" style="font-size:10px">+ ${otherRoles.map(r=>ROLE_LABELS[r]||r).join(', ')}</span>`:''}</div>
             <div class="row-sub">${s.email||'no email'} · PIN: ${_pinsVisible && s.pin ? `<strong style="font-family:monospace;letter-spacing:2px;color:var(--teal-dark)">${s.pin}</strong>` : '****'}</div>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="showEditStaffModal(${s.id},'${s.name.replace(/'/g,"\\'")}','${s.role}','${s.email||''}',${s.active})">Edit</button>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`).join('');
+}
+
+function roleCheckboxes(selectedRoles) {
+  const roles = [
+    {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
+    {v:'inspector', l:'Inspector'}, {v:'coordinator', l:'Coordinator'}, {v:'admin', l:'Admin'}
+  ];
+  return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
+}
+function getCheckedRoles(container) {
+  return [...container.querySelectorAll('.role-checkbox:checked')].map(c => c.value);
 }
 
 function showAddStaffModal() {
@@ -2887,14 +2911,8 @@ function showAddStaffModal() {
   modal.innerHTML=`<div class="modal-box" style="max-width:400px">
     <h3>Add Staff Member</h3>
     <label>Full name</label><input type="text" id="sm-name" placeholder="e.g. Jane Smith">
-    <label style="margin-top:0.75rem">Role</label>
-    <select id="sm-role">
-      <option value="warehouse">Warehouse</option>
-      <option value="maintenance">Maintenance</option>
-      <option value="inspector">Inspector</option>
-      <option value="coordinator">Coordinator</option>
-      <option value="admin">Admin</option>
-    </select>
+    <label style="margin-top:0.75rem">Roles (select all that apply)</label>
+    <div id="sm-roles">${roleCheckboxes([])}</div>
     <label style="margin-top:0.75rem">PIN (4 digits)</label>
     <input type="text" id="sm-pin" maxlength="4" placeholder="e.g. 1234">
     <label style="margin-top:0.75rem">Email (for alerts)</label>
@@ -2909,20 +2927,22 @@ function showAddStaffModal() {
 
 async function submitAddStaff() {
   const name=document.getElementById('sm-name')?.value?.trim();
-  const role=document.getElementById('sm-role')?.value;
+  const roles=getCheckedRoles(document.getElementById('sm-roles'));
   const pin=document.getElementById('sm-pin')?.value?.trim();
   const email=document.getElementById('sm-email')?.value?.trim();
   if(!name||!pin){alert('Name and PIN are required.');return;}
+  if(!roles.length){alert('Please select at least one role.');return;}
   if(pin.length!==4||!/^\d+$/.test(pin)){alert('PIN must be exactly 4 digits.');return;}
   const res=await fetch('/api/staff',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({admin_pin:_currentPin,name,role,pin,email})});
+    body:JSON.stringify({admin_pin:_currentPin,name,role:roles.join(','),pin,email})});
   const data=await res.json();
   if(data.error){alert(data.error);return;}
   document.getElementById('modal-staff')?.remove();
   loadStaffList();
 }
 
-function showEditStaffModal(id, name, role, email, active) {
+function showEditStaffModal(id, name, roleStr, email, active) {
+  const currentRoles = (roleStr||'').split(',').map(r=>r.trim()).filter(Boolean);
   const modal = document.createElement('div');
   modal.className='modal-overlay'; modal.id='modal-staff-edit';
   modal.innerHTML=`<div class="modal-box" style="max-width:400px">
@@ -2931,14 +2951,8 @@ function showEditStaffModal(id, name, role, email, active) {
     <input type="text" id="se-pin" maxlength="4" placeholder="4 digits">
     <label style="margin-top:0.75rem">Email</label>
     <input type="email" id="se-email" value="${email}">
-    <label style="margin-top:0.75rem">Role</label>
-    <select id="se-role">
-      <option value="warehouse" ${role==='warehouse'?'selected':''}>Warehouse</option>
-      <option value="maintenance" ${role==='maintenance'?'selected':''}>Maintenance</option>
-      <option value="inspector" ${role==='inspector'?'selected':''}>Inspector</option>
-      <option value="coordinator" ${role==='coordinator'?'selected':''}>Coordinator</option>
-      <option value="admin" ${role==='admin'?'selected':''}>Admin</option>
-    </select>
+    <label style="margin-top:0.75rem">Roles (select all that apply)</label>
+    <div id="se-roles">${roleCheckboxes(currentRoles)}</div>
     <label style="margin-top:0.75rem">Status</label>
     <select id="se-active">
       <option value="1" ${active?'selected':''}>Active</option>
@@ -2965,10 +2979,11 @@ async function deleteStaffMember(id, name) {
 async function submitEditStaff(id) {
   const pin=document.getElementById('se-pin')?.value?.trim();
   const email=document.getElementById('se-email')?.value?.trim();
-  const role=document.getElementById('se-role')?.value;
+  const roles=getCheckedRoles(document.getElementById('se-roles'));
   const active=parseInt(document.getElementById('se-active')?.value);
+  if(!roles.length){alert('Please select at least one role.');return;}
   if(pin&&(pin.length!==4||!/^\d+$/.test(pin))){alert('PIN must be 4 digits.');return;}
-  const body={admin_pin:_currentPin,email,role,active};
+  const body={admin_pin:_currentPin,email,role:roles.join(','),active};
   if(pin) body.pin=pin;
   const res=await fetch(`/api/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
