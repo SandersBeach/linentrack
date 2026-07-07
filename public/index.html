@@ -706,6 +706,22 @@ async function renderCleaners() {
   } else { html+='<div class="empty">No cleaners yet</div>'; }
   html+=`</div>`;
 
+  // Bulk email import
+  html += `<div class="card"><div class="card-title">Bulk import emails</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:0.75rem">One per line: <code>Name: email</code>. For multiple emails on one cleaner, separate with a comma. Matching is by name — anything that doesn't match an existing cleaner will be reported, not guessed.</p>
+    <textarea id="bulk-email-textarea" style="width:100%;min-height:180px;font-family:monospace;font-size:13px;padding:10px;border:0.5px solid var(--gray-200);border-radius:var(--radius-sm)">A&D Cleaning: antoinettemendez86@icloud.com, demario.dean@hotmail.com
+Dream Clean: dreamclean72@gmail.com
+Elizabeth Varo: varochita84@gmail.com
+Gesiane Barbosa: profgesiane7@gmail.com
+Jennifer Hawkins: jenkat164@gmail.com
+Juan Carlos Rocha: rompemuellecoast@gmail.com
+Mario Cruz: qandqcleaningservices1@gmail.com
+Miranda Edney: mirandaedney1@gmail.com
+Monserrat Guzman: jacsirymonserrat@gmail.com</textarea>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="bulkImportCleanerEmails()">Import Emails</button>
+    <div id="bulk-email-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+  </div>`;
+
   // Edit modal
   html += `<div id="modal-cleaner-edit" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
     <div class="modal-box">
@@ -723,6 +739,33 @@ async function renderCleaners() {
 
   document.getElementById('main-content').innerHTML = html;
 }
+async function bulkImportCleanerEmails() {
+  const raw = document.getElementById('bulk-email-textarea')?.value || '';
+  const entries = [];
+  raw.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const idx = line.indexOf(':');
+    if (idx === -1) return;
+    const name = line.slice(0, idx).trim();
+    const email = line.slice(idx+1).trim();
+    if (name && email) entries.push({name, email});
+  });
+  if (!entries.length) { alert('No valid lines found. Use format: Name: email'); return; }
+  const msg = document.getElementById('bulk-email-msg');
+  msg.style.color = 'var(--teal)'; msg.textContent = 'Importing...';
+  try {
+    const res = await fetch('/api/cleaners/bulk-set-emails', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin, entries})});
+    const data = await res.json();
+    if (data.error) { msg.style.color='var(--coral-dark)'; msg.textContent = data.error; return; }
+    let text = `✓ Updated ${data.updated.length}: ${data.updated.join(', ')}`;
+    if (data.unmatched.length) text += ` — ⚠️ No match found for: ${data.unmatched.join(', ')}`;
+    msg.style.color = data.unmatched.length ? 'var(--amber)' : 'var(--teal)';
+    msg.textContent = text;
+    renderCleaners();
+  } catch(e) { msg.style.color='var(--coral-dark)'; msg.textContent = 'Connection error — please try again.'; }
+}
+
 async function addCleaner() {
   const name=document.getElementById('new-cleaner')?.value?.trim();
   const email=document.getElementById('new-cleaner-email')?.value?.trim();
@@ -765,6 +808,7 @@ async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; c
 // ── Settings Tab ───────────────────────────────────────────────────────────────
 async function renderSettings() {
   const homes = await fetch('/api/homes').then(r => r.json());
+  const cleanerEmailSetting = await fetch('/api/settings/cleaner-emails-enabled').then(r => r.json()).catch(()=>({enabled:false}));
   let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
     <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
@@ -785,6 +829,16 @@ async function renderSettings() {
     <div id="seed-staff-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     <div id="sync-emails-msg" style="font-size:12px;color:var(--teal);margin-top:4px;min-height:18px"></div>
     </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Cleaner Email Alerts</h2></div>
+    <div class="card">
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Overdue linen bag alerts always notify Cassie (housekeeping manager). This controls whether the <strong>cleaner themselves</strong> also gets emailed — keep this off during testing so cleaners don't get confused by test alerts.</p>
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn ${cleanerEmailSetting.enabled?'btn-primary':'btn-ghost'}" id="cleaner-email-toggle-btn" onclick="toggleCleanerEmails()">
+        ${cleanerEmailSetting.enabled ? '✅ ON — Cleaners WILL receive overdue emails' : '🔒 OFF — Cleaners will NOT receive overdue emails'}
+      </button>
+    </div>
+    <div id="cleaner-email-toggle-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
     <div class="card"><div class="card-title">Load real inventory</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the current housekeeping supply inventory from the master list. <strong>This will replace all existing HK supply quantities.</strong> Only do this once, or when resetting to baseline.</p>
@@ -797,6 +851,22 @@ async function renderSettings() {
     <div id="seed-hk-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div></div>`;
   document.getElementById('main-content').innerHTML = html;
 }
+async function toggleCleanerEmails() {
+  const btn = document.getElementById('cleaner-email-toggle-btn');
+  const current = await fetch('/api/settings/cleaner-emails-enabled').then(r=>r.json()).catch(()=>({enabled:false}));
+  const next = !current.enabled;
+  const label = next ? 'turn ON (cleaners will start receiving real overdue emails)' : 'turn OFF (cleaners will stop receiving overdue emails)';
+  if (!confirm(`Are you sure you want to ${label}?`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/settings/cleaner-emails-enabled', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin, enabled:next})});
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.disabled=false; return; }
+    document.getElementById('cleaner-email-toggle-msg').textContent = data.enabled ? '✓ Cleaners will now receive real overdue emails.' : '✓ Cleaner emails are now suppressed — only Cassie gets notified.';
+    renderSettings();
+  } catch(e) { alert('Connection error — please try again.'); btn.disabled=false; }
+}
+
 async function seedStoreInventory() {
   if (!confirm('This will replace all current store items with the master list. Continue?')) return;
   const btn = event.target;
