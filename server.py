@@ -68,21 +68,45 @@ def resolve_performer(data):
         if role: return role.capitalize()
     return 'Unknown'
 
+def staff_role_list(staff):
+    """Split a staff member's role field (possibly 'warehouse,maintenance')
+    into a clean list of individual role strings."""
+    if not staff or not staff.get('role'): return []
+    return [r.strip() for r in staff['role'].split(',') if r.strip()]
+
+VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin'}
+
+def validate_role_string(role_str):
+    """Validate a comma-separated role string like 'warehouse,maintenance'.
+    Returns (cleaned_string, error_message_or_None)."""
+    parts = [r.strip() for r in (role_str or '').split(',') if r.strip()]
+    if not parts:
+        return None, 'At least one role is required'
+    bad = [r for r in parts if r not in VALID_ROLES]
+    if bad:
+        return None, f"Unknown role(s): {', '.join(bad)}"
+    # dedupe while preserving order
+    seen = set(); cleaned = []
+    for r in parts:
+        if r not in seen: seen.add(r); cleaned.append(r)
+    return ','.join(cleaned), None
+
 def is_admin_pin(pin):
     """True if this PIN is the legacy shared admin PIN OR belongs to an
-    individual staff member with role='admin'. Use this (not check_pin alone)
-    for every admin-gated route, so individual admin logins always work."""
+    individual staff member whose role list includes 'admin'. Use this
+    (not check_pin alone) for every admin-gated route."""
     if check_pin(pin) == 'admin': return True
     staff = check_staff_pin(pin)
-    return bool(staff and staff.get('role') == 'admin')
+    return 'admin' in staff_role_list(staff)
 
-def resolve_role(pin):
-    """Return the effective role for a PIN — checks individual staff first,
-    then falls back to the legacy shared PINs. Use this (not check_pin alone)
-    for any route gating access by role, so individual-PIN logins always work."""
+def resolve_roles(pin):
+    """Return the effective list of roles for a PIN — checks individual staff
+    first (may hold multiple roles), then falls back to the single legacy
+    shared-PIN role. Always returns a list, even if empty."""
     staff = check_staff_pin(pin)
-    if staff: return staff['role']
-    return check_pin(pin)
+    if staff: return staff_role_list(staff)
+    legacy = check_pin(pin)
+    return [legacy] if legacy else []
 
 _DB_URL = (os.environ.get('DATABASE_URL') or
            os.environ.get('DATABASE_PUBLIC_URL') or
@@ -982,8 +1006,8 @@ def update_supply(sid):
 @app.route('/api/supplies/<int:sid>/transaction', methods=['POST'])
 def supply_transaction(sid):
     data=request.json or {}
-    role=resolve_role(str(data.get('pin','')))
-    if role not in ('admin','maintenance','coordinator'): return jsonify({'error':'Access denied'}),403
+    roles=resolve_roles(str(data.get('pin','')))
+    if not any(r in ('admin','maintenance','coordinator') for r in roles): return jsonify({'error':'Access denied'}),403
     action=data.get('action',''); qty=int(data.get('quantity',1))
     performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
     if action not in ('take','restock'): return jsonify({'error':'Invalid action'}),400
@@ -1058,8 +1082,8 @@ def update_hk_supply(sid):
 @app.route('/api/hk-supplies/<int:sid>/transaction', methods=['POST'])
 def hk_supply_transaction(sid):
     data=request.json or {}
-    role=resolve_role(str(data.get('pin','')))
-    if role not in ('admin','warehouse'): return jsonify({'error':'Access denied'}),403
+    roles=resolve_roles(str(data.get('pin','')))
+    if not any(r in ('admin','warehouse') for r in roles): return jsonify({'error':'Access denied'}),403
     action=data.get('action',''); qty=int(data.get('quantity',1))
     performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
     if action not in ('take','restock'): return jsonify({'error':'Invalid action'}),400
@@ -1313,10 +1337,11 @@ def staff_auth():
     pin = str(data.get('pin', ''))
     staff = check_staff_pin(pin)
     if staff:
-        return jsonify({'success': True, 'name': staff['name'], 'role': staff['role'], 'id': staff['id'], 'email': staff.get('email') or ''})
+        roles = staff_role_list(staff)
+        return jsonify({'success': True, 'name': staff['name'], 'role': roles[0] if roles else '', 'roles': roles, 'id': staff['id'], 'email': staff.get('email') or ''})
     legacy_role = check_pin(pin)
     if legacy_role:
-        return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'is_master': legacy_role == 'admin'})
+        return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'roles': [legacy_role], 'is_master': legacy_role == 'admin'})
     return jsonify({'error': 'Invalid PIN'}), 401
 
 @app.route('/api/staff', methods=['GET'])
@@ -1392,7 +1417,9 @@ def add_staff():
     if not is_admin_pin(str(data.get('admin_pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     name=data.get('name','').strip()
-    role=data.get('role','warehouse')
+    role_clean, role_err = validate_role_string(data.get('role','warehouse'))
+    if role_err: return jsonify({'error':role_err}),400
+    role=role_clean
     pin=str(data.get('pin','')).strip()
     email=data.get('email','').strip() or None
     if not name or not pin: return jsonify({'error':'Name and PIN required'}), 400
@@ -1417,7 +1444,10 @@ def update_staff(sid):
     cur.execute("SELECT name FROM staff_members WHERE id=%s",(sid,)); existing=cur.fetchone()
     fields=[]; params=[]
     if 'name' in data: fields.append('name=%s'); params.append(data['name'].strip())
-    if 'role' in data: fields.append('role=%s'); params.append(data['role'])
+    if 'role' in data:
+        role_clean, role_err = validate_role_string(data['role'])
+        if role_err: cur.close(); conn.close(); return jsonify({'error':role_err}),400
+        fields.append('role=%s'); params.append(role_clean)
     if 'email' in data: fields.append('email=%s'); params.append(data['email'].strip() or None)
     if 'pin' in data:
         new_pin=str(data['pin']).strip()
