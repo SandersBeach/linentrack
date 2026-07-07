@@ -639,17 +639,57 @@ function filterStatus() {
 // ── Homes Tab ──────────────────────────────────────────────────────────────────
 async function renderHomes() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
-  const inv = await fetch('/api/inventory').then(r => r.json());
+  const [inv, loaners, storeLoans] = await Promise.all([
+    fetch('/api/inventory').then(r => r.json()),
+    fetch('/api/loaners').then(r => r.json()),
+    fetch('/api/store/loans').then(r => r.json())
+  ]);
+  const norm = s => (s||'').trim().toLowerCase();
+
   const homeMap = {};
-  inv.forEach(b => { if (!homeMap[b.home_name]) homeMap[b.home_name]={code:b.home_code,bags:[]}; homeMap[b.home_name].bags.push(b); });
+  inv.forEach(b => { if (!homeMap[b.home_name]) homeMap[b.home_name]={code:b.home_code,bags:[],loaners:[],storeLoans:[]}; homeMap[b.home_name].bags.push(b); });
+
+  const loanersOut = loaners.filter(l => l.status === 'out' && l.home_name);
+  loanersOut.forEach(l => {
+    if (!homeMap[l.home_name]) homeMap[l.home_name] = {code:'', bags:[], loaners:[], storeLoans:[]};
+    homeMap[l.home_name].loaners.push(l);
+  });
+
+  const unmatchedStoreLoans = [];
+  storeLoans.forEach(sl => {
+    const matchName = Object.keys(homeMap).find(name => norm(name) === norm(sl.property_address));
+    if (matchName) homeMap[matchName].storeLoans.push(sl);
+    else unmatchedStoreLoans.push(sl);
+  });
+
   let html = `<div class="search-row"><input type="text" id="home-q" placeholder="Search home..." oninput="filterHomes()" /></div><div id="homes-body">`;
-  Object.entries(homeMap).sort((a,b)=>a[1].code.localeCompare(b[1].code)).forEach(([name,{code,bags}]) => {
-    const out=bags.filter(b=>b.status==='out'); const inW=bags.filter(b=>b.status==='in');
-    html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code}</div></div><div style="display:flex;gap:6px">${out.length?`<span class="badge badge-out">${out.length} out</span>`:''}${inW.length?`<span class="badge badge-in">${inW.length} in</span>`:''}</div></div>`;
-    bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':'In'}</span></div>`;});
+  Object.entries(homeMap).sort((a,b)=>(a[1].code||'').localeCompare(b[1].code||'')).forEach(([name,{code,bags,loaners,storeLoans}]) => {
+    const out=bags.filter(b=>b.status==='out'); const inW=bags.filter(b=>b.status==='in'); const staged=bags.filter(b=>b.status==='staged');
+    const totalItems = bags.length + loaners.length + storeLoans.length;
+    html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div><div style="display:flex;gap:6px;flex-wrap:wrap">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div></div>`;
+    if (bags.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🧺 Linens</div>`;
+      bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):b.status==='staged'?'⏳ Staged, awaiting pickup':'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':b.status==='staged'?'badge-warn':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':b.status==='staged'?'Staged':'In'}</span></div>`;});
+    }
+    if (loaners.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🔧 Loaner items</div>`;
+      loaners.forEach(l=>{const who=l.checked_out_by||l.staff_name;html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${l.id}</span><span style="flex:1;color:var(--gray-400)">${l.name}${who?' · '+who:''}</span><span class="badge badge-out" style="font-size:10px">Out</span></div>`;});
+    }
+    if (storeLoans.length) {
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🛍️ Store loans</div>`;
+      storeLoans.forEach(sl=>{const overdue=sl.expected_return_date && sl.expected_return_date<new Date().toISOString().slice(0,10);html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span style="flex:1;color:var(--gray-400)">${sl.item_name} · ${sl.performed_by||'—'}${sl.expected_return_date?' · due '+sl.expected_return_date:''}</span><span class="badge ${overdue?'badge-out':'badge-warn'}" style="font-size:10px">${overdue?'Overdue':'On loan'}</span></div>`;});
+    }
+    if (!bags.length && !loaners.length && !storeLoans.length) {
+      html += `<div style="font-size:12px;color:var(--gray-400);padding:4px 0">Nothing currently tracked at this property</div>`;
+    }
     html+=`</div>`;
   });
   html+=`</div>`;
+  if (unmatchedStoreLoans.length) {
+    html += `<div class="card" style="border-color:var(--amber)"><div class="card-title" style="color:var(--amber)">⚠️ Store loans with an unrecognized address</div><p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">These don't exactly match any home on file — likely a typo in the property address when checked out.</p>`;
+    unmatchedStoreLoans.forEach(sl=>{html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span style="flex:1;color:var(--gray-400)">${sl.item_name} · "${sl.property_address}" · ${sl.performed_by||'—'}</span></div>`;});
+    html += `</div>`;
+  }
   document.getElementById('main-content').innerHTML = html;
 }
 function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{c.style.display=!q||c.dataset.home.includes(q)?'':'none';}); }
@@ -1976,9 +2016,12 @@ function renderStoreCards() {
 
 // ── Checkout Modal ────────────────────────────────────────────
 
-function showStoreCheckoutModal(itemId) {
+async function showStoreCheckoutModal(itemId) {
   const item = _storeItems.find(i=>i.id===itemId);
   if (!item) return;
+  const homes = await fetch('/api/homes').then(r=>r.json()).catch(()=>[]);
+  const homeOptions = homes.sort((a,b)=>a.code.localeCompare(b.code))
+    .map(h=>`<option value="${h.name.replace(/"/g,'&quot;')}">${h.name} (${h.code})</option>`).join('');
 
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
@@ -1987,8 +2030,11 @@ function showStoreCheckoutModal(itemId) {
     <h3>Check Out: ${item.name}</h3>
     <p style="font-size:13px;color:var(--gray-400);margin-bottom:1rem">${item.quantity} in stock${item.price ? ` · $${parseFloat(item.price).toFixed(2)} each` : ''}</p>
 
-    <label>Property address</label>
-    <input type="text" id="co-property" placeholder="e.g. 22 Flatwood Street" list="homes-datalist">
+    <label>Property</label>
+    <select id="co-property">
+      <option value="">Select a property...</option>
+      ${homeOptions}
+    </select>
 
     <label style="margin-top:0.75rem">Quantity</label>
     <input type="number" id="co-qty" value="1" min="1" max="${item.quantity}">
