@@ -2799,10 +2799,20 @@ function showEditStaffModal(id, name, role, email, active) {
     </select>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="document.getElementById('modal-staff-edit').remove()">Cancel</button>
+      <button class="btn btn-danger" onclick="deleteStaffMember(${id},'${name.replace(/'/g,"\\'")}')">Delete</button>
       <button class="btn btn-primary" onclick="submitEditStaff(${id})">Save Changes</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
+}
+
+async function deleteStaffMember(id, name) {
+  if (!confirm(`Permanently delete ${name}? This cannot be undone. (If you just want to disable their login, use Status: Inactive instead.)`)) return;
+  const res = await fetch(`/api/staff/${id}`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({admin_pin:_currentPin}) });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('modal-staff-edit')?.remove();
+  loadStaffList();
 }
 
 async function submitEditStaff(id) {
