@@ -483,6 +483,14 @@ def make_bag_qr(bag_id):
     buf = io.BytesIO(); img.save(buf, format='PNG')
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
+def make_pickup_qr():
+    url = 'https://sbrlinens.up.railway.app/pickup'
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(url); qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO(); img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+
 def make_supply_qr(supply_id):
     url = f'https://sbrlinens.up.railway.app?supply={supply_id}'
     qr = qrcode.QRCode(box_size=6, border=2)
@@ -1052,6 +1060,10 @@ def supply_transaction(sid):
         body=f"Low stock alert for '{item['name']}'.\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
         alert_sent=send_email(f"LOW STOCK: {item['name']}",body,to=SARAH_EMAIL)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
+
+@app.route('/api/pickup-qr', methods=['GET'])
+def get_pickup_qr():
+    return jsonify({'qr_code': make_pickup_qr()})
 
 @app.route('/api/supplies/<int:sid>/qr', methods=['GET'])
 def get_supply_qr(sid):
