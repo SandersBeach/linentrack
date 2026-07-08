@@ -721,13 +721,39 @@ function exportActivityCSV() {
 }
 
 // ── Cleaners Tab ───────────────────────────────────────────────────────────────
+async function printPickupQR() {
+  const res = await fetch('/api/pickup-qr');
+  const data = await res.json();
+  const win = window.open('', '_blank');
+  win.document.write(`<html><head><title>Bag Pickup — Wall QR</title><style>
+    body{font-family:sans-serif;text-align:center;padding:60px}
+    h1{font-size:28px;margin-bottom:8px}
+    p{font-size:16px;color:#555;margin-bottom:30px}
+    img{width:320px;height:320px}
+    .steps{max-width:420px;margin:30px auto 0;text-align:left;font-size:14px;color:#333;line-height:1.8}
+  </style></head><body>
+    <h1>📱 Scan to Pick Up Your Bags</h1>
+    <p>Sanders Beach Rentals · LinenTrack</p>
+    <img src="${data.qr_code}">
+    <div class="steps">
+      <strong>How to use:</strong><br>
+      1. Open your phone camera and scan this code<br>
+      2. Enter your 5-digit PIN<br>
+      3. Scan each bag as you pick it up<br>
+      4. Your 24-hour return clock starts once confirmed
+    </div>
+    <script>window.onload=()=>window.print()<\/script>
+  </body></html>`);
+  win.document.close();
+}
 async function renderCleaners() {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const cleaners = await fetch('/api/cleaners').then(r => r.json());
   const pickupUrl = window.location.origin + '/pickup';
   let html = `<div class="section-header"><h2>Cleaners</h2></div>
   <div class="card" style="background:var(--teal-light);border-color:var(--teal-mid)">
-    <div style="font-size:13px;color:var(--teal-dark)">📱 <strong>Cleaner pickup URL:</strong> <a href="${pickupUrl}" style="color:var(--teal-dark)">${pickupUrl}</a><br><span style="font-size:11px;opacity:0.8">Post a QR code of this URL at the warehouse for cleaners to scan with their phone.</span></div>
+    <div style="font-size:13px;color:var(--teal-dark)">📱 <strong>Cleaner pickup URL:</strong> <a href="${pickupUrl}" style="color:var(--teal-dark)">${pickupUrl}</a><br><span style="font-size:11px;opacity:0.8">Post this QR code at the warehouse for cleaners to scan with their phone.</span></div>
+    <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="printPickupQR()">🖨️ Print Wall QR Poster</button>
   </div>
   <div class="card"><div class="card-title">Add cleaner</div>
     <div class="form-row"><div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div><div><label>Email (for overdue alerts)</label><input type="email" id="new-cleaner-email" placeholder="cleaner@email.com" /></div></div>
