@@ -390,6 +390,7 @@ const TAB_LABELS = {
 };
 let currentTab = 'scan';
 let _availableTabs = [];
+let _tabGeneration = 0;
 let userRoles = [];
 
 // ── PIN ────────────────────────────────────────────────────────────────────────
@@ -483,6 +484,7 @@ const MODULE_NAMES = {
 };
 function showTab(t) {
   currentTab = t;
+  const myGen = ++_tabGeneration;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
@@ -504,16 +506,21 @@ function showTab(t) {
   };
   if (fns[t]) {
     document.getElementById('main-content').innerHTML = '<div style="padding:2.5rem;text-align:center;color:var(--gray-400);font-size:13px">Loading…</div>';
-    fns[t]();
+    fns[t](myGen);
   }
 }
+// Returns true if a render call started for an older tab/generation should
+// abandon writing to the screen — i.e. the person has since switched tabs
+// (or logged out and back in) before this fetch finished.
+function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 
 // ── Scan Tab ───────────────────────────────────────────────────────────────────
 let scanState = { bag: null, cleaners: [], selectedCleaner: null, sessionLog: [], mode: 'out' };
 
-async function renderScan() {
+async function renderScan(gen) {
   const cr = await fetch('/api/cleaners');
   scanState.cleaners = await cr.json();
+  if (_stale(gen)) return;
   const opts = scanState.cleaners.map(c => `<option value="${c.id}" ${scanState.selectedCleaner==c.id?'selected':''}>${c.name}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
     <div class="card">
@@ -603,9 +610,10 @@ async function processScan() {
 async function lookupBag() { await processScan(); }
 
 // ── Overdue Tab ────────────────────────────────────────────────────────────────
-async function renderOverdue() {
+async function renderOverdue(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Checking for overdue bags...</div>';
   const inv = await fetch('/api/inventory').then(r => r.json());
+  if (_stale(gen)) return;
   const now = new Date();
   const overdue = inv.filter(b => b.status==='out' && b.picked_up_at && (now - new Date(b.picked_up_at)) / 3600000 >= 24);
   const needsReview = inv.filter(b => b.status==='out' && !b.picked_up_at);
@@ -630,9 +638,10 @@ async function renderOverdue() {
 }
 
 // ── Status Tab ─────────────────────────────────────────────────────────────────
-async function renderStatus() {
+async function renderStatus(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const [inv, stats] = await Promise.all([fetch('/api/inventory').then(r=>r.json()), fetch('/api/stats').then(r=>r.json())]);
+  if (_stale(gen)) return;
   const byCleaner = {}; const inWarehouse = [];
   const byCleanerStaged = {};
   inv.forEach(b => {
@@ -664,13 +673,14 @@ function filterStatus() {
 }
 
 // ── Homes Tab ──────────────────────────────────────────────────────────────────
-async function renderHomes() {
+async function renderHomes(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const [inv, loaners, storeLoans] = await Promise.all([
     fetch('/api/inventory').then(r => r.json()),
     fetch('/api/loaners').then(r => r.json()),
     fetch('/api/store/loans').then(r => r.json())
   ]);
+  if (_stale(gen)) return;
   const norm = s => (s||'').trim().toLowerCase();
 
   const homeMap = {};
@@ -722,9 +732,10 @@ async function renderHomes() {
 function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{c.style.display=!q||c.dataset.home.includes(q)?'':'none';}); }
 
 // ── Log Tab ────────────────────────────────────────────────────────────────────
-async function renderLog() {
+async function renderLog(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const log = await fetch('/api/activity').then(r => r.json());
+  if (_stale(gen)) return;
   let html = `<div class="card" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">From (optional)</label><input type="date" id="log-export-start"></div>
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">To (optional)</label><input type="date" id="log-export-end"></div>
@@ -773,9 +784,10 @@ async function printPickupQR() {
   </body></html>`);
   win.document.close();
 }
-async function renderCleaners() {
+async function renderCleaners(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Loading...</div>';
   const cleaners = await fetch('/api/cleaners').then(r => r.json());
+  if (_stale(gen)) return;
   const pickupUrl = window.location.origin + '/pickup';
   let html = `<div class="section-header"><h2>Cleaners</h2></div>
   <div class="card" style="background:var(--teal-light);border-color:var(--teal-mid)">
@@ -914,9 +926,10 @@ async function resetPin(id,name) {
 async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/cleaners/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok)alert(d.error); renderCleaners(); }
 
 // ── Settings Tab ───────────────────────────────────────────────────────────────
-async function renderSettings() {
+async function renderSettings(gen) {
   const homes = await fetch('/api/homes').then(r => r.json());
   const cleanerEmailSetting = await fetch('/api/settings/cleaner-emails-enabled').then(r => r.json()).catch(()=>({enabled:false}));
+  if (_stale(gen)) return;
   let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
     <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
@@ -1155,8 +1168,9 @@ function checkPendingSupplyScan() {
 // ── LoanerTrack ────────────────────────────────────────────────────────────────
 let loanerScanState = { staff: [], homes: [], selectedStaff: null, sessionLog: [], mode: 'out' };
 
-async function renderLoanerScan() {
+async function renderLoanerScan(gen) {
   const [sr, hr] = await Promise.all([fetch('/api/maintenance_staff').then(r=>r.json()), fetch('/api/homes').then(r=>r.json())]);
+  if (_stale(gen)) return;
   loanerScanState.staff = sr; loanerScanState.homes = hr;
   const staffOpts = sr.map(s=>`<option value="${s.id}" ${loanerScanState.selectedStaff==s.id?'selected':''}>${s.name}</option>`).join('');
   const homeOpts = hr.map(h=>`<option value="${h.id}">${h.name}</option>`).join('');
@@ -1201,18 +1215,20 @@ function renderLoanerSessionLog() {
   [...log].reverse().forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span></div>`;});
   html+='</div>'; const el=document.getElementById('loaner-session-log'); if(el)el.innerHTML=html;
 }
-async function renderLoanerStatus() {
+async function renderLoanerStatus(gen) {
   document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
   const loaners=await fetch('/api/loaners').then(r=>r.json());
+  if (_stale(gen)) return;
   const out=loaners.filter(l=>l.status==='out'); const inW=loaners.filter(l=>l.status==='in');
   let html=`<div class="stat-grid"><div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div></div>`;
   if(out.length){html+='<div class="card"><div class="card-title">Currently deployed</div>';out.forEach(l=>{const since=l.checked_out?new Date(l.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';const who=l.checked_out_by||l.staff_name;html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${who?' · '+who:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
   if(inW.length){html+='<div class="card"><div class="card-title">At warehouse</div>';const cats={};inW.forEach(l=>{if(!cats[l.category])cats[l.category]=[];cats[l.category].push(l);});Object.entries(cats).sort().forEach(([cat,items])=>{html+=`<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;items.forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><span class="badge badge-in">In</span></div>`;});});html+='</div>';}
   document.getElementById('main-content').innerHTML=html;
 }
-async function renderLoanerLog() {
+async function renderLoanerLog(gen) {
   document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
   const log=await fetch('/api/activity').then(r=>r.json());
+  if (_stale(gen)) return;
   const loanerLog=log.filter(e=>e.activity_type==='loaner');
   if(!loanerLog.length){document.getElementById('main-content').innerHTML='<div class="empty">No loaner activity yet</div>';return;}
   let html='<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
@@ -1229,8 +1245,9 @@ async function loadSupplies() {
   _supplies = await res.json();
 }
 
-async function renderSupplyScan() {
+async function renderSupplyScan(gen) {
   await loadSupplies();
+  if (_stale(gen)) return;
   const cats = [...new Set(_supplies.map(s=>s.category))].sort();
   const catFilter = `<select id="supply-cat-filter" onchange="renderSupplyCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
   document.getElementById('main-content').innerHTML = `
@@ -1312,9 +1329,10 @@ async function loadSupplyLog() {
   }).join('') + '</div>';
 }
 
-async function renderSupplyStatus() {
+async function renderSupplyStatus(gen) {
   await loadSupplies();
-  renderSupplyScan();
+  if (_stale(gen)) return;
+  renderSupplyScan(gen);
 }
 
 function showAddSupplyModal() {
@@ -1437,9 +1455,10 @@ function printSupplyQR() {
 let _countSession = null;
 let _countScanBuffer = '';
 
-async function renderInventoryCount() {
+async function renderInventoryCount(gen) {
   const pastRes = await fetch('/api/inventory-counts');
   const pastCounts = await pastRes.json();
+  if (_stale(gen)) return;
   if (_countSession) { renderCountInProgress(); return; }
   let pastHtml = '';
   if (pastCounts.length) {
@@ -1657,8 +1676,9 @@ async function loadHKSupplies() {
   _hkSupplies = await res.json();
 }
 
-async function renderHKSupply() {
+async function renderHKSupply(gen) {
   await loadHKSupplies();
+  if (_stale(gen)) return;
   const cats = [...new Set(_hkSupplies.map(s=>s.category))].sort();
   const catFilter = `<select id="hk-cat-filter" onchange="renderHKCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
   document.getElementById('main-content').innerHTML = `
@@ -2125,9 +2145,10 @@ async function resolveOrderDiscrepancy(orderId) {
 
 let _storeItems = [];
 
-async function renderStore() {
+async function renderStore(gen) {
   const res = await fetch('/api/store/items');
   _storeItems = await res.json();
+  if (_stale(gen)) return;
 
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
