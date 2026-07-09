@@ -526,14 +526,23 @@ def make_loaner_qr(loaner_id):
 
 # ── Static routes ─────────────────────────────────────────────────────────────
 
+def _no_cache_html(filename):
+    """Serve an HTML page with headers that force the browser to always fetch
+    the latest version, never a stale cached copy from a previous deploy."""
+    resp = send_from_directory('public', filename)
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
 @app.route('/')
-def index(): return send_from_directory('public', 'index.html')
+def index(): return _no_cache_html('index.html')
 
 @app.route('/po-approvals')
-def po_approvals(): return send_from_directory('public', 'po-approvals.html')
+def po_approvals(): return _no_cache_html('po-approvals.html')
 
 @app.route('/pickup')
-def pickup(): return send_from_directory('public', 'pickup.html')
+def pickup(): return _no_cache_html('pickup.html')
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -1154,7 +1163,7 @@ def update_hk_supply(sid):
 def hk_supply_transaction(sid):
     data=request.json or {}
     roles=resolve_roles(str(data.get('pin','')))
-    if not any(r in ('admin','warehouse') for r in roles): return jsonify({'error':'Access denied'}),403
+    if not any(r in ('admin','warehouse','inspector') for r in roles): return jsonify({'error':'Access denied'}),403
     action=data.get('action',''); qty=int(data.get('quantity',1))
     performed=data.get('performed_by','Staff').strip(); notes=data.get('notes','').strip()
     if action not in ('take','restock'): return jsonify({'error':'Invalid action'}),400
