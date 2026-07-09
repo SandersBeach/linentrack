@@ -256,6 +256,7 @@ def init_db():
             timestamp TEXT NOT NULL
         );
         ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS performed_by_email TEXT;
+        ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS transaction_type TEXT NOT NULL DEFAULT 'sold_out';
         ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS expected_return_date TEXT;
         ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS returned_at TEXT;
         ALTER TABLE store_transactions ADD COLUMN IF NOT EXISTS is_overdue INTEGER DEFAULT 0;
@@ -1687,29 +1688,37 @@ def store_checkout():
         return jsonify({'error':'expected_return_date required for loans'}), 400
 
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM store_items WHERE id=%s",(item_id,))
-    item=cur.fetchone()
-    if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
-    if item['quantity'] < qty:
-        cur.close(); conn.close()
-        return jsonify({'error':f'Only {item["quantity"]} in stock'}), 400
+    try:
+        cur.execute("SELECT * FROM store_items WHERE id=%s",(item_id,))
+        item=cur.fetchone()
+        if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+        if item['quantity'] < qty:
+            cur.close(); conn.close()
+            return jsonify({'error':f'Only {item["quantity"]} in stock'}), 400
 
-    new_qty = item['quantity'] - qty
-    cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, item_id))
-    cur.execute("""INSERT INTO store_transactions
-        (item_id,action,quantity,quantity_after,property_address,performed_by,performed_by_email,
-         transaction_type,expected_return_date,notes,timestamp)
-        VALUES (%s,'checkout',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (item_id,qty,new_qty,property_address,performed_by,performed_by_email,
-         transaction_type,expected_return,notes,now_central()))
-    tx_id=cur.fetchone()['id']
-    conn.commit()
+        new_qty = item['quantity'] - qty
+        cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, item_id))
+        cur.execute("""INSERT INTO store_transactions
+            (item_id,action,quantity,quantity_after,property_address,performed_by,performed_by_email,
+             transaction_type,expected_return_date,notes,timestamp)
+            VALUES (%s,'checkout',%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+            (item_id,qty,new_qty,property_address,performed_by,performed_by_email,
+             transaction_type,expected_return,notes,now_central()))
+        tx_id=cur.fetchone()['id']
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); cur.close(); conn.close()
+        import traceback; print(f'[STORE CHECKOUT ERROR] {e}', flush=True); traceback.print_exc()
+        return jsonify({'error':'Checkout failed — please try again or check with Kristin.'}), 500
 
-    # Send accounting email if sold out
+    # Send accounting email if sold out — wrapped so an email hiccup can never
+    # fail the checkout itself (item is already sold out and recorded above).
     if transaction_type == 'sold_out':
-        total_value = float(item['price'] or 0) * qty
-        price_line = f"\nUnit Price: ${item['price']:.2f}\nTotal to Bill: ${total_value:.2f}" if item['price'] else "\n(No price on file — please confirm billing amount)"
-        body = f"""STORE ITEM SOLD OUT — BILLING REQUIRED
+        try:
+            has_price = item['price'] is not None and float(item['price']) > 0
+            total_value = float(item['price'] or 0) * qty
+            price_line = f"\nUnit Price: ${float(item['price']):.2f}\nTotal to Bill: ${total_value:.2f}" if has_price else "\n(No price on file — please confirm billing amount)"
+            body = f"""STORE ITEM SOLD OUT — BILLING REQUIRED
 
 Property: {property_address}
 Item: {item['name']}
@@ -1725,34 +1734,47 @@ This item has been marked as sold out and will remain at the property. Please bi
 
 — SandersCentral StoreCentral"""
 
-        html = f"""
-        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-          <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
-            <h2 style="color:#fff;margin:0;font-size:18px">🏪 StoreCentral — Billing Required</h2>
-            <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals · SandersCentral</p>
-          </div>
-          <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
-            <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px">
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600;width:40%">Property</td><td style="padding:8px;border-bottom:1px solid #eee">{property_address}</td></tr>
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Item</td><td style="padding:8px;border-bottom:1px solid #eee">{item['name']}</td></tr>
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Category</td><td style="padding:8px;border-bottom:1px solid #eee">{item['category']}</td></tr>
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Quantity</td><td style="padding:8px;border-bottom:1px solid #eee">{qty}</td></tr>
-              {'<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Unit Price</td><td style="padding:8px;border-bottom:1px solid #eee">$'+f"{item['price']:.2f}"+'</td></tr><tr><td style="padding:8px;background:#fef9e7;font-weight:700;color:#c0392b">Total to Bill</td><td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#c0392b;font-size:16px">$'+f"{total_value:.2f}"+'</td></tr>' if item['price'] else '<tr><td style="padding:8px;background:#fef9e7;font-weight:600;color:#c0392b">Billing Amount</td><td style="padding:8px;border-bottom:1px solid #eee;color:#c0392b">No price on file — please confirm</td></tr>'}
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Checked out by</td><td style="padding:8px;border-bottom:1px solid #eee">{performed_by}</td></tr>
-              <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Date</td><td style="padding:8px;border-bottom:1px solid #eee">{now_central()}</td></tr>
-              {f'<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Notes</td><td style="padding:8px;border-bottom:1px solid #eee">{notes}</td></tr>' if notes else ''}
-            </table>
-            <div style="background:#fdecea;padding:12px;border-radius:6px;font-size:13px;color:#c0392b">
-              <strong>Action required:</strong> Please bill the homeowner for this item.
-            </div>
-            <p style="margin:16px 0 0;font-size:11px;color:#aaa;text-align:center">SandersCentral · StoreCentral</p>
-          </div>
-        </div>"""
+            if has_price:
+                unit_price_str = f"{float(item['price']):.2f}"
+                total_value_str = f"{total_value:.2f}"
+                price_rows = ('<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Unit Price</td>'
+                    '<td style="padding:8px;border-bottom:1px solid #eee">$' + unit_price_str + '</td></tr>'
+                    '<tr><td style="padding:8px;background:#fef9e7;font-weight:700;color:#c0392b">Total to Bill</td>'
+                    '<td style="padding:8px;border-bottom:1px solid #eee;font-weight:700;color:#c0392b;font-size:16px">$' + total_value_str + '</td></tr>')
+            else:
+                price_rows = ('<tr><td style="padding:8px;background:#fef9e7;font-weight:600;color:#c0392b">Billing Amount</td>'
+                    '<td style="padding:8px;border-bottom:1px solid #eee;color:#c0392b">No price on file — please confirm</td></tr>')
 
-        send_email(
-            f"BILLING REQUIRED: {item['name']} → {property_address}",
-            body, to=ACCOUNTING_EMAIL, html_body=html
-        )
+            html = f"""
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+              <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+                <h2 style="color:#fff;margin:0;font-size:18px">🏪 StoreCentral — Billing Required</h2>
+                <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals · SandersCentral</p>
+              </div>
+              <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+                <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px">
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600;width:40%">Property</td><td style="padding:8px;border-bottom:1px solid #eee">{property_address}</td></tr>
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Item</td><td style="padding:8px;border-bottom:1px solid #eee">{item['name']}</td></tr>
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Category</td><td style="padding:8px;border-bottom:1px solid #eee">{item['category']}</td></tr>
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Quantity</td><td style="padding:8px;border-bottom:1px solid #eee">{qty}</td></tr>
+                  {price_rows}
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Checked out by</td><td style="padding:8px;border-bottom:1px solid #eee">{performed_by}</td></tr>
+                  <tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Date</td><td style="padding:8px;border-bottom:1px solid #eee">{now_central()}</td></tr>
+                  {f'<tr><td style="padding:8px;background:#f9f9f9;font-weight:600">Notes</td><td style="padding:8px;border-bottom:1px solid #eee">{notes}</td></tr>' if notes else ''}
+                </table>
+                <div style="background:#fdecea;padding:12px;border-radius:6px;font-size:13px;color:#c0392b">
+                  <strong>Action required:</strong> Please bill the homeowner for this item.
+                </div>
+                <p style="margin:16px 0 0;font-size:11px;color:#aaa;text-align:center">SandersCentral · StoreCentral</p>
+              </div>
+            </div>"""
+
+            send_email(
+                f"BILLING REQUIRED: {item['name']} → {property_address}",
+                body, to=ACCOUNTING_EMAIL, html_body=html
+            )
+        except Exception as e:
+            import traceback; print(f'[STORE SOLD-OUT EMAIL ERROR] {e}', flush=True); traceback.print_exc()
 
     cur.close(); conn.close()
     return jsonify({'success':True,'transaction_id':tx_id,'new_quantity':new_qty})
