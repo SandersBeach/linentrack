@@ -320,7 +320,14 @@
     <input type="hidden" id="tx-action">
     <p id="tx-item-info" style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:1rem;padding:10px;background:var(--gray-50);border-radius:var(--radius-sm)"></p>
     <label>Quantity</label>
-    <input id="tx-qty" type="number" min="1" value="1">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <button type="button" class="btn btn-ghost" style="width:44px;padding:9px 0;margin-bottom:0;flex-shrink:0" onclick="bumpTxQty(-1)">−</button>
+      <input id="tx-qty" type="number" inputmode="numeric" pattern="[0-9]*" min="1" value="1" style="text-align:center;margin-bottom:0" onfocus="this.select()">
+      <button type="button" class="btn btn-ghost" style="width:44px;padding:9px 0;margin-bottom:0;flex-shrink:0" onclick="bumpTxQty(1)">+</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${[2,3,5,10,12].map(n=>`<button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(${n})">${n}</button>`).join('')}
+    </div>
     <div id="tx-performer-display" style="font-size:13px;color:var(--gray-700);margin:0.5rem 0;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Logged in as <strong></strong></div>
     <label>Notes (optional)</label>
     <input id="tx-notes" type="text" placeholder="e.g. used at HOME-12">
@@ -1348,6 +1355,12 @@ function showSupplyTxModal(supplyId, action) {
 }
 function openSupplyTxFromScan(supplyId) { showSupplyTxModal(supplyId, 'take'); }
 function closeSupplyTxModal() { document.getElementById('modal-supply-tx').style.display='none'; }
+function bumpTxQty(delta) {
+  const input = document.getElementById('tx-qty');
+  const cur = parseInt(input.value) || 1;
+  input.value = Math.max(1, cur + delta);
+}
+function setTxQty(n) { document.getElementById('tx-qty').value = n; }
 async function submitSupplyTx() {
   const supplyId = document.getElementById('tx-supply-id').value;
   const action = document.getElementById('tx-action').value;
