@@ -952,6 +952,12 @@ async function renderSettings() {
     </div>
     <div id="bag-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
+    <div class="card"><div class="card-title">Print loaner QR labels</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the item ID directly into the Scan Item field in LoanerCentral. Good for labeling all 24 loaner items or replacing a lost/damaged label.</p>
+    <button class="btn btn-primary btn-sm" onclick="printLoanerQRCodes()">🖨️ Print All Loaner Item Labels</button>
+    <div id="loaner-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
+    </div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 async function toggleCleanerEmails() {
@@ -1017,6 +1023,29 @@ async function printBagQRCodes(homeId) {
     win.document.close();
     msg.style.color = 'var(--teal)';
     msg.textContent = `Opened print view for ${bags.length} bag label${bags.length!==1?'s':''}.`;
+  } catch (e) {
+    msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the labels — please try again.';
+  }
+}
+
+async function printLoanerQRCodes() {
+  const msg = document.getElementById('loaner-qr-msg');
+  msg.style.color = 'var(--gray-400)'; msg.textContent = 'Loading...';
+  try {
+    const items = await fetch('/api/loaners/qr-sheet').then(r=>r.json());
+    if (!items.length) { msg.textContent = 'No loaner items found.'; return; }
+    const win = window.open('', '_blank');
+    const cards = items.map(i => `
+      <div style="display:inline-block;width:200px;text-align:center;padding:14px;margin:6px;border:1px solid #ddd;border-radius:8px;page-break-inside:avoid">
+        <img src="${i.qr_code}" style="width:140px;height:140px">
+        <div style="font-size:14px;font-weight:700;margin-top:6px;font-family:monospace">${i.id}</div>
+        <div style="font-size:12px;font-weight:600;margin-top:2px">${i.name}</div>
+        <div style="font-size:11px;color:#888">${i.category}</div>
+      </div>`).join('');
+    win.document.write(`<html><head><title>Loaner Item Labels</title><style>body{font-family:sans-serif;text-align:center;padding:20px}</style></head><body><h2>Loaner Item Labels (${items.length})</h2>${cards}<script>window.onload=()=>window.print()<\/script></body></html>`);
+    win.document.close();
+    msg.style.color = 'var(--teal)';
+    msg.textContent = `Opened print view for ${items.length} loaner item label${items.length!==1?'s':''}.`;
   } catch (e) {
     msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the labels — please try again.';
   }
