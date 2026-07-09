@@ -1680,12 +1680,12 @@ def store_checkout():
     data=request.json or {}
     item_id=data.get('item_id')
     qty=int(data.get('quantity',1))
-    property_address=data.get('property_address','').strip()
-    performed_by=data.get('performed_by','').strip()
-    performed_by_email=data.get('performed_by_email','').strip()
+    property_address=(data.get('property_address') or '').strip()
+    performed_by=(data.get('performed_by') or '').strip()
+    performed_by_email=(data.get('performed_by_email') or '').strip()
     transaction_type=data.get('transaction_type','sold_out')
-    expected_return=data.get('expected_return_date','').strip() or None
-    notes=data.get('notes','').strip() or None
+    expected_return=(data.get('expected_return_date') or '').strip() or None
+    notes=(data.get('notes') or '').strip() or None
 
     if not item_id or not performed_by or not property_address:
         return jsonify({'error':'item_id, performed_by, and property_address required'}), 400
