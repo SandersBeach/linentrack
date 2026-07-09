@@ -1372,9 +1372,21 @@ async function submitSupplyTx() {
   const performedBy = _currentStaffName;
   const notes = document.getElementById('tx-notes').value;
   const target = document.getElementById('modal-supply-tx').dataset.target || 'supply';
-  const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
   if (!performedBy) { alert('Could not determine who is logged in — please log out and back in.'); return; }
   if (!qty||qty<1) { alert('Please enter a valid quantity.'); return; }
+
+  if (target === 'store') {
+    const res = await fetch(`/api/store/items/${supplyId}/restock`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, quantity:qty, performed_by:performedBy, notes}) });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    closeSupplyTxModal();
+    const storeRes = await fetch('/api/store/items');
+    _storeItems = await storeRes.json();
+    renderStoreCards();
+    return;
+  }
+
+  const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
   const res = await fetch(`${endpoint}/${supplyId}/transaction`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin, action, quantity:qty, performed_by:performedBy, notes}) });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
@@ -2155,9 +2167,24 @@ function renderStoreCards() {
       ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
+        <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color:var(--green)" onclick="showStoreRestockModal(${item.id})">📥 Restock</button>
         ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`).join('');
+}
+
+function showStoreRestockModal(itemId) {
+  const item = _storeItems.find(i=>i.id===itemId); if(!item)return;
+  document.getElementById('tx-supply-id').value = itemId;
+  document.getElementById('tx-action').value = 'restock';
+  document.getElementById('tx-modal-title').textContent = '📥 Restock Store Item';
+  document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} in stock`;
+  document.getElementById('tx-qty').value = 1;
+  document.getElementById('tx-notes').value = '';
+  const disp = document.getElementById('tx-performer-display');
+  disp.querySelector('strong').textContent = _currentStaffName || 'Unknown (please log out and back in)';
+  document.getElementById('modal-supply-tx').dataset.target = 'store';
+  document.getElementById('modal-supply-tx').style.display = 'flex';
 }
 
 // ── Checkout Modal ────────────────────────────────────────────
