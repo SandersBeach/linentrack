@@ -389,6 +389,7 @@ const TAB_LABELS = {
   store: '🏪 Store'
 };
 let currentTab = 'scan';
+let _availableTabs = [];
 let userRoles = [];
 
 // ── PIN ────────────────────────────────────────────────────────────────────────
@@ -427,10 +428,8 @@ async function submitPin() {
     if (defaultView === 'loaners' && (userRoles.includes('maintenance') || userRoles.includes('admin'))) {
       sessionStorage.removeItem('defaultView');
       showTab('loaner_scan');
-    } else if (userRoles.includes('coordinator') && !userRoles.includes('admin') && !userRoles.includes('warehouse')) {
-      showTab('inventory_count');
-    } else if (userRoles.includes('maintenance') && !userRoles.includes('admin') && !userRoles.includes('warehouse')) {
-      showTab('loaner_scan');
+    } else if (_availableTabs.length) {
+      showTab(_availableTabs[0]);
     } else {
       showTab('scan');
     }
@@ -457,6 +456,7 @@ function logout() {
 function buildTabs() {
   const seen = new Set(); const tabs = [];
   userRoles.forEach(r => (TABS[r] || []).forEach(t => { if (!seen.has(t)) { seen.add(t); tabs.push(t); } }));
+  _availableTabs = tabs;
   document.getElementById('tab-bar').innerHTML = tabs.map(t =>
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
   ).join('');
