@@ -438,7 +438,20 @@ async function submitPin() {
     checkPendingSupplyScan();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
-function logout() { role = null; userRoles = []; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = ''; updateDots(); document.getElementById('login').style.display = 'flex'; document.getElementById('app').style.display = 'none'; }
+function logout() {
+  role = null; userRoles = []; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = '';
+  updateDots();
+  // Close any modal window the previous person left open — otherwise it stays
+  // on screen (and interactive) even after someone else logs in.
+  ['modal-supply-item','modal-supply-tx','modal-supply-qr'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.display = 'none';
+  });
+  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.remove();
+  });
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
