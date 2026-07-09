@@ -507,6 +507,15 @@ def make_hk_supply_qr(supply_id):
     buf = io.BytesIO(); img.save(buf, format='PNG')
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
+def make_loaner_qr(loaner_id):
+    """QR encodes the literal loaner item ID text (not a URL) — same pattern as
+    bag labels, so it works with the Bluetooth scanner's Scan Item field."""
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(loaner_id); qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+    buf = io.BytesIO(); img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+
 # ── Static routes ─────────────────────────────────────────────────────────────
 
 @app.route('/')
@@ -969,6 +978,16 @@ def get_loaners():
         FROM loaners l LEFT JOIN homes h ON h.id=l.home_id LEFT JOIN loaner_staff s ON s.id=l.staff_id
         ORDER BY l.category,l.name""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/loaners/qr-sheet', methods=['GET'])
+def loaners_qr_sheet():
+    """Generate printable QR codes for loaner items — literal item ID encoded,
+    same pattern as the bag label sheet."""
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name, category FROM loaners ORDER BY category, name")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    result=[{'id':r['id'],'name':r['name'],'category':r['category'],'qr_code':make_loaner_qr(r['id'])} for r in rows]
+    return jsonify(result)
 
 @app.route('/api/loaner/<path:loaner_id>/deploy', methods=['POST'])
 def deploy_loaner(loaner_id):
