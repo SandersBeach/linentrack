@@ -502,7 +502,10 @@ function showTab(t) {
     forecast: renderForecast,
     store: renderStore
   };
-  if (fns[t]) fns[t]();
+  if (fns[t]) {
+    document.getElementById('main-content').innerHTML = '<div style="padding:2.5rem;text-align:center;color:var(--gray-400);font-size:13px">Loading…</div>';
+    fns[t]();
+  }
 }
 
 // ── Scan Tab ───────────────────────────────────────────────────────────────────
