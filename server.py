@@ -360,6 +360,13 @@ def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
         with urllib.request.urlopen(req) as resp:
             print(f'[EMAIL SENT] {subject} -> {recipients} (status {resp.status})', flush=True)
         return True
+    except urllib.error.HTTPError as e:
+        try:
+            error_body = e.read().decode('utf-8')
+        except Exception:
+            error_body = '(could not read response body)'
+        print(f'[EMAIL ERROR] {subject}: HTTP {e.code} — {error_body}', flush=True)
+        return False
     except Exception as e:
         import traceback; print(f'[EMAIL ERROR] {subject}: {e}', flush=True); traceback.print_exc()
         return False
