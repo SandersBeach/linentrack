@@ -153,7 +153,7 @@
   <div class="cam-status" id="cam-status">Point your camera at a bag tag QR code</div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 let _pin = '';
 let _cleaner = null;
@@ -326,6 +326,10 @@ async function openCameraScan() {
   const video = document.getElementById('cam-video');
   const status = document.getElementById('cam-status');
   overlay.style.display = 'flex';
+  if (typeof jsQR === 'undefined') {
+    status.textContent = 'Scanner library failed to load — check your internet connection and try again, or use manual entry.';
+    return;
+  }
   status.textContent = 'Point your camera at a bag tag QR code';
   if (!_camCanvas) { _camCanvas = document.createElement('canvas'); _camCtx = _camCanvas.getContext('2d', { willReadFrequently: true }); }
   try {
