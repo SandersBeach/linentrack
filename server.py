@@ -1674,6 +1674,39 @@ def update_store_item(sid):
     log_audit('StoreCentral', 'Edited store item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
 
+@app.route('/api/store/items/<int:sid>/restock', methods=['POST'])
+def restock_store_item(sid):
+    """Increase quantity on an existing store item, with an audit trail entry."""
+    data=request.json or {}
+    roles=resolve_roles(str(data.get('pin','')))
+    if not any(r in ('admin','maintenance','coordinator') for r in roles): return jsonify({'error':'Access denied'}),403
+    qty=int(data.get('quantity',0))
+    performed_by=(data.get('performed_by') or '').strip()
+    notes=(data.get('notes') or '').strip() or None
+    if qty<=0: return jsonify({'error':'Quantity must be positive'}),400
+    if not performed_by: return jsonify({'error':'performed_by required'}),400
+
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM store_items WHERE id=%s",(sid,))
+        item=cur.fetchone()
+        if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+        new_qty = item['quantity'] + qty
+        cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, sid))
+        cur.execute("""INSERT INTO store_transactions
+            (item_id,action,quantity,quantity_after,performed_by,transaction_type,notes,timestamp)
+            VALUES (%s,'restock',%s,%s,%s,'restock',%s,%s)""",
+            (sid,qty,new_qty,performed_by,notes,now_central()))
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); cur.close(); conn.close()
+        import traceback; print(f'[STORE RESTOCK ERROR] {e}', flush=True); traceback.print_exc()
+        return jsonify({'error':'Restock failed — please try again or check with Kristin.'}), 500
+
+    cur.close(); conn.close()
+    log_audit('StoreCentral', 'Restocked item', item['name'], resolve_performer(data), f'+{qty} -> {new_qty}')
+    return jsonify({'success':True,'new_quantity':new_qty})
+
 @app.route('/api/store/checkout', methods=['POST'])
 def store_checkout():
     """Check out a store item as loan or sold_out."""
