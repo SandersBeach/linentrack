@@ -3047,7 +3047,9 @@ function showEditStaffModal(id, name, roleStr, email, active) {
   modal.className='modal-overlay'; modal.id='modal-staff-edit';
   modal.innerHTML=`<div class="modal-box" style="max-width:400px">
     <h3>Edit: ${name}</h3>
-    <label>New PIN (leave blank to keep current)</label>
+    <label>Name</label>
+    <input type="text" id="se-name" value="${name}">
+    <label style="margin-top:0.75rem">New PIN (leave blank to keep current)</label>
     <input type="text" id="se-pin" maxlength="4" placeholder="4 digits">
     <label style="margin-top:0.75rem">Email</label>
     <input type="email" id="se-email" value="${email}">
@@ -3077,13 +3079,15 @@ async function deleteStaffMember(id, name) {
 }
 
 async function submitEditStaff(id) {
+  const name=document.getElementById('se-name')?.value?.trim();
   const pin=document.getElementById('se-pin')?.value?.trim();
   const email=document.getElementById('se-email')?.value?.trim();
   const roles=getCheckedRoles(document.getElementById('se-roles'));
   const active=parseInt(document.getElementById('se-active')?.value);
+  if(!name){alert('Name is required.');return;}
   if(!roles.length){alert('Please select at least one role.');return;}
   if(pin&&(pin.length!==4||!/^\d+$/.test(pin))){alert('PIN must be 4 digits.');return;}
-  const body={admin_pin:_currentPin,email,role:roles.join(','),active};
+  const body={admin_pin:_currentPin,name,email,role:roles.join(','),active};
   if(pin) body.pin=pin;
   const res=await fetch(`/api/staff/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
