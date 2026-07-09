@@ -326,7 +326,11 @@
       <button type="button" class="btn btn-ghost" style="width:44px;padding:9px 0;margin-bottom:0;flex-shrink:0" onclick="bumpTxQty(1)">+</button>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-      ${[2,3,5,10,12].map(n=>`<button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(${n})">${n}</button>`).join('')}
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(2)">2</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(3)">3</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(5)">5</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(10)">10</button>
+      <button type="button" class="btn btn-ghost btn-sm" style="flex:0 0 auto;padding:6px 12px" onclick="setTxQty(12)">12</button>
     </div>
     <div id="tx-performer-display" style="font-size:13px;color:var(--gray-700);margin:0.5rem 0;padding:8px 10px;background:var(--gray-50);border-radius:var(--radius-sm)">Logged in as <strong></strong></div>
     <label>Notes (optional)</label>
