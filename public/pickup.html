@@ -18,9 +18,8 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
 
-  /* ── Shared ── */
   .screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 2rem; width: 100%; max-width: 400px; }
+  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 2rem; width: 100%; max-width: 400px; position: relative; }
   .logo { font-size: 13px; font-weight: 600; color: var(--gray-400); text-align: center; margin-bottom: 1.5rem; letter-spacing: 0.05em; text-transform: uppercase; }
   .logo span { color: var(--teal); }
   .title { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 6px; }
@@ -33,7 +32,12 @@
   .btn-ghost:hover { background: var(--gray-200); }
   .err { color: var(--coral-dark); font-size: 13px; text-align: center; margin-top: 10px; min-height: 20px; }
 
-  /* ── PIN pad ── */
+  .lang-toggle { display: flex; justify-content: center; gap: 6px; margin-bottom: 1.25rem; }
+  .lang-toggle.lang-toggle-pin { position: absolute; top: 14px; right: 14px; margin-bottom: 0; }
+  .lang-btn { border: 0.5px solid var(--gray-200); background: #fff; color: var(--gray-700); font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 20px; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+  .lang-btn.active { background: var(--teal); color: #fff; border-color: var(--teal); }
+  .topbar .lang-toggle { margin-bottom: 0; }
+
   .pin-dots { display: flex; justify-content: center; gap: 14px; margin-bottom: 1.75rem; }
   .pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--gray-200); transition: all 0.15s; }
   .pin-dot.filled { background: var(--teal); border-color: var(--teal); }
@@ -43,12 +47,12 @@
   .num-btn:active { background: var(--gray-100); transform: scale(0.96); }
   .num-btn.del { font-size: 14px; color: var(--gray-400); }
 
-  /* ── Scan screen ── */
   .scan-screen { min-height: 100vh; background: var(--gray-50); }
-  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; justify-content: space-between; height: 52px; }
-  .topbar-name { font-size: 15px; font-weight: 600; }
+  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; justify-content: space-between; height: 52px; gap: 10px; }
+  .topbar-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar-name span { color: var(--teal); }
-  .topbar-btn { font-size: 12px; color: var(--coral); background: none; border: none; cursor: pointer; padding: 4px 8px; font-family: var(--font); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .topbar-btn { font-size: 12px; color: var(--coral); background: none; border: none; cursor: pointer; padding: 4px 8px; font-family: var(--font); white-space: nowrap; }
   .content { padding: 1.25rem; max-width: 520px; margin: 0 auto; }
   .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray-400); margin-bottom: 0.75rem; }
   .bag-list { margin-bottom: 1.25rem; }
@@ -93,9 +97,13 @@
 <!-- ── PIN Login ── -->
 <div id="screen-pin" class="screen" style="background:var(--gray-50)">
   <div class="card">
+    <div class="lang-toggle lang-toggle-pin">
+      <button class="lang-btn" id="lang-btn-en-pin" onclick="setLang('en')">EN</button>
+      <button class="lang-btn" id="lang-btn-es-pin" onclick="setLang('es')">ES</button>
+    </div>
     <div class="logo">Sanders Beach Rentals · <span>LinenTrack</span></div>
-    <div class="title">Bag Pickup</div>
-    <div class="subtitle">Enter your 5-digit cleaner PIN</div>
+    <div class="title" id="pin-title">Bag Pickup</div>
+    <div class="subtitle" id="pin-subtitle">Enter your 5-digit cleaner PIN</div>
     <div class="pin-dots" id="pin-dots">
       <div class="pin-dot" id="pd0"></div>
       <div class="pin-dot" id="pd1"></div>
@@ -113,7 +121,7 @@
       <button class="num-btn" onclick="pinPress('7')">7</button>
       <button class="num-btn" onclick="pinPress('8')">8</button>
       <button class="num-btn" onclick="pinPress('9')">9</button>
-      <button class="num-btn del" onclick="pinClear()">Clear</button>
+      <button class="num-btn del" id="pin-clear-btn" onclick="pinClear()">Clear</button>
       <button class="num-btn" onclick="pinPress('0')">0</button>
       <button class="num-btn del" onclick="pinDel()">⌫</button>
     </div>
@@ -125,20 +133,26 @@
 <div id="screen-scan" class="scan-screen" style="display:none">
   <div class="topbar">
     <div class="topbar-name">👋 <span id="cleaner-name-display">Cleaner</span></div>
-    <button class="topbar-btn" onclick="logout()">Sign out</button>
+    <div class="topbar-right">
+      <div class="lang-toggle">
+        <button class="lang-btn" id="lang-btn-en-scan" onclick="setLang('en')">EN</button>
+        <button class="lang-btn" id="lang-btn-es-scan" onclick="setLang('es')">ES</button>
+      </div>
+      <button class="topbar-btn" id="signout-btn" onclick="logout()">Sign out</button>
+    </div>
   </div>
   <div class="content">
     <div id="wrong-bag-area"></div>
     <div id="all-done-area"></div>
     <div class="scan-box">
-      <div class="section-title" style="margin-bottom:8px">Scan a bag to confirm pickup</div>
+      <div class="section-title" id="scan-section-title" style="margin-bottom:8px">Scan a bag to confirm pickup</div>
       <input type="text" id="scan-input" placeholder="Scan bag tag..." autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter')processScan()">
-      <div class="hint">Scanner auto-submits · or press Enter after typing</div>
-      <button class="scan-cam-btn" onclick="openCameraScan()">📷 Scan with phone camera</button>
+      <div class="hint" id="scan-hint">Scanner auto-submits · or press Enter after typing</div>
+      <button class="scan-cam-btn" id="cam-scan-btn" onclick="openCameraScan()">📷 Scan with phone camera</button>
     </div>
-    <div class="section-title">Your bags ready for pickup</div>
+    <div class="section-title" id="your-bags-title">Your bags ready for pickup</div>
     <div id="bag-list" class="bag-list">
-      <div class="empty-state">Loading your bags...</div>
+      <div class="empty-state" id="loading-bags-text">Loading your bags...</div>
     </div>
   </div>
 </div>
@@ -155,12 +169,133 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
+// ── i18n ──────────────────────────────────────────────────────────────────────
+// Language resets to English on every fresh page load (not remembered), since
+// multiple cleaners share one PIN/phone and each person should pick their own.
+let LANG = 'en';
+
+const T = {
+  en: {
+    pinTitle: 'Bag Pickup',
+    pinSubtitle: 'Enter your 5-digit cleaner PIN',
+    clear: 'Clear',
+    wrongPin: 'Wrong PIN — try again',
+    connError: 'Connection error',
+    signOut: 'Sign out',
+    scanSectionTitle: 'Scan a bag to confirm pickup',
+    scanPlaceholder: 'Scan bag tag...',
+    scanHint: 'Scanner auto-submits · or press Enter after typing',
+    camBtn: '📷 Scan with phone camera',
+    yourBagsTitle: 'Your bags ready for pickup',
+    loadingBags: 'Loading your bags...',
+    errorLoadingBags: 'Error loading bags',
+    confirmed: '✓ Confirmed',
+    waiting: '⏳ Waiting',
+    allDoneMsg: 'All bags confirmed!',
+    allDoneSub: "You're good to go. Your 24-hour return window starts now.",
+    noBags: 'No bags are staged for you right now.<br>Check with the linen attendant.',
+    alreadyConfirmed: 'Already confirmed!',
+    bagConfirmed: (home) => `✓ ${home} confirmed!`,
+    wrongBagTitle: '🚨 Wrong bag!',
+    wrongBagSub: (id, name) => `<strong>${id}</strong> belongs to ${name}. Please put it back where you found it.`,
+    notYours: '⚠️ That bag is not yours!',
+    genericError: 'Error — try again',
+    camPrompt: 'Point your camera at a bag tag QR code',
+    camLibFail: 'Scanner library failed to load — check your internet connection and try again, or use manual entry.',
+    camNoAccess: 'Could not access camera — check camera permission for this browser.',
+    camDetected: '✓ Code detected...',
+    defaultCleanerName: 'Cleaner',
+    serverErrors: {
+      'Bag not found': 'Bag not found',
+      'Already staged or checked out': 'Already staged or checked out',
+      'This bag has not been staged yet': 'This bag has not been staged yet',
+      'Already picked up': 'Already picked up',
+      'Invalid PIN': 'Invalid PIN',
+      'PIN required': 'PIN required'
+    }
+  },
+  es: {
+    pinTitle: 'Recoger bolsas',
+    pinSubtitle: 'Ingresa tu PIN de 5 dígitos',
+    clear: 'Borrar',
+    wrongPin: 'PIN incorrecto — inténtalo de nuevo',
+    connError: 'Error de conexión',
+    signOut: 'Cerrar sesión',
+    scanSectionTitle: 'Escanea una bolsa para confirmar la recogida',
+    scanPlaceholder: 'Escanea la etiqueta de la bolsa...',
+    scanHint: 'El escáner envía automáticamente · o presiona Enter después de escribir',
+    camBtn: '📷 Escanear con la cámara del teléfono',
+    yourBagsTitle: 'Tus bolsas listas para recoger',
+    loadingBags: 'Cargando tus bolsas...',
+    errorLoadingBags: 'Error al cargar las bolsas',
+    confirmed: '✓ Confirmada',
+    waiting: '⏳ Esperando',
+    allDoneMsg: '¡Todas las bolsas confirmadas!',
+    allDoneSub: 'Todo listo. Tu plazo de devolución de 24 horas comienza ahora.',
+    noBags: 'No tienes bolsas asignadas en este momento.<br>Consulta con el encargado de blancos.',
+    alreadyConfirmed: '¡Ya confirmada!',
+    bagConfirmed: (home) => `✓ ¡${home} confirmada!`,
+    wrongBagTitle: '🚨 ¡Bolsa equivocada!',
+    wrongBagSub: (id, name) => `<strong>${id}</strong> pertenece a ${name}. Por favor devuélvela a donde la encontraste.`,
+    notYours: '⚠️ ¡Esa bolsa no es tuya!',
+    genericError: 'Error — inténtalo de nuevo',
+    camPrompt: 'Apunta tu cámara al código QR de la etiqueta de la bolsa',
+    camLibFail: 'No se pudo cargar el escáner — revisa tu conexión a internet e inténtalo de nuevo, o ingresa el código manualmente.',
+    camNoAccess: 'No se pudo acceder a la cámara — revisa el permiso de cámara para este navegador.',
+    camDetected: '✓ Código detectado...',
+    defaultCleanerName: 'Limpiador/a',
+    serverErrors: {
+      'Bag not found': 'Bolsa no encontrada',
+      'Already staged or checked out': 'Ya está preparada o entregada',
+      'This bag has not been staged yet': 'Esta bolsa aún no ha sido preparada',
+      'Already picked up': 'Ya fue recogida',
+      'Invalid PIN': 'PIN inválido',
+      'PIN required': 'Se requiere el PIN'
+    }
+  }
+};
+
+function t() { return T[LANG]; }
+
+function translateServerError(msg) {
+  if (!msg) return t().genericError;
+  return t().serverErrors[msg] || msg;
+}
+
+function setLang(lang) {
+  LANG = lang;
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('lang-btn-' + lang + '-pin')?.classList.add('active');
+  document.getElementById('lang-btn-' + lang + '-scan')?.classList.add('active');
+  applyStaticText();
+  if (document.getElementById('screen-scan').style.display !== 'none') {
+    renderBagList();
+  }
+}
+
+function applyStaticText() {
+  const tr = t();
+  document.getElementById('pin-title').textContent = tr.pinTitle;
+  document.getElementById('pin-subtitle').textContent = tr.pinSubtitle;
+  document.getElementById('pin-clear-btn').textContent = tr.clear;
+  document.getElementById('signout-btn').textContent = tr.signOut;
+  document.getElementById('scan-section-title').textContent = tr.scanSectionTitle;
+  document.getElementById('scan-input').placeholder = tr.scanPlaceholder;
+  document.getElementById('scan-hint').textContent = tr.scanHint;
+  document.getElementById('cam-scan-btn').textContent = tr.camBtn;
+  document.getElementById('your-bags-title').textContent = tr.yourBagsTitle;
+  const loadingEl = document.getElementById('loading-bags-text');
+  if (loadingEl) loadingEl.textContent = tr.loadingBags;
+  const camStatus = document.getElementById('cam-status');
+  if (camStatus && !_camRunning) camStatus.textContent = tr.camPrompt;
+  if (!_cleaner) document.getElementById('cleaner-name-display').textContent = tr.defaultCleanerName;
+}
+
 let _pin = '';
 let _cleaner = null;
 let _stagedBags = [];
 let _confirmedIds = new Set();
 
-// ── PIN ───────────────────────────────────────────────────────────────────────
 function pinPress(d) {
   if (_pin.length >= 5) return;
   _pin += d;
@@ -178,7 +313,7 @@ async function submitPin() {
     const r = await fetch('/api/cleaner-auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_pin}) });
     const data = await r.json();
     if (!r.ok || !data.success) {
-      document.getElementById('pin-err').textContent = 'Wrong PIN — try again';
+      document.getElementById('pin-err').textContent = t().wrongPin;
       _pin = ''; updateDots(); return;
     }
     _cleaner = data.cleaner;
@@ -188,7 +323,7 @@ async function submitPin() {
     await loadStagedBags();
     focusScan();
   } catch(e) {
-    document.getElementById('pin-err').textContent = 'Connection error';
+    document.getElementById('pin-err').textContent = t().connError;
     _pin = ''; updateDots();
   }
 }
@@ -201,20 +336,21 @@ function logout() {
   document.getElementById('pin-err').textContent = '';
   document.getElementById('wrong-bag-area').innerHTML = '';
   document.getElementById('all-done-area').innerHTML = '';
+  document.getElementById('cleaner-name-display').textContent = t().defaultCleanerName;
 }
 
-// ── Bags ──────────────────────────────────────────────────────────────────────
 async function loadStagedBags() {
   try {
     const r = await fetch(`/api/cleaner/${_cleaner.id}/staged-bags`);
     _stagedBags = await r.json();
     renderBagList();
   } catch(e) {
-    document.getElementById('bag-list').innerHTML = '<div class="empty-state">Error loading bags</div>';
+    document.getElementById('bag-list').innerHTML = `<div class="empty-state">${t().errorLoadingBags}</div>`;
   }
 }
 
 function renderBagList() {
+  const tr = t();
   const list = document.getElementById('bag-list');
   const allDone = _stagedBags.length > 0 && _stagedBags.every(b => _confirmedIds.has(b.id));
 
@@ -222,8 +358,8 @@ function renderBagList() {
     document.getElementById('all-done-area').innerHTML = `
       <div class="all-done anim">
         <div class="check">✅</div>
-        <div class="msg">All bags confirmed!</div>
-        <div class="sub">You're good to go. Your 24-hour return window starts now.</div>
+        <div class="msg">${tr.allDoneMsg}</div>
+        <div class="sub">${tr.allDoneSub}</div>
       </div>`;
     list.innerHTML = '';
     return;
@@ -232,7 +368,7 @@ function renderBagList() {
   document.getElementById('all-done-area').innerHTML = '';
 
   if (!_stagedBags.length) {
-    list.innerHTML = '<div class="empty-state">No bags are staged for you right now.<br>Check with the linen attendant.</div>';
+    list.innerHTML = `<div class="empty-state">${tr.noBags}</div>`;
     return;
   }
 
@@ -244,7 +380,7 @@ function renderBagList() {
         <span class="bag-id">${b.id}</span>
       </div>
       <div class="bag-status ${confirmed?'status-confirmed':'status-waiting'}">
-        ${confirmed ? '✓ Confirmed' : '⏳ Waiting'}
+        ${confirmed ? tr.confirmed : tr.waiting}
       </div>
     </div>`;
   }).join('');
@@ -253,11 +389,11 @@ function renderBagList() {
 function focusScan() { setTimeout(() => document.getElementById('scan-input')?.focus(), 100); }
 
 async function processScan() {
+  const tr = t();
   const input = document.getElementById('scan-input');
   let raw = (input?.value || '').trim();
   input.value = '';
 
-  // Extract bag ID from URL param if scanner reads a QR URL
   let id = raw;
   if (raw.includes('?') || raw.includes('=')) {
     const m = raw.match(/[?&][Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
@@ -268,10 +404,9 @@ async function processScan() {
   }
   if (!id) { focusScan(); return; }
 
-  // Check if this bag is in the staged list for this cleaner
   const inList = _stagedBags.find(b => b.id === id);
   if (inList && _confirmedIds.has(id)) {
-    showFlash('Already confirmed!', 'ok');
+    showFlash(tr.alreadyConfirmed, 'ok');
     focusScan(); return;
   }
 
@@ -285,22 +420,20 @@ async function processScan() {
     if (r.ok && data.success) {
       _confirmedIds.add(id);
       document.getElementById('wrong-bag-area').innerHTML = '';
-      showFlash(`✓ ${data.home} confirmed!`, 'ok');
+      showFlash(tr.bagConfirmed(data.home), 'ok');
       renderBagList();
     } else if (data.wrong_cleaner) {
-      // Wrong cleaner's bag — big alert
       document.getElementById('wrong-bag-area').innerHTML = `
         <div class="wrong-bag-alert anim">
-          <div class="wa-title">🚨 Wrong bag!</div>
-          <div class="wa-sub"><strong>${id}</strong> belongs to ${data.assigned_to}. Please put it back where you found it.</div>
+          <div class="wa-title">${tr.wrongBagTitle}</div>
+          <div class="wa-sub">${tr.wrongBagSub(id, data.assigned_to)}</div>
         </div>`;
-      // Flash the bag row red if it happens to be in our list
-      showFlash('⚠️ That bag is not yours!', 'err');
+      showFlash(tr.notYours, 'err');
     } else {
-      showFlash(data.error || 'Error — try again', 'err');
+      showFlash(translateServerError(data.error), 'err');
     }
   } catch(e) {
-    showFlash('Connection error', 'err');
+    showFlash(tr.connError, 'err');
   }
   focusScan();
 }
@@ -313,7 +446,6 @@ function showFlash(msg, type) {
   setTimeout(() => el.remove(), 2500);
 }
 
-// ── Camera QR Scan ──────────────────────────────────────────────────────────
 let _camStream = null;
 let _camRunning = false;
 let _camCanvas = null;
@@ -322,15 +454,16 @@ let _camLastCode = null;
 let _camLastTime = 0;
 
 async function openCameraScan() {
+  const tr = t();
   const overlay = document.getElementById('cam-overlay');
   const video = document.getElementById('cam-video');
   const status = document.getElementById('cam-status');
   overlay.style.display = 'flex';
   if (typeof jsQR === 'undefined') {
-    status.textContent = 'Scanner library failed to load — check your internet connection and try again, or use manual entry.';
+    status.textContent = tr.camLibFail;
     return;
   }
-  status.textContent = 'Point your camera at a bag tag QR code';
+  status.textContent = tr.camPrompt;
   if (!_camCanvas) { _camCanvas = document.createElement('canvas'); _camCtx = _camCanvas.getContext('2d', { willReadFrequently: true }); }
   try {
     _camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -340,7 +473,7 @@ async function openCameraScan() {
     _camLastCode = null; _camLastTime = 0;
     requestAnimationFrame(camScanLoop);
   } catch (e) {
-    status.textContent = 'Could not access camera — check camera permission for this browser.';
+    status.textContent = tr.camNoAccess;
   }
 }
 
@@ -372,19 +505,20 @@ function camScanLoop() {
 
 function handleCameraResult(raw) {
   const status = document.getElementById('cam-status');
-  status.textContent = '✓ Code detected...';
+  status.textContent = t().camDetected;
   if (navigator.vibrate) navigator.vibrate(80);
   document.getElementById('scan-input').value = raw;
   processScan();
-  setTimeout(() => { if (_camRunning) status.textContent = 'Point your camera at a bag tag QR code'; }, 1200);
+  setTimeout(() => { if (_camRunning) status.textContent = t().camPrompt; }, 1200);
 }
 
-// Auto-focus scan input when tapping anywhere on scan screen
 document.addEventListener('click', e => {
   if (document.getElementById('screen-scan').style.display !== 'none' && !e.target.closest('button, input')) {
     focusScan();
   }
 });
+
+setLang('en');
 </script>
 </body>
 </html>
