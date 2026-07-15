@@ -151,6 +151,11 @@ def init_db():
             id SERIAL PRIMARY KEY, bag_id TEXT NOT NULL, home_id INTEGER NOT NULL,
             cleaner_id INTEGER, action TEXT NOT NULL, timestamp TEXT NOT NULL, notes TEXT
         );
+        CREATE TABLE IF NOT EXISTS laundry_batches (
+            id SERIAL PRIMARY KEY, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
+            expected_weight_lbs NUMERIC, actual_weight_lbs NUMERIC, bag_count INTEGER,
+            notes TEXT, created_by TEXT, created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS loaner_staff (
             id SERIAL PRIMARY KEY, name TEXT NOT NULL, active INTEGER DEFAULT 1
         );
@@ -315,6 +320,8 @@ def init_db():
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_notes TEXT",
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
         "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS performed_by TEXT",
+        "ALTER TABLE homes ADD COLUMN IF NOT EXISTS expected_weight_lbs NUMERIC",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS weight_lbs NUMERIC",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -583,7 +590,7 @@ def save_pins():
 @app.route('/api/homes', methods=['GET'])
 def get_homes():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT h.id, h.name, h.code,
+    cur.execute("""SELECT h.id, h.name, h.code, h.expected_weight_lbs,
         COUNT(b.id) AS bag_count, COUNT(CASE WHEN b.status='out' THEN 1 END) AS out_count
         FROM homes h LEFT JOIN bags b ON b.home_id=h.id GROUP BY h.id ORDER BY h.code""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
@@ -591,15 +598,40 @@ def get_homes():
 @app.route('/api/homes', methods=['POST'])
 def add_home():
     data=request.json or {}; name=data.get('name','').strip(); code=data.get('code','').strip().upper()
+    expected_weight = data.get('expected_weight_lbs')
+    expected_weight = float(expected_weight) if expected_weight not in (None,'') else None
     if not name or not code: return jsonify({'error':'Name and code required'}),400
     conn=get_db(); cur=conn.cursor()
     try:
-        cur.execute('INSERT INTO homes (name,code) VALUES (%s,%s)',(name,code))
+        cur.execute('INSERT INTO homes (name,code,expected_weight_lbs) VALUES (%s,%s,%s)',(name,code,expected_weight))
         conn.commit(); cur.close(); conn.close()
         log_audit('Homes', 'Added home', code, resolve_performer(data), name)
         return jsonify({'success':True})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Home already exists'}),409
+
+@app.route('/api/homes/<int:hid>', methods=['PUT'])
+def edit_home(hid):
+    """Edit a home's name, code, and/or expected linen weight (used to flag
+    checked-in bags that come back lighter than expected — see checkin())."""
+    data=request.json or {}
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute('SELECT * FROM homes WHERE id=%s',(hid,)); home=cur.fetchone()
+    if not home: cur.close(); conn.close(); return jsonify({'error':'Home not found'}),404
+    name = data.get('name','').strip() or home['name']
+    code = data.get('code','').strip().upper() or home['code']
+    if 'expected_weight_lbs' in data:
+        ew = data.get('expected_weight_lbs')
+        expected_weight = float(ew) if ew not in (None,'') else None
+    else:
+        expected_weight = home['expected_weight_lbs']
+    try:
+        cur.execute('UPDATE homes SET name=%s, code=%s, expected_weight_lbs=%s WHERE id=%s',(name,code,expected_weight,hid))
+        conn.commit(); cur.close(); conn.close()
+        log_audit('Homes', 'Edited home', code, resolve_performer(data))
+        return jsonify({'success':True})
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Another home already uses that code'}),409
 
 @app.route('/api/homes/<int:hid>', methods=['DELETE'])
 def delete_home(hid):
@@ -611,6 +643,94 @@ def delete_home(hid):
     cur.execute('DELETE FROM homes WHERE id=%s',(hid,)); conn.commit(); cur.close(); conn.close()
     log_audit('Homes', 'Removed home', home['code'] if home else str(hid), resolve_performer(data), home['name'] if home else '')
     return jsonify({'success':True})
+
+# ── Laundry weight reconciliation ─────────────────────────────────────────────
+# No scale at the warehouse — bags are dumped into laundry bins and the vendor
+# weighs the whole batch. So instead of per-bag weights, this compares an
+# EXPECTED total (sum of each home's expected_weight_lbs for every bag checked
+# in during a period) against the ACTUAL total the vendor reports for that
+# same batch, entered manually once the invoice/ticket comes in.
+
+def _compute_expected_batch_weight(start, end):
+    """Sum expected_weight_lbs across every 'Returned' checkin in [start,end].
+    start/end are 'YYYY-MM-DD' strings (end is inclusive)."""
+    start_ts = start + " 00:00:00"
+    end_ts = end + " 23:59:59"
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT h.id, h.name, h.code, h.expected_weight_lbs
+        FROM transactions t JOIN homes h ON h.id=t.home_id
+        WHERE t.action='Returned' AND t.timestamp BETWEEN %s AND %s""",(start_ts,end_ts))
+    rows = cur.fetchall(); cur.close(); conn.close()
+    total = 0.0
+    missing_homes = {}
+    for r in rows:
+        if r['expected_weight_lbs'] is not None:
+            total += float(r['expected_weight_lbs'])
+        else:
+            missing_homes[r['id']] = f"{r['name']} ({r['code']})"
+    return {
+        'bag_count': len(rows),
+        'expected_total_weight_lbs': round(total,1),
+        'homes_missing_expected_weight': sorted(missing_homes.values())
+    }
+
+@app.route('/api/laundry-batches/expected', methods=['GET'])
+def laundry_batch_expected():
+    start = request.args.get('start','').strip()
+    end = request.args.get('end','').strip()
+    if not start or not end:
+        return jsonify({'error':'start and end dates are required'}),400
+    return jsonify(_compute_expected_batch_weight(start,end))
+
+@app.route('/api/laundry-batches', methods=['GET'])
+def list_laundry_batches():
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM laundry_batches ORDER BY period_start DESC, id DESC LIMIT 100")
+    rows=cur.fetchall(); cur.close(); conn.close()
+    result=[]
+    for r in rows:
+        expected = float(r['expected_weight_lbs']) if r['expected_weight_lbs'] is not None else None
+        actual = float(r['actual_weight_lbs']) if r['actual_weight_lbs'] is not None else None
+        variance_pct = None
+        if expected and actual is not None and expected > 0:
+            variance_pct = round((actual - expected) / expected * 100, 1)
+        result.append({**r, 'expected_weight_lbs':expected, 'actual_weight_lbs':actual, 'variance_pct':variance_pct})
+    return jsonify(result)
+
+@app.route('/api/laundry-batches', methods=['POST'])
+def save_laundry_batch():
+    data=request.json or {}
+    start = data.get('period_start','').strip()
+    end = data.get('period_end','').strip()
+    actual_raw = data.get('actual_weight_lbs')
+    notes = data.get('notes','').strip()
+    if not start or not end:
+        return jsonify({'error':'period_start and period_end are required'}),400
+    try:
+        actual = float(actual_raw) if actual_raw not in (None,'') else None
+    except (TypeError, ValueError):
+        return jsonify({'error':'actual_weight_lbs must be a number'}),400
+    expected_info = _compute_expected_batch_weight(start,end)
+    ts = now_central()
+    conn=get_db(); cur=conn.cursor()
+    cur.execute("""INSERT INTO laundry_batches
+        (period_start,period_end,expected_weight_lbs,actual_weight_lbs,bag_count,notes,created_by,created_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        (start,end,expected_info['expected_total_weight_lbs'],actual,expected_info['bag_count'],
+         notes or None, resolve_performer(data), ts))
+    new_id = cur.fetchone()[0]
+    conn.commit(); cur.close(); conn.close()
+    log_audit('Homes', 'Saved laundry weight comparison', f'{start} to {end}', resolve_performer(data),
+        f"expected {expected_info['expected_total_weight_lbs']} lbs vs actual {actual} lbs")
+    return jsonify({'success':True,'id':new_id, **expected_info})
+
+@app.route('/api/laundry-batches/<int:bid>', methods=['DELETE'])
+def delete_laundry_batch(bid):
+    conn=get_db(); cur=conn.cursor()
+    cur.execute('DELETE FROM laundry_batches WHERE id=%s',(bid,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True})
+
 
 # ── Bags ──────────────────────────────────────────────────────────────────────
 
@@ -713,15 +833,31 @@ def pickup_bag(bag_id):
 @app.route('/api/bag/<path:bag_id>/checkin', methods=['POST'])
 def checkin(bag_id):
     data=request.json or {}; notes=data.get('notes',''); staff_name=data.get('staff_name','').strip()
+    weight_raw = data.get('weight_lbs')
+    weight_lbs = None
+    if weight_raw not in (None, ''):
+        try: weight_lbs = float(weight_raw)
+        except (TypeError, ValueError): weight_lbs = None
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT b.*,h.name AS home_name,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s",(bag_id.upper(),))
+    cur.execute("SELECT b.*,h.name AS home_name,h.expected_weight_lbs,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s",(bag_id.upper(),))
     bag=cur.fetchone()
     if not bag: cur.close(); conn.close(); return jsonify({'error':'Bag not found'}),404
     if bag['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already checked in'}),400
     ts=now_central()
-    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,'Returned',%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None))
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name,weight_lbs) VALUES (%s,%s,%s,'Returned',%s,%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None,weight_lbs))
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—'})
+    conn.commit(); cur.close(); conn.close()
+    expected = bag['expected_weight_lbs']
+    underweight = False
+    if weight_lbs is not None and expected:
+        try:
+            expected_f = float(expected)
+            if expected_f > 0 and weight_lbs < expected_f * 0.85:
+                underweight = True
+        except (TypeError, ValueError):
+            pass
+    return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—',
+        'weight_lbs':weight_lbs,'expected_weight_lbs':expected,'underweight':underweight})
 
 # ── Cleaner staged bags (for pickup page) ─────────────────────────────────────
 
@@ -876,11 +1012,11 @@ def get_activity():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT t.id,'bag' AS activity_type, t.bag_id, h.name AS home_name,
-               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes, t.staff_name
+               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes, t.staff_name, t.weight_lbs
         FROM transactions t JOIN homes h ON h.id=t.home_id LEFT JOIN cleaners c ON c.id=t.cleaner_id
         UNION ALL
         SELECT lt.id,'loaner' AS activity_type, lt.loaner_id AS bag_id, h.name AS home_name,
-               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes, lt.performed_by_name AS staff_name
+               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes, lt.performed_by_name AS staff_name, NULL AS weight_lbs
         FROM loaner_transactions lt LEFT JOIN homes h ON h.id=lt.home_id LEFT JOIN loaner_staff s ON s.id=lt.staff_id
         ORDER BY ts DESC LIMIT 500""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
