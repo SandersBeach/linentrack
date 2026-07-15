@@ -735,6 +735,17 @@ def get_staged_bags(cleaner_id):
         ORDER BY h.code, b.id""",(cleaner_id,))
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
+@app.route('/api/cleaner/<int:cleaner_id>/bags-out', methods=['GET'])
+def get_cleaner_bags_out(cleaner_id):
+    """Return bags currently checked out (status='out') by this cleaner, so the
+    pickup page can show them what they still have and need to return."""
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT b.id, b.status, b.picked_up_at, h.name AS home_name, h.code AS home_code
+        FROM bags b JOIN homes h ON h.id=b.home_id
+        WHERE b.cleaner_id=%s AND b.status='out'
+        ORDER BY h.code, b.id""",(cleaner_id,))
+    rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
 # ── Overdue check (called on a schedule or manually) ─────────────────────────
 
 def run_bag_overdue_check():
