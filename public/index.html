@@ -759,7 +759,15 @@ async function renderHomes(gen) {
   Object.entries(homeMap).sort((a,b)=>(a[1].code||'').localeCompare(b[1].code||'')).forEach(([name,{code,bags,loaners,storeLoans}]) => {
     const out=bags.filter(b=>b.status==='out'); const inW=bags.filter(b=>b.status==='in'); const staged=bags.filter(b=>b.status==='staged');
     const totalItems = bags.length + loaners.length + storeLoans.length;
-    html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div><div style="display:flex;gap:6px;flex-wrap:wrap">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div></div>`;
+    html+=`<div class="card home-card" data-home="${name.toLowerCase()}">
+      <div class="status-card-header" onclick="toggleStatusCard(this)">
+        <div class="status-card-left">
+          <button class="expand-btn">+</button>
+          <div style="white-space:normal;overflow:visible;text-overflow:clip"><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400);font-weight:400">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div>
+      </div>
+      <div class="status-card-body collapsed">`;
     if (bags.length) {
       html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🧺 Linens</div>`;
       bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):b.status==='staged'?'⏳ Staged, awaiting pickup':'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':b.status==='staged'?'badge-warn':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':b.status==='staged'?'Staged':'In'}</span></div>`;});
@@ -775,7 +783,7 @@ async function renderHomes(gen) {
     if (!bags.length && !loaners.length && !storeLoans.length) {
       html += `<div style="font-size:12px;color:var(--gray-400);padding:4px 0">Nothing currently tracked at this property</div>`;
     }
-    html+=`</div>`;
+    html+=`</div></div>`;
   });
   html+=`</div>`;
   if (unmatchedStoreLoans.length) {
@@ -785,7 +793,7 @@ async function renderHomes(gen) {
   }
   document.getElementById('main-content').innerHTML = html;
 }
-function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{c.style.display=!q||c.dataset.home.includes(q)?'':'none';}); }
+function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{const match=!q||c.dataset.home.includes(q); c.style.display=match?'':'none'; if(match&&q){const body=c.querySelector('.status-card-body');const btn=c.querySelector('.expand-btn');if(body)body.classList.remove('collapsed');if(btn)btn.textContent='–';}}); }
 
 // ── Log Tab ────────────────────────────────────────────────────────────────────
 async function renderLog(gen) {
