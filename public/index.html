@@ -592,9 +592,13 @@ function renderSessionLog() {
   const log = scanState.sessionLog;
   if (!log.length) return;
   const errors = log.filter(l=>l.error).length;
-  let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
+  const warns = log.filter(l=>l.warn && !l.error).length;
+  let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${warns?`<span class="badge badge-warn">${warns} light</span>`:''}${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
   [...log].reverse().forEach(l => {
-    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span></div>`;
+    const badgeClass = l.error ? 'badge-out' : l.warn ? 'badge-warn' : l.action==='out' ? 'badge-out' : 'badge-in';
+    const badgeText = l.error ? 'Error' : l.warn ? 'Light' : l.action==='out' ? 'Out' : 'In';
+    const textColor = l.error ? 'var(--coral)' : l.warn ? 'var(--amber)' : 'var(--gray-400)';
+    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${textColor}">${l.msg}</div></div><span class="badge ${badgeClass}">${badgeText}</span></div>`;
   });
   html += '</div>';
   const el = document.getElementById('session-log');
@@ -796,7 +800,7 @@ async function renderLog(gen) {
   </div>`;
   if (!log.length) { html += '<div class="empty">No activity yet</div>'; document.getElementById('main-content').innerHTML = html; return; }
   html += '<div class="card" style="padding:0.75rem 1.25rem">';
-  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
+  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.weight_lbs!=null?' · <strong>'+e.weight_lbs+' lbs</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
   html += '</div>';
   document.getElementById('main-content').innerHTML = html;
 }
@@ -984,11 +988,28 @@ async function renderSettings(gen) {
   if (_stale(gen)) return;
   let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
-    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
+    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><div class="form-row"><div><label>Expected linen weight (lbs, optional)</label><input type="number" id="new-home-weight" placeholder="e.g. 45" min="0" step="0.1" /></div><div></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
     <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="card"><div class="card-title">All homes</div>`;
-  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div>`;});
+  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out${h.expected_weight_lbs?` · expected ~${parseFloat(h.expected_weight_lbs)} lbs`:''}</div></div><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="showEditHomeModal(${h.id},'${h.name.replace(/'/g,"\\'")}','${h.code}',${h.expected_weight_lbs||'null'})">Edit</button>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div></div>`;});
   html+=`</div>`;
+  html += `<div class="card"><div class="card-title">🧺 Laundry Weight Reconciliation</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Since there's no scale at the warehouse, this compares an <strong>expected</strong> total — the sum of each home's expected linen weight for every bag checked in during a period — against the <strong>actual</strong> total your laundry vendor reports for that same batch. A big gap can mean linens aren't all making it back.</p>
+    <div class="form-row">
+      <div><label>Period start</label><input type="date" id="lb-start"></div>
+      <div><label>Period end</label><input type="date" id="lb-end"></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="calcExpectedBatchWeight()">Calculate expected weight</button>
+    <div id="lb-expected-result" style="font-size:13px;color:var(--gray-700);margin:10px 0"></div>
+    <div class="form-row">
+      <div><label>Actual weight from vendor (lbs)</label><input type="number" id="lb-actual" min="0" step="0.1" placeholder="e.g. 320"></div>
+      <div><label>Notes (optional)</label><input type="text" id="lb-notes" placeholder="e.g. invoice #4521"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="saveLaundryBatch()">Save comparison</button>
+    <div id="lb-save-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:16px"></div>
+    <div class="section-header" style="margin-top:1.25rem"><h2 style="font-size:13px">Past comparisons</h2></div>
+    <div id="laundry-batch-history"><button class="btn btn-ghost btn-sm" onclick="loadLaundryBatches()">Load history</button></div>
+  </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Staff & PINs</h2></div>
     <div class="card"><div class="card-title">Staff members</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Manage individual staff PINs. Each person logs in with their own 4-digit PIN.</p>
@@ -1177,7 +1198,94 @@ async function savePins() {
   await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined,staff_name:_currentStaffName})});
   document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
-async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); const weightRaw=document.getElementById('new-home-weight')?.value?.trim(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,expected_weight_lbs:weightRaw||null,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
+
+function showEditHomeModal(id, name, code, expectedWeight) {
+  const modal = document.createElement('div');
+  modal.className='modal-overlay'; modal.id='modal-home-edit';
+  modal.innerHTML=`<div class="modal-box" style="max-width:400px">
+    <h3>Edit: ${name}</h3>
+    <label>Home name</label>
+    <input type="text" id="eh-name" value="${name}">
+    <label style="margin-top:0.75rem">Code</label>
+    <input type="text" id="eh-code" value="${code}">
+    <label style="margin-top:0.75rem">Expected linen weight (lbs)</label>
+    <input type="number" id="eh-weight" min="0" step="0.1" value="${expectedWeight!==null?expectedWeight:''}" placeholder="e.g. 45">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-home-edit').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditHome(${id})">Save Changes</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitEditHome(id) {
+  const name=document.getElementById('eh-name')?.value?.trim();
+  const code=document.getElementById('eh-code')?.value?.trim().toUpperCase();
+  const weightRaw=document.getElementById('eh-weight')?.value?.trim();
+  if(!name||!code){alert('Name and code are required');return;}
+  const r=await fetch(`/api/homes/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,expected_weight_lbs:weightRaw||null,staff_name:_currentStaffName})});
+  const d=await r.json(); if(!r.ok){alert(d.error);return;}
+  document.getElementById('modal-home-edit')?.remove();
+  renderSettings();
+}
+
+async function calcExpectedBatchWeight() {
+  const start = document.getElementById('lb-start')?.value;
+  const end = document.getElementById('lb-end')?.value;
+  const resultEl = document.getElementById('lb-expected-result');
+  if (!start || !end) { resultEl.innerHTML = '<span style="color:var(--coral-dark)">Pick a start and end date first.</span>'; return; }
+  resultEl.textContent = 'Calculating...';
+  const data = await fetch(`/api/laundry-batches/expected?start=${start}&end=${end}`).then(r=>r.json()).catch(()=>null);
+  if (!data || data.error) { resultEl.innerHTML = `<span style="color:var(--coral-dark)">${data?.error||'Error calculating expected weight'}</span>`; return; }
+  let html = `Expected: <strong>${data.expected_total_weight_lbs} lbs</strong> — based on ${data.bag_count} bag check-in${data.bag_count!==1?'s':''} in this period.`;
+  if (data.homes_missing_expected_weight.length) {
+    html += `<br><span style="color:var(--amber)">⚠️ ${data.homes_missing_expected_weight.length} home(s) checked in during this period don't have an expected weight set, so they're not counted: ${data.homes_missing_expected_weight.join(', ')}</span>`;
+  }
+  resultEl.innerHTML = html;
+}
+
+async function saveLaundryBatch() {
+  const start = document.getElementById('lb-start')?.value;
+  const end = document.getElementById('lb-end')?.value;
+  const actual = document.getElementById('lb-actual')?.value?.trim();
+  const notes = document.getElementById('lb-notes')?.value?.trim();
+  const msgEl = document.getElementById('lb-save-msg');
+  if (!start || !end) { msgEl.innerHTML = '<span style="color:var(--coral-dark)">Pick a start and end date first.</span>'; return; }
+  msgEl.textContent = 'Saving...';
+  const r = await fetch('/api/laundry-batches', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ period_start:start, period_end:end, actual_weight_lbs:actual||null, notes, staff_name:_currentStaffName }) });
+  const data = await r.json();
+  if (!r.ok) { msgEl.innerHTML = `<span style="color:var(--coral-dark)">${data.error}</span>`; return; }
+  msgEl.textContent = '✓ Saved';
+  document.getElementById('lb-actual').value = '';
+  document.getElementById('lb-notes').value = '';
+  loadLaundryBatches();
+}
+
+async function loadLaundryBatches() {
+  const area = document.getElementById('laundry-batch-history');
+  if (!area) return;
+  area.innerHTML = '<p style="font-size:13px;color:var(--gray-400)">Loading...</p>';
+  const batches = await fetch('/api/laundry-batches').then(r=>r.json()).catch(()=>[]);
+  if (!batches.length) { area.innerHTML = '<p style="font-size:13px;color:var(--gray-400);font-style:italic">No comparisons saved yet.</p>'; return; }
+  area.innerHTML = batches.map(b => {
+    const flagged = b.variance_pct !== null && b.variance_pct < -15;
+    return `<div class="row" style="${flagged?'background:var(--coral-light);border-radius:6px;padding:10px 8px':''}">
+      <div class="row-main">
+        <div class="row-title">${b.period_start} → ${b.period_end}${flagged?` <span class="badge badge-out">${b.variance_pct}%</span>`:''}</div>
+        <div class="row-sub">Expected: ${b.expected_weight_lbs??'—'} lbs · Actual: ${b.actual_weight_lbs??'not entered'} lbs${b.variance_pct!==null?` · ${b.variance_pct>0?'+':''}${b.variance_pct}% vs expected`:''} · ${b.bag_count||0} bags${b.notes?' · <em>'+b.notes+'</em>':''}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="deleteLaundryBatch(${b.id})">Remove</button>
+    </div>`;
+  }).join('');
+}
+
+async function deleteLaundryBatch(id) {
+  if (!confirm('Remove this saved comparison?')) return;
+  await fetch(`/api/laundry-batches/${id}`, { method:'DELETE' });
+  loadLaundryBatches();
+}
 async function deleteHome(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/homes/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
 async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){alert('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id),staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} document.getElementById('bag-msg').textContent=`✓ Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
 
