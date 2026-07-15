@@ -88,6 +88,13 @@
   .badge-ok { background: var(--green-light); color: var(--green); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); }
   .row:last-child { border-bottom: none; }
+  .status-card-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+  .status-card-header:hover .expand-btn { border-color: var(--teal-mid); color: var(--teal-dark); }
+  .status-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .status-card-left > div { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .expand-btn { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--gray-200); background: var(--gray-50); color: var(--gray-700); font-size: 14px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+  .status-card-body { margin-top: 8px; }
+  .status-card-body.collapsed { display: none; }
   .row-main { flex: 1; min-width: 0; }
   .row-title { font-size: 13px; font-weight: 500; }
   .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
@@ -653,23 +660,49 @@ async function renderStatus(gen) {
     <div class="search-row"><input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" /><select id="status-f" onchange="filterStatus()" style="width:150px"><option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option></select></div><div id="status-body">`;
   // Staged bags section
   Object.entries(byCleanerStaged).sort().forEach(([name, bags]) => {
-    html += `<div class="card" data-section="staged"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-warn">${bags.length} staged</span></div>`;
+    html += `<div class="card" data-section="staged">
+      <div class="status-card-header" onclick="toggleStatusCard(this)">
+        <div class="status-card-left"><button class="expand-btn">+</button><div>${name}</div></div>
+        <span class="badge badge-warn">${bags.length} staged</span>
+      </div>
+      <div class="status-card-body collapsed">`;
     bags.forEach(b => { const since=b.staged_at?new Date(b.staged_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">⏳ Staged ${since} — awaiting pickup</div></div><span class="badge badge-warn">Staged</span></div>`; });
-    html += `</div>`;
+    html += `</div></div>`;
   });
   // Out bags section
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
-    html += `<div class="card" data-section="out"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span></div>`;
+    html += `<div class="card" data-section="out">
+      <div class="status-card-header" onclick="toggleStatusCard(this)">
+        <div class="status-card-left"><button class="expand-btn">+</button><div>${name}</div></div>
+        <span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span>
+      </div>
+      <div class="status-card-body collapsed">`;
     bags.forEach(b => { const since=b.picked_up_at?new Date(b.picked_up_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Picked up ${since}</div>`:'<div class="row-sub" style="color:var(--amber)">⚠️ No pickup time recorded — can\'t tell if overdue</div>'}</div><span class="badge badge-out">Out</span></div>`; });
-    html += `</div>`;
+    html += `</div></div>`;
   });
-  if (inWarehouse.length) { html+=`<div class="card" data-section="in"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">At warehouse</div><span class="badge badge-in">${inWarehouse.length} bags</span></div>`; inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;}); html+=`</div>`; }
+  if (inWarehouse.length) {
+    html += `<div class="card" data-section="in">
+      <div class="status-card-header" onclick="toggleStatusCard(this)">
+        <div class="status-card-left"><button class="expand-btn">+</button><div>At warehouse</div></div>
+        <span class="badge badge-in">${inWarehouse.length} bags</span>
+      </div>
+      <div class="status-card-body collapsed">`;
+    inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;});
+    html += `</div></div>`;
+  }
   html += `</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
+function toggleStatusCard(headerEl) {
+  const body = headerEl.nextElementSibling;
+  const btn = headerEl.querySelector('.expand-btn');
+  if (!body) return;
+  const collapsed = body.classList.toggle('collapsed');
+  if (btn) btn.textContent = collapsed ? '+' : '–';
+}
 function filterStatus() {
   const q=(document.getElementById('status-q')?.value||'').toLowerCase(); const f=document.getElementById('status-f')?.value||'';
-  document.querySelectorAll('[data-section]').forEach(sec => { const section=sec.dataset.section; if(f&&section!==f){sec.style.display='none';return;} sec.style.display=''; if(q){let any=false;sec.querySelectorAll('[data-search]').forEach(r=>{const match=r.dataset.search.includes(q);r.style.display=match?'':'none';if(match)any=true;});sec.style.display=any?'':'none';}else{sec.querySelectorAll('[data-search]').forEach(r=>r.style.display='');} });
+  document.querySelectorAll('[data-section]').forEach(sec => { const section=sec.dataset.section; if(f&&section!==f){sec.style.display='none';return;} sec.style.display=''; if(q){let any=false;sec.querySelectorAll('[data-search]').forEach(r=>{const match=r.dataset.search.includes(q);r.style.display=match?'':'none';if(match)any=true;});sec.style.display=any?'':'none'; if(any){const body=sec.querySelector('.status-card-body');const btn=sec.querySelector('.expand-btn');if(body)body.classList.remove('collapsed');if(btn)btn.textContent='–';}}else{sec.querySelectorAll('[data-search]').forEach(r=>r.style.display='');} });
 }
 
 // ── Homes Tab ──────────────────────────────────────────────────────────────────
