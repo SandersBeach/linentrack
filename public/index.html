@@ -95,6 +95,14 @@
   .expand-btn { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--gray-200); background: var(--gray-50); color: var(--gray-700); font-size: 14px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
   .status-card-body { margin-top: 8px; }
   .status-card-body.collapsed { display: none; }
+  .scan-cam-btn { width:100%; padding:11px; border-radius:var(--radius-sm); border:0.5px solid var(--teal-mid); background:var(--teal-light); color:var(--teal-dark); font-size:14px; font-weight:600; cursor:pointer; font-family:var(--font); margin-top:10px; }
+  .scan-cam-btn:active { transform: scale(0.98); }
+  .cam-overlay { position:fixed; inset:0; background:#000; z-index:1000; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .cam-video-wrap { position:relative; width:100%; max-width:480px; aspect-ratio:1/1; overflow:hidden; }
+  .cam-video-wrap video { width:100%; height:100%; object-fit:cover; }
+  .cam-frame { position:absolute; inset:12%; border:3px solid var(--teal-mid); border-radius:16px; box-shadow:0 0 0 2000px rgba(0,0,0,0.35); pointer-events:none; }
+  .cam-status { color:#fff; font-size:15px; text-align:center; padding:1rem 1.25rem; min-height:20px; transition: color 0.15s; }
+  .cam-close { position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:50%; width:40px; height:40px; font-size:18px; cursor:pointer; z-index:1001; }
   .row-main { flex: 1; min-width: 0; }
   .row-title { font-size: 13px; font-weight: 500; }
   .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
@@ -361,6 +369,17 @@
   </div>
 </div>
 
+<!-- ── Phone camera QR scan overlay (reusable across scan screens) ── -->
+<div id="cam-overlay" class="cam-overlay" style="display:none">
+  <button class="cam-close" onclick="closeCameraScan()">✕</button>
+  <div class="cam-video-wrap">
+    <video id="cam-video" autoplay playsinline muted></video>
+    <div class="cam-frame"></div>
+  </div>
+  <div class="cam-status" id="cam-status">Point your camera at the item tag QR code</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
 let role = null;
@@ -1222,6 +1241,7 @@ async function renderLoanerScan(gen) {
       <label>Scan loaner item tag</label>
       <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" />
       <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
+      <button class="scan-cam-btn" onclick="openCameraScan('loaner-scan-input', processLoanerScan, 'Point your camera at the loaner item tag QR code')">📷 Scan with phone camera</button>
     </div>
     <div id="loaner-session-log"></div>`;
   document.getElementById('loaner-scan-input')?.focus();
@@ -1247,6 +1267,83 @@ function renderLoanerSessionLog() {
   let html=`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
   [...log].reverse().forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span></div>`;});
   html+='</div>'; const el=document.getElementById('loaner-session-log'); if(el)el.innerHTML=html;
+}
+
+// ── Phone camera QR scan (reusable across scan screens) ─────────────────────
+// openCameraScan(targetInputId, onResult, promptText) opens the full-screen
+// camera, and on a detected code fills targetInputId with the raw value then
+// calls onResult() — the same function that normally runs on Enter/scanner-submit.
+let _camStream = null;
+let _camRunning = false;
+let _camCanvas = null;
+let _camCtx = null;
+let _camLastCode = null;
+let _camLastTime = 0;
+let _camTargetInputId = null;
+let _camOnResult = null;
+let _camPrompt = 'Point your camera at the tag QR code';
+
+async function openCameraScan(targetInputId, onResult, promptText) {
+  _camTargetInputId = targetInputId;
+  _camOnResult = onResult;
+  _camPrompt = promptText || 'Point your camera at the tag QR code';
+  const overlay = document.getElementById('cam-overlay');
+  const video = document.getElementById('cam-video');
+  const status = document.getElementById('cam-status');
+  status.style.color = '#fff'; status.style.fontWeight = 'normal';
+  overlay.style.display = 'flex';
+  if (typeof jsQR === 'undefined') {
+    status.textContent = 'Scanner library failed to load — check your internet connection and try again, or use manual entry.';
+    return;
+  }
+  status.textContent = _camPrompt;
+  if (!_camCanvas) { _camCanvas = document.createElement('canvas'); _camCtx = _camCanvas.getContext('2d', { willReadFrequently: true }); }
+  try {
+    _camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = _camStream;
+    await video.play();
+    _camRunning = true;
+    _camLastCode = null; _camLastTime = 0;
+    requestAnimationFrame(camScanLoop);
+  } catch (e) {
+    status.textContent = 'Could not access camera — check camera permission for this browser.';
+  }
+}
+
+function closeCameraScan() {
+  _camRunning = false;
+  const overlay = document.getElementById('cam-overlay');
+  overlay.style.display = 'none';
+  if (_camStream) { _camStream.getTracks().forEach(tr => tr.stop()); _camStream = null; }
+}
+
+function camScanLoop() {
+  if (!_camRunning) return;
+  const video = document.getElementById('cam-video');
+  if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR !== 'undefined') {
+    _camCanvas.width = video.videoWidth;
+    _camCanvas.height = video.videoHeight;
+    _camCtx.drawImage(video, 0, 0, _camCanvas.width, _camCanvas.height);
+    const imgData = _camCtx.getImageData(0, 0, _camCanvas.width, _camCanvas.height);
+    const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+    const now = Date.now();
+    if (code && code.data && (code.data !== _camLastCode || now - _camLastTime > 2000)) {
+      _camLastCode = code.data; _camLastTime = now;
+      handleCameraResult(code.data);
+    }
+  }
+  if (_camRunning) requestAnimationFrame(camScanLoop);
+}
+
+function handleCameraResult(raw) {
+  const status = document.getElementById('cam-status');
+  status.style.color = '#fff'; status.style.fontWeight = 'normal';
+  status.textContent = '✓ Code detected...';
+  if (navigator.vibrate) navigator.vibrate(80);
+  const input = document.getElementById(_camTargetInputId);
+  if (input) input.value = raw;
+  if (typeof _camOnResult === 'function') _camOnResult();
+  setTimeout(() => { if (_camRunning) status.textContent = _camPrompt; }, 1200);
 }
 async function renderLoanerStatus(gen) {
   document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
