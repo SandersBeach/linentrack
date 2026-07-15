@@ -64,11 +64,12 @@
   .bag-status { font-size: 12px; font-weight: 600; }
   .status-waiting { color: var(--amber); }
   .status-confirmed { color: var(--teal-dark); }
+  .status-out { color: var(--teal-dark); font-size: 11px; font-weight: 500; text-align: right; }
   .scan-box { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
   input[type=text] { width: 100%; padding: 11px 14px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 15px; font-family: var(--font); background: #fff; color: var(--gray-900); outline: none; transition: border 0.15s; }
   input[type=text]:focus { border-color: var(--teal); }
   .hint { font-size: 12px; color: var(--gray-400); margin-top: 6px; }
-  .flash { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; z-index: 999; white-space: nowrap; }
+  .flash { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 10px 20px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; z-index: 1002; white-space: nowrap; max-width: 90vw; text-align: center; }
   .flash-ok { background: var(--teal-light); color: var(--teal-dark); border: 0.5px solid var(--teal-mid); }
   .flash-err { background: var(--coral-light); color: var(--coral-dark); border: 0.5px solid var(--coral); }
   .empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--gray-400); font-size: 14px; }
@@ -88,7 +89,7 @@
   .cam-video-wrap { position:relative; width:100%; max-width:480px; aspect-ratio:1/1; overflow:hidden; }
   .cam-video-wrap video { width:100%; height:100%; object-fit:cover; }
   .cam-frame { position:absolute; inset:12%; border:3px solid var(--teal-mid); border-radius:16px; box-shadow:0 0 0 2000px rgba(0,0,0,0.35); pointer-events:none; }
-  .cam-status { color:#fff; font-size:14px; text-align:center; padding:1rem; min-height:20px; }
+  .cam-status { color:#fff; font-size:15px; text-align:center; padding:1rem 1.25rem; min-height:20px; transition: color 0.15s; }
   .cam-close { position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:50%; width:40px; height:40px; font-size:18px; cursor:pointer; z-index:1001; }
 </style>
 </head>
@@ -154,6 +155,10 @@
     <div id="bag-list" class="bag-list">
       <div class="empty-state" id="loading-bags-text">Loading your bags...</div>
     </div>
+    <div class="section-title" id="bags-out-title">Bags you currently have</div>
+    <div id="bags-out-list" class="bag-list">
+      <div class="empty-state" id="loading-bags-out-text">Loading...</div>
+    </div>
   </div>
 </div>
 
@@ -198,6 +203,7 @@ const T = {
     bagConfirmed: (home) => `✓ ${home} confirmed!`,
     wrongBagTitle: '🚨 Wrong bag!',
     wrongBagSub: (id, name) => `<strong>${id}</strong> belongs to ${name}. Please put it back where you found it.`,
+    wrongBagPlain: (id, name) => `Wrong bag — ${id} belongs to ${name}. Put it back.`,
     notYours: '⚠️ That bag is not yours!',
     genericError: 'Error — try again',
     camPrompt: 'Point your camera at a bag tag QR code',
@@ -205,6 +211,10 @@ const T = {
     camNoAccess: 'Could not access camera — check camera permission for this browser.',
     camDetected: '✓ Code detected...',
     defaultCleanerName: 'Cleaner',
+    bagsOutTitle: 'Bags you currently have',
+    noBagsOut: "You don't have any bags checked out right now.",
+    loadingBagsOut: 'Loading...',
+    pickedUpLabel: 'Picked up',
     serverErrors: {
       'Bag not found': 'Bag not found',
       'Already staged or checked out': 'Already staged or checked out',
@@ -237,6 +247,7 @@ const T = {
     bagConfirmed: (home) => `✓ ¡${home} confirmada!`,
     wrongBagTitle: '🚨 ¡Bolsa equivocada!',
     wrongBagSub: (id, name) => `<strong>${id}</strong> pertenece a ${name}. Por favor devuélvela a donde la encontraste.`,
+    wrongBagPlain: (id, name) => `Bolsa equivocada — ${id} pertenece a ${name}. Devuélvela.`,
     notYours: '⚠️ ¡Esa bolsa no es tuya!',
     genericError: 'Error — inténtalo de nuevo',
     camPrompt: 'Apunta tu cámara al código QR de la etiqueta de la bolsa',
@@ -244,6 +255,10 @@ const T = {
     camNoAccess: 'No se pudo acceder a la cámara — revisa el permiso de cámara para este navegador.',
     camDetected: '✓ Código detectado...',
     defaultCleanerName: 'Limpiador/a',
+    bagsOutTitle: 'Bolsas que tienes actualmente',
+    noBagsOut: 'No tienes bolsas contigo en este momento.',
+    loadingBagsOut: 'Cargando...',
+    pickedUpLabel: 'Recogida',
     serverErrors: {
       'Bag not found': 'Bolsa no encontrada',
       'Already staged or checked out': 'Ya está preparada o entregada',
@@ -270,6 +285,7 @@ function setLang(lang) {
   applyStaticText();
   if (document.getElementById('screen-scan').style.display !== 'none') {
     renderBagList();
+    renderBagsOutList();
   }
 }
 
@@ -284,8 +300,11 @@ function applyStaticText() {
   document.getElementById('scan-hint').textContent = tr.scanHint;
   document.getElementById('cam-scan-btn').textContent = tr.camBtn;
   document.getElementById('your-bags-title').textContent = tr.yourBagsTitle;
+  document.getElementById('bags-out-title').textContent = tr.bagsOutTitle;
   const loadingEl = document.getElementById('loading-bags-text');
   if (loadingEl) loadingEl.textContent = tr.loadingBags;
+  const loadingOutEl = document.getElementById('loading-bags-out-text');
+  if (loadingOutEl) loadingOutEl.textContent = tr.loadingBagsOut;
   const camStatus = document.getElementById('cam-status');
   if (camStatus && !_camRunning) camStatus.textContent = tr.camPrompt;
   if (!_cleaner) document.getElementById('cleaner-name-display').textContent = tr.defaultCleanerName;
@@ -295,7 +314,9 @@ let _pin = '';
 let _cleaner = null;
 let _stagedBags = [];
 let _confirmedIds = new Set();
+let _bagsOut = [];
 
+// ── PIN ───────────────────────────────────────────────────────────────────────
 function pinPress(d) {
   if (_pin.length >= 5) return;
   _pin += d;
@@ -320,7 +341,7 @@ async function submitPin() {
     document.getElementById('screen-pin').style.display = 'none';
     document.getElementById('screen-scan').style.display = 'block';
     document.getElementById('cleaner-name-display').textContent = _cleaner.name;
-    await loadStagedBags();
+    await Promise.all([loadStagedBags(), loadBagsOut()]);
     focusScan();
   } catch(e) {
     document.getElementById('pin-err').textContent = t().connError;
@@ -329,7 +350,7 @@ async function submitPin() {
 }
 function logout() {
   closeCameraScan();
-  _pin = ''; _cleaner = null; _stagedBags = []; _confirmedIds = new Set();
+  _pin = ''; _cleaner = null; _stagedBags = []; _confirmedIds = new Set(); _bagsOut = [];
   updateDots();
   document.getElementById('screen-scan').style.display = 'none';
   document.getElementById('screen-pin').style.display = 'flex';
@@ -339,6 +360,7 @@ function logout() {
   document.getElementById('cleaner-name-display').textContent = t().defaultCleanerName;
 }
 
+// ── Bags ──────────────────────────────────────────────────────────────────────
 async function loadStagedBags() {
   try {
     const r = await fetch(`/api/cleaner/${_cleaner.id}/staged-bags`);
@@ -346,6 +368,16 @@ async function loadStagedBags() {
     renderBagList();
   } catch(e) {
     document.getElementById('bag-list').innerHTML = `<div class="empty-state">${t().errorLoadingBags}</div>`;
+  }
+}
+
+async function loadBagsOut() {
+  try {
+    const r = await fetch(`/api/cleaner/${_cleaner.id}/bags-out`);
+    _bagsOut = await r.json();
+    renderBagsOutList();
+  } catch(e) {
+    document.getElementById('bags-out-list').innerHTML = `<div class="empty-state">${t().errorLoadingBags}</div>`;
   }
 }
 
@@ -386,14 +418,64 @@ function renderBagList() {
   }).join('');
 }
 
+function renderBagsOutList() {
+  const tr = t();
+  const list = document.getElementById('bags-out-list');
+  if (!_bagsOut.length) {
+    list.innerHTML = `<div class="empty-state">${tr.noBagsOut}</div>`;
+    return;
+  }
+  list.innerHTML = _bagsOut.map(b => {
+    let since = '';
+    if (b.picked_up_at) {
+      const d = new Date(b.picked_up_at.replace(' ', 'T'));
+      if (!isNaN(d)) {
+        since = d.toLocaleString(LANG === 'es' ? 'es-ES' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      }
+    }
+    return `<div class="bag-row anim">
+      <div>
+        <div class="bag-home">${b.home_name}</div>
+        <span class="bag-id">${b.id}</span>
+      </div>
+      <div class="bag-status status-out">${tr.pickedUpLabel}${since ? ': ' + since : ''}</div>
+    </div>`;
+  }).join('');
+}
+
 function focusScan() { setTimeout(() => document.getElementById('scan-input')?.focus(), 100); }
 
-async function processScan() {
+// ── Camera status helper ─────────────────────────────────────────────────────
+let _camStatusResetTimer = null;
+function setCamStatus(msg, kind, viaCamera, autoCloseOnErr) {
+  if (!viaCamera) return;
+  const status = document.getElementById('cam-status');
+  if (!status) return;
+  status.textContent = msg;
+  status.style.color = kind === 'err' ? '#FF7A56' : '#5DCAA5';
+  status.style.fontWeight = '700';
+  clearTimeout(_camStatusResetTimer);
+  const holdTime = kind === 'err' ? 3200 : 1800;
+  if (autoCloseOnErr && kind === 'err') {
+    setTimeout(() => { if (_camRunning) closeCameraScan(); }, holdTime);
+  } else {
+    _camStatusResetTimer = setTimeout(() => {
+      if (_camRunning) {
+        status.style.color = '#fff';
+        status.style.fontWeight = 'normal';
+        status.textContent = t().camPrompt;
+      }
+    }, holdTime);
+  }
+}
+
+async function processScan(viaCamera) {
   const tr = t();
   const input = document.getElementById('scan-input');
   let raw = (input?.value || '').trim();
   input.value = '';
 
+  // Extract bag ID from URL param if scanner reads a QR URL
   let id = raw;
   if (raw.includes('?') || raw.includes('=')) {
     const m = raw.match(/[?&][Bb][Aa][Gg]=([A-Za-z0-9-]+)/);
@@ -404,9 +486,11 @@ async function processScan() {
   }
   if (!id) { focusScan(); return; }
 
+  // Check if this bag is in the staged list for this cleaner
   const inList = _stagedBags.find(b => b.id === id);
   if (inList && _confirmedIds.has(id)) {
     showFlash(tr.alreadyConfirmed, 'ok');
+    setCamStatus(tr.alreadyConfirmed, 'ok', viaCamera);
     focusScan(); return;
   }
 
@@ -420,20 +504,31 @@ async function processScan() {
     if (r.ok && data.success) {
       _confirmedIds.add(id);
       document.getElementById('wrong-bag-area').innerHTML = '';
-      showFlash(tr.bagConfirmed(data.home), 'ok');
+      const msg = tr.bagConfirmed(data.home);
+      showFlash(msg, 'ok');
+      setCamStatus(msg, 'ok', viaCamera);
       renderBagList();
+      loadBagsOut();
     } else if (data.wrong_cleaner) {
+      // Wrong cleaner's bag — big on-screen alert
       document.getElementById('wrong-bag-area').innerHTML = `
         <div class="wrong-bag-alert anim">
           <div class="wa-title">${tr.wrongBagTitle}</div>
           <div class="wa-sub">${tr.wrongBagSub(id, data.assigned_to)}</div>
         </div>`;
       showFlash(tr.notYours, 'err');
+      if (navigator.vibrate) navigator.vibrate([120,80,120,80,180]);
+      // Also surface it right inside the camera view (in red) and auto-close
+      // the camera so the on-screen red alert isn't hidden behind it.
+      setCamStatus(tr.wrongBagPlain(id, data.assigned_to || ''), 'err', viaCamera, true);
     } else {
-      showFlash(translateServerError(data.error), 'err');
+      const msg = translateServerError(data.error);
+      showFlash(msg, 'err');
+      setCamStatus(msg, 'err', viaCamera);
     }
   } catch(e) {
     showFlash(tr.connError, 'err');
+    setCamStatus(tr.connError, 'err', viaCamera);
   }
   focusScan();
 }
@@ -446,6 +541,7 @@ function showFlash(msg, type) {
   setTimeout(() => el.remove(), 2500);
 }
 
+// ── Camera QR Scan ──────────────────────────────────────────────────────────
 let _camStream = null;
 let _camRunning = false;
 let _camCanvas = null;
@@ -458,6 +554,8 @@ async function openCameraScan() {
   const overlay = document.getElementById('cam-overlay');
   const video = document.getElementById('cam-video');
   const status = document.getElementById('cam-status');
+  status.style.color = '#fff';
+  status.style.fontWeight = 'normal';
   overlay.style.display = 'flex';
   if (typeof jsQR === 'undefined') {
     status.textContent = tr.camLibFail;
@@ -479,9 +577,10 @@ async function openCameraScan() {
 
 function closeCameraScan() {
   _camRunning = false;
+  clearTimeout(_camStatusResetTimer);
   const overlay = document.getElementById('cam-overlay');
   overlay.style.display = 'none';
-  if (_camStream) { _camStream.getTracks().forEach(t => t.stop()); _camStream = null; }
+  if (_camStream) { _camStream.getTracks().forEach(tr => tr.stop()); _camStream = null; }
   focusScan();
 }
 
@@ -505,19 +604,22 @@ function camScanLoop() {
 
 function handleCameraResult(raw) {
   const status = document.getElementById('cam-status');
+  status.style.color = '#fff';
+  status.style.fontWeight = 'normal';
   status.textContent = t().camDetected;
   if (navigator.vibrate) navigator.vibrate(80);
   document.getElementById('scan-input').value = raw;
-  processScan();
-  setTimeout(() => { if (_camRunning) status.textContent = t().camPrompt; }, 1200);
+  processScan(true);
 }
 
+// Auto-focus scan input when tapping anywhere on scan screen
 document.addEventListener('click', e => {
   if (document.getElementById('screen-scan').style.display !== 'none' && !e.target.closest('button, input')) {
     focusScan();
   }
 });
 
+// ── Init ──────────────────────────────────────────────────────────────────────
 setLang('en');
 </script>
 </body>
