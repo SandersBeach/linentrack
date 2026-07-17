@@ -2884,7 +2884,7 @@ def seed_pack_formula():
     ts = now_central()
     upserted = 0
     for row in PACK_FORMULA_SEED:
-        addr = row['name'].lower().strip()
+        addr = row['address']
         cur.execute("""
             INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,updated_at)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -2892,7 +2892,7 @@ def seed_pack_formula():
                 property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
                 twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
                 mats=EXCLUDED.mats, pool=EXCLUDED.pool, updated_at=EXCLUDED.updated_at
-        """, (addr, row['name'], row['king'], row['queen'], row['twin'], row['towels'],
+        """, (addr, row['property_name'], row['king'], row['queen'], row['twin'], row['towels'],
               row['hand'], row['wash'], row['mats'], row['pool'], ts))
         upserted += 1
     conn.commit(); cur.close(); conn.close()
