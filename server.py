@@ -1,4 +1,4 @@
-import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv
+import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets
 from flask import Flask, request, jsonify, send_from_directory, Response
 from datetime import datetime, timedelta
 import psycopg2
@@ -18,6 +18,7 @@ HOUSEKEEPING_MANAGER = 'cassie@sandersbeachrentals.com'
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', 'info@sandersbeachrentals.com')
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
 PO_APPROVER_1_EMAIL = 'sabrina@sandersbeachrentals.com'
 PO_APPROVER_1_NAME  = 'Sabrina Renshaw'
@@ -150,11 +151,6 @@ def init_db():
         CREATE TABLE IF NOT EXISTS transactions (
             id SERIAL PRIMARY KEY, bag_id TEXT NOT NULL, home_id INTEGER NOT NULL,
             cleaner_id INTEGER, action TEXT NOT NULL, timestamp TEXT NOT NULL, notes TEXT
-        );
-        CREATE TABLE IF NOT EXISTS laundry_batches (
-            id SERIAL PRIMARY KEY, period_start TEXT NOT NULL, period_end TEXT NOT NULL,
-            expected_weight_lbs NUMERIC, actual_weight_lbs NUMERIC, bag_count INTEGER,
-            notes TEXT, created_by TEXT, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS loaner_staff (
             id SERIAL PRIMARY KEY, name TEXT NOT NULL, active INTEGER DEFAULT 1
@@ -289,6 +285,43 @@ def init_db():
             id SERIAL PRIMARY KEY, ts TEXT NOT NULL, area TEXT NOT NULL,
             action TEXT NOT NULL, item TEXT, performed_by TEXT, details TEXT
         );
+        CREATE TABLE IF NOT EXISTS pack_list_formula (
+            address TEXT PRIMARY KEY, property_name TEXT,
+            king INTEGER DEFAULT 0, queen INTEGER DEFAULT 0, twin INTEGER DEFAULT 0,
+            towels INTEGER DEFAULT 0, hand INTEGER DEFAULT 0, wash INTEGER DEFAULT 0,
+            mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS pack_list_status (
+            id SERIAL PRIMARY KEY, address TEXT NOT NULL, pack_date TEXT NOT NULL,
+            packed_by TEXT NOT NULL, packed_at TEXT NOT NULL, staged_bag_ids TEXT,
+            cleaner_id INTEGER, cleaner_name TEXT, created_at TEXT NOT NULL,
+            UNIQUE(address, pack_date)
+        );
+        CREATE TABLE IF NOT EXISTS pack_flags (
+            id SERIAL PRIMARY KEY, address TEXT, item_name TEXT NOT NULL, issue_type TEXT NOT NULL,
+            notes TEXT, flagged_by TEXT NOT NULL, flagged_at TEXT NOT NULL, pack_date TEXT,
+            resolved INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS pack_emergency_adds (
+            id SERIAL PRIMARY KEY, address TEXT NOT NULL, notes TEXT, pack_date TEXT NOT NULL,
+            added_by TEXT NOT NULL, added_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pack_emergency_acks (
+            id SERIAL PRIMARY KEY, emergency_id INTEGER NOT NULL REFERENCES pack_emergency_adds(id),
+            staff_name TEXT NOT NULL, acked_at TEXT NOT NULL, UNIQUE(emergency_id, staff_name)
+        );
+        CREATE TABLE IF NOT EXISTS cleaner_name_aliases (
+            breezeway_name TEXT PRIMARY KEY, cleaner_name TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pack_cleaner_assignments (
+            address TEXT NOT NULL, assignment_date TEXT NOT NULL,
+            cleaner_id INTEGER, cleaner_name TEXT, raw_assignee TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY (address, assignment_date)
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_checkin_sessions (
+            id SERIAL PRIMARY KEY, cleaner_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL, expires_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS po_requests (
             id SERIAL PRIMARY KEY,
             employee_name TEXT NOT NULL, employee_email TEXT NOT NULL,
@@ -320,13 +353,36 @@ def init_db():
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_notes TEXT",
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
         "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS performed_by TEXT",
-        "ALTER TABLE homes ADD COLUMN IF NOT EXISTS expected_weight_lbs NUMERIC",
-        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS weight_lbs NUMERIC",
+        "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
             print(f'Migration note: {e}')
             conn.rollback()
+    # Known Breezeway/SandersCentral name mismatches — safe to insert repeatedly.
+    try:
+        cur.execute(
+            "INSERT INTO cleaner_name_aliases (breezeway_name,cleaner_name,created_at) VALUES (%s,%s,%s) ON CONFLICT (breezeway_name) DO NOTHING",
+            ('mario diaz', 'Mario Cruz', now_central())
+        )
+        conn.commit()
+    except Exception as e:
+        print(f'Alias seed note: {e}')
+        conn.rollback()
+    # Backfill bucket for existing hk_supply_items rows based on category —
+    # Amenities: Guest Amenities, Kitchen, Laundry, Trash & Liners.
+    # Cleaning Supplies: Maintenance, Cleaning Supplies.
+    try:
+        cur.execute("""
+            UPDATE hk_supply_items SET bucket = CASE
+                WHEN category IN ('Guest Amenities','Kitchen','Laundry','Trash & Liners') THEN 'Amenities'
+                ELSE 'Cleaning Supplies'
+            END WHERE bucket IS NULL
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f'Bucket backfill note: {e}')
+        conn.rollback()
     conn.commit(); cur.close(); conn.close()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -551,6 +607,12 @@ def po_approvals(): return _no_cache_html('po-approvals.html')
 @app.route('/pickup')
 def pickup(): return _no_cache_html('pickup.html')
 
+@app.route('/warehouse-display')
+def warehouse_display(): return _no_cache_html('warehouse-display.html')
+
+@app.route('/cleaner-checkin')
+def cleaner_checkin_page(): return _no_cache_html('checkin.html')
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @app.route('/api/auth', methods=['POST'])
@@ -590,7 +652,7 @@ def save_pins():
 @app.route('/api/homes', methods=['GET'])
 def get_homes():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT h.id, h.name, h.code, h.expected_weight_lbs,
+    cur.execute("""SELECT h.id, h.name, h.code,
         COUNT(b.id) AS bag_count, COUNT(CASE WHEN b.status='out' THEN 1 END) AS out_count
         FROM homes h LEFT JOIN bags b ON b.home_id=h.id GROUP BY h.id ORDER BY h.code""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
@@ -598,40 +660,15 @@ def get_homes():
 @app.route('/api/homes', methods=['POST'])
 def add_home():
     data=request.json or {}; name=data.get('name','').strip(); code=data.get('code','').strip().upper()
-    expected_weight = data.get('expected_weight_lbs')
-    expected_weight = float(expected_weight) if expected_weight not in (None,'') else None
     if not name or not code: return jsonify({'error':'Name and code required'}),400
     conn=get_db(); cur=conn.cursor()
     try:
-        cur.execute('INSERT INTO homes (name,code,expected_weight_lbs) VALUES (%s,%s,%s)',(name,code,expected_weight))
+        cur.execute('INSERT INTO homes (name,code) VALUES (%s,%s)',(name,code))
         conn.commit(); cur.close(); conn.close()
         log_audit('Homes', 'Added home', code, resolve_performer(data), name)
         return jsonify({'success':True})
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Home already exists'}),409
-
-@app.route('/api/homes/<int:hid>', methods=['PUT'])
-def edit_home(hid):
-    """Edit a home's name, code, and/or expected linen weight (used to flag
-    checked-in bags that come back lighter than expected — see checkin())."""
-    data=request.json or {}
-    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute('SELECT * FROM homes WHERE id=%s',(hid,)); home=cur.fetchone()
-    if not home: cur.close(); conn.close(); return jsonify({'error':'Home not found'}),404
-    name = data.get('name','').strip() or home['name']
-    code = data.get('code','').strip().upper() or home['code']
-    if 'expected_weight_lbs' in data:
-        ew = data.get('expected_weight_lbs')
-        expected_weight = float(ew) if ew not in (None,'') else None
-    else:
-        expected_weight = home['expected_weight_lbs']
-    try:
-        cur.execute('UPDATE homes SET name=%s, code=%s, expected_weight_lbs=%s WHERE id=%s',(name,code,expected_weight,hid))
-        conn.commit(); cur.close(); conn.close()
-        log_audit('Homes', 'Edited home', code, resolve_performer(data))
-        return jsonify({'success':True})
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Another home already uses that code'}),409
 
 @app.route('/api/homes/<int:hid>', methods=['DELETE'])
 def delete_home(hid):
@@ -643,94 +680,6 @@ def delete_home(hid):
     cur.execute('DELETE FROM homes WHERE id=%s',(hid,)); conn.commit(); cur.close(); conn.close()
     log_audit('Homes', 'Removed home', home['code'] if home else str(hid), resolve_performer(data), home['name'] if home else '')
     return jsonify({'success':True})
-
-# ── Laundry weight reconciliation ─────────────────────────────────────────────
-# No scale at the warehouse — bags are dumped into laundry bins and the vendor
-# weighs the whole batch. So instead of per-bag weights, this compares an
-# EXPECTED total (sum of each home's expected_weight_lbs for every bag checked
-# in during a period) against the ACTUAL total the vendor reports for that
-# same batch, entered manually once the invoice/ticket comes in.
-
-def _compute_expected_batch_weight(start, end):
-    """Sum expected_weight_lbs across every 'Returned' checkin in [start,end].
-    start/end are 'YYYY-MM-DD' strings (end is inclusive)."""
-    start_ts = start + " 00:00:00"
-    end_ts = end + " 23:59:59"
-    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT h.id, h.name, h.code, h.expected_weight_lbs
-        FROM transactions t JOIN homes h ON h.id=t.home_id
-        WHERE t.action='Returned' AND t.timestamp BETWEEN %s AND %s""",(start_ts,end_ts))
-    rows = cur.fetchall(); cur.close(); conn.close()
-    total = 0.0
-    missing_homes = {}
-    for r in rows:
-        if r['expected_weight_lbs'] is not None:
-            total += float(r['expected_weight_lbs'])
-        else:
-            missing_homes[r['id']] = f"{r['name']} ({r['code']})"
-    return {
-        'bag_count': len(rows),
-        'expected_total_weight_lbs': round(total,1),
-        'homes_missing_expected_weight': sorted(missing_homes.values())
-    }
-
-@app.route('/api/laundry-batches/expected', methods=['GET'])
-def laundry_batch_expected():
-    start = request.args.get('start','').strip()
-    end = request.args.get('end','').strip()
-    if not start or not end:
-        return jsonify({'error':'start and end dates are required'}),400
-    return jsonify(_compute_expected_batch_weight(start,end))
-
-@app.route('/api/laundry-batches', methods=['GET'])
-def list_laundry_batches():
-    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM laundry_batches ORDER BY period_start DESC, id DESC LIMIT 100")
-    rows=cur.fetchall(); cur.close(); conn.close()
-    result=[]
-    for r in rows:
-        expected = float(r['expected_weight_lbs']) if r['expected_weight_lbs'] is not None else None
-        actual = float(r['actual_weight_lbs']) if r['actual_weight_lbs'] is not None else None
-        variance_pct = None
-        if expected and actual is not None and expected > 0:
-            variance_pct = round((actual - expected) / expected * 100, 1)
-        result.append({**r, 'expected_weight_lbs':expected, 'actual_weight_lbs':actual, 'variance_pct':variance_pct})
-    return jsonify(result)
-
-@app.route('/api/laundry-batches', methods=['POST'])
-def save_laundry_batch():
-    data=request.json or {}
-    start = data.get('period_start','').strip()
-    end = data.get('period_end','').strip()
-    actual_raw = data.get('actual_weight_lbs')
-    notes = data.get('notes','').strip()
-    if not start or not end:
-        return jsonify({'error':'period_start and period_end are required'}),400
-    try:
-        actual = float(actual_raw) if actual_raw not in (None,'') else None
-    except (TypeError, ValueError):
-        return jsonify({'error':'actual_weight_lbs must be a number'}),400
-    expected_info = _compute_expected_batch_weight(start,end)
-    ts = now_central()
-    conn=get_db(); cur=conn.cursor()
-    cur.execute("""INSERT INTO laundry_batches
-        (period_start,period_end,expected_weight_lbs,actual_weight_lbs,bag_count,notes,created_by,created_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-        (start,end,expected_info['expected_total_weight_lbs'],actual,expected_info['bag_count'],
-         notes or None, resolve_performer(data), ts))
-    new_id = cur.fetchone()[0]
-    conn.commit(); cur.close(); conn.close()
-    log_audit('Homes', 'Saved laundry weight comparison', f'{start} to {end}', resolve_performer(data),
-        f"expected {expected_info['expected_total_weight_lbs']} lbs vs actual {actual} lbs")
-    return jsonify({'success':True,'id':new_id, **expected_info})
-
-@app.route('/api/laundry-batches/<int:bid>', methods=['DELETE'])
-def delete_laundry_batch(bid):
-    conn=get_db(); cur=conn.cursor()
-    cur.execute('DELETE FROM laundry_batches WHERE id=%s',(bid,))
-    conn.commit(); cur.close(); conn.close()
-    return jsonify({'success':True})
-
 
 # ── Bags ──────────────────────────────────────────────────────────────────────
 
@@ -833,31 +782,124 @@ def pickup_bag(bag_id):
 @app.route('/api/bag/<path:bag_id>/checkin', methods=['POST'])
 def checkin(bag_id):
     data=request.json or {}; notes=data.get('notes',''); staff_name=data.get('staff_name','').strip()
-    weight_raw = data.get('weight_lbs')
-    weight_lbs = None
-    if weight_raw not in (None, ''):
-        try: weight_lbs = float(weight_raw)
-        except (TypeError, ValueError): weight_lbs = None
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT b.*,h.name AS home_name,h.expected_weight_lbs,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s",(bag_id.upper(),))
+    cur.execute("SELECT b.*,h.name AS home_name,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s",(bag_id.upper(),))
     bag=cur.fetchone()
     if not bag: cur.close(); conn.close(); return jsonify({'error':'Bag not found'}),404
     if bag['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already checked in'}),400
     ts=now_central()
-    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name,weight_lbs) VALUES (%s,%s,%s,'Returned',%s,%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None,weight_lbs))
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,'Returned',%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None))
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
+    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—'})
+
+# ── Warehouse-presence-gated cleaner self check-in ────────────────────────────
+# A screen physically mounted in the warehouse displays a QR code that rotates
+# every WH_TOKEN_ROTATE_SECONDS. Scanning it (must be done fresh, in person —
+# a photo of an old code stops working within one rotation cycle) opens a
+# short-lived session for that cleaner to check their own bags back in.
+# This exists specifically to prevent "false" check-ins claimed from off-site.
+
+WH_TOKEN_ROTATE_SECONDS = 900   # how often the displayed QR changes (15 min)
+WH_SESSION_MINUTES = 20        # how long a validated session stays usable, once started
+
+def get_or_rotate_warehouse_token():
+    now_str = now_central()
+    now_dt = datetime.strptime(now_str, '%Y-%m-%d %H:%M:%S')
+    current = get_setting('wh_token_current')
+    created_str = get_setting('wh_token_current_created')
+    if current and created_str:
+        created_dt = datetime.strptime(created_str, '%Y-%m-%d %H:%M:%S')
+        if (now_dt - created_dt).total_seconds() < WH_TOKEN_ROTATE_SECONDS:
+            return current
+    new_token = secrets.token_urlsafe(12)
+    set_setting('wh_token_prev', current or '')
+    set_setting('wh_token_current', new_token)
+    set_setting('wh_token_current_created', now_str)
+    return new_token
+
+def is_valid_warehouse_token(token):
+    if not token:
+        return False
+    return token == get_setting('wh_token_current') or token == get_setting('wh_token_prev')
+
+def is_valid_warehouse_session(session_id, cleaner_id):
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM warehouse_checkin_sessions WHERE id=%s AND cleaner_id=%s", (session_id, cleaner_id))
+    row = cur.fetchone(); cur.close(); conn.close()
+    if not row:
+        return False
+    now_dt = datetime.strptime(now_central(), '%Y-%m-%d %H:%M:%S')
+    expires_dt = datetime.strptime(row['expires_at'], '%Y-%m-%d %H:%M:%S')
+    return now_dt <= expires_dt
+
+@app.route('/api/warehouse-checkin/current-token', methods=['GET'])
+def warehouse_current_token():
+    """Called repeatedly by the warehouse display screen to get the current
+    (or freshly rotated) QR code."""
+    token = get_or_rotate_warehouse_token()
+    base_url = request.url_root.rstrip('/')
+    url = f"{base_url}/cleaner-checkin?token={token}"
+    img = qrcode.make(url)
+    buf = io.BytesIO(); img.save(buf, format='PNG')
+    qr_b64 = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+    return jsonify({'qr_code': qr_b64, 'rotate_seconds': WH_TOKEN_ROTATE_SECONDS})
+
+@app.route('/api/warehouse-checkin/start-session', methods=['POST'])
+def warehouse_start_session():
+    """Validates the scanned token + the cleaner's PIN, and opens a short
+    check-in session. This is the only place presence is actually enforced —
+    everything after this uses the session, not the token."""
+    data = request.json or {}
+    token = data.get('token', '')
+    cleaner_pin = str(data.get('cleaner_pin', ''))
+    if not is_valid_warehouse_token(token):
+        return jsonify({'error': 'This code has expired. Please scan the screen in the warehouse again.'}), 401
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,name FROM cleaners WHERE pin=%s AND active=1", (cleaner_pin,))
+    cleaner = cur.fetchone()
+    if not cleaner:
+        cur.close(); conn.close(); return jsonify({'error': 'Invalid PIN'}), 401
+    now_str = now_central()
+    expires_str = (datetime.strptime(now_str, '%Y-%m-%d %H:%M:%S') + timedelta(minutes=WH_SESSION_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+    cur.execute("INSERT INTO warehouse_checkin_sessions (cleaner_id,started_at,expires_at) VALUES (%s,%s,%s) RETURNING id", (cleaner['id'], now_str, expires_str))
+    sid = cur.fetchone()['id']
     conn.commit(); cur.close(); conn.close()
-    expected = bag['expected_weight_lbs']
-    underweight = False
-    if weight_lbs is not None and expected:
-        try:
-            expected_f = float(expected)
-            if expected_f > 0 and weight_lbs < expected_f * 0.85:
-                underweight = True
-        except (TypeError, ValueError):
-            pass
-    return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—',
-        'weight_lbs':weight_lbs,'expected_weight_lbs':expected,'underweight':underweight})
+    return jsonify({'success': True, 'session_id': sid, 'cleaner_id': cleaner['id'], 'cleaner_name': cleaner['name']})
+
+@app.route('/api/cleaner/<int:cleaner_id>/out-bags', methods=['GET'])
+def get_cleaner_out_bags(cleaner_id):
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT b.id, b.status, b.picked_up_at, h.name AS home_name, h.code AS home_code
+                   FROM bags b JOIN homes h ON h.id=b.home_id
+                   WHERE b.cleaner_id=%s AND b.status='out' ORDER BY h.name""", (cleaner_id,))
+    rows = cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/warehouse-checkin/checkin-bag', methods=['POST'])
+def warehouse_cleaner_checkin_bag():
+    """Cleaner self-checkin, only usable within a session opened by scanning
+    a fresh warehouse-display token. Verifies the bag actually belongs to
+    that cleaner before releasing it."""
+    data = request.json or {}
+    session_id = data.get('session_id'); cleaner_id = data.get('cleaner_id')
+    bag_id = (data.get('bag_id') or '').strip().upper()
+    if not session_id or not cleaner_id or not bag_id:
+        return jsonify({'error': 'Missing required info'}), 400
+    if not is_valid_warehouse_session(session_id, cleaner_id):
+        return jsonify({'error': 'Your session has expired — please scan the warehouse screen again.'}), 401
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT b.*,h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id WHERE b.id=%s", (bag_id,))
+    bag = cur.fetchone()
+    if not bag:
+        cur.close(); conn.close(); return jsonify({'error': 'Bag not found'}), 404
+    if bag['status'] != 'out':
+        cur.close(); conn.close(); return jsonify({'error': f'This bag is not currently checked out (status: {bag["status"]}).'}), 400
+    if bag['cleaner_id'] != cleaner_id:
+        cur.close(); conn.close(); return jsonify({'error': 'This bag is not checked out to you.'}), 403
+    ts = now_central()
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp) VALUES (%s,%s,%s,'Returned (self, warehouse-verified)',%s)", (bag_id, bag['home_id'], cleaner_id, ts))
+    cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s", (bag_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'home': bag['home_name']})
 
 # ── Cleaner staged bags (for pickup page) ─────────────────────────────────────
 
@@ -868,17 +910,6 @@ def get_staged_bags(cleaner_id):
     cur.execute("""SELECT b.id, b.status, b.staged_at, h.name AS home_name, h.code AS home_code
         FROM bags b JOIN homes h ON h.id=b.home_id
         WHERE b.cleaner_id=%s AND b.status='staged'
-        ORDER BY h.code, b.id""",(cleaner_id,))
-    rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
-
-@app.route('/api/cleaner/<int:cleaner_id>/bags-out', methods=['GET'])
-def get_cleaner_bags_out(cleaner_id):
-    """Return bags currently checked out (status='out') by this cleaner, so the
-    pickup page can show them what they still have and need to return."""
-    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT b.id, b.status, b.picked_up_at, h.name AS home_name, h.code AS home_code
-        FROM bags b JOIN homes h ON h.id=b.home_id
-        WHERE b.cleaner_id=%s AND b.status='out'
         ORDER BY h.code, b.id""",(cleaner_id,))
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
@@ -1012,11 +1043,11 @@ def get_activity():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT t.id,'bag' AS activity_type, t.bag_id, h.name AS home_name,
-               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes, t.staff_name, t.weight_lbs
+               c.name AS cleaner_name, t.action, t.timestamp AS ts, t.notes, t.staff_name
         FROM transactions t JOIN homes h ON h.id=t.home_id LEFT JOIN cleaners c ON c.id=t.cleaner_id
         UNION ALL
         SELECT lt.id,'loaner' AS activity_type, lt.loaner_id AS bag_id, h.name AS home_name,
-               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes, lt.performed_by_name AS staff_name, NULL AS weight_lbs
+               s.name AS cleaner_name, lt.action, lt.timestamp AS ts, lt.notes, lt.performed_by_name AS staff_name
         FROM loaner_transactions lt LEFT JOIN homes h ON h.id=lt.home_id LEFT JOIN loaner_staff s ON s.id=lt.staff_id
         ORDER BY ts DESC LIMIT 500""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
@@ -1155,18 +1186,26 @@ def loaners_qr_sheet():
 
 @app.route('/api/loaner/<path:loaner_id>/deploy', methods=['POST'])
 def deploy_loaner(loaner_id):
-    data=request.json or {}; staff_id=data.get('staff_id'); home_id=data.get('home_id'); performed_by_name=data.get('staff_name','').strip()
+    data=request.json or {}; home_id=data.get('home_id'); performed_by_name=data.get('staff_name','').strip()
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT l.*,s.name AS sname,h.name AS hname FROM loaners l LEFT JOIN loaner_staff s ON s.id=%s LEFT JOIN homes h ON h.id=%s WHERE l.id=%s",(staff_id,home_id,loaner_id.upper()))
+    # Identity comes from login (performed_by_name), not a manual selection. We still try
+    # to resolve a matching loaner_staff row (by name) so older reports/joins keep working,
+    # but nothing blocks on it — if there's no match, we just track the name directly.
+    staff_id = None
+    if performed_by_name:
+        cur.execute("SELECT id FROM loaner_staff WHERE LOWER(name)=LOWER(%s)", (performed_by_name,))
+        match = cur.fetchone()
+        if match: staff_id = match['id']
+    cur.execute("SELECT l.*,h.name AS hname FROM loaners l LEFT JOIN homes h ON h.id=%s WHERE l.id=%s",(home_id,loaner_id.upper()))
     row=cur.fetchone()
     if not row: cur.close(); conn.close(); return jsonify({'error':'Item not found'}),404
-    if row['status']=='out': cur.close(); conn.close(); return jsonify({'error':'Already deployed'}),400
+    if row['status']=='out': cur.close(); conn.close(); return jsonify({'error':'Already checked out'}),400
     ts=now_central()
     cur.execute("UPDATE loaners SET status='out',staff_id=%s,home_id=%s,checked_out=%s,checked_out_by=%s WHERE id=%s",(staff_id,home_id,ts,performed_by_name or None,loaner_id.upper()))
-    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Deployed',%s,%s)",(loaner_id.upper(),staff_id,home_id,ts,performed_by_name or None))
+    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Checked out',%s,%s)",(loaner_id.upper(),staff_id,home_id,ts,performed_by_name or None))
     conn.commit()
-    staff_name=row.get('sname','Staff'); home_name=row.get('hname','Unknown')
-    cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'staff':performed_by_name or staff_name,'home':home_name})
+    home_name=row.get('hname','Unknown')
+    cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'staff':performed_by_name or 'Staff','home':home_name})
 
 @app.route('/api/loaner/<path:loaner_id>/retrieve', methods=['POST'])
 def retrieve_loaner(loaner_id):
@@ -1175,9 +1214,9 @@ def retrieve_loaner(loaner_id):
     cur.execute("SELECT l.*,h.name AS home_name FROM loaners l LEFT JOIN homes h ON h.id=l.home_id WHERE l.id=%s",(loaner_id.upper(),))
     row=cur.fetchone()
     if not row: cur.close(); conn.close(); return jsonify({'error':'Item not found'}),404
-    if row['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already in warehouse'}),400
+    if row['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already checked in'}),400
     ts=now_central()
-    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Retrieved',%s,%s)",(loaner_id.upper(),row['staff_id'],row['home_id'],ts,performed_by_name or None))
+    cur.execute("INSERT INTO loaner_transactions (loaner_id,staff_id,home_id,action,timestamp,performed_by_name) VALUES (%s,%s,%s,'Checked in',%s,%s)",(loaner_id.upper(),row['staff_id'],row['home_id'],ts,performed_by_name or None))
     cur.execute("UPDATE loaners SET status='in',staff_id=NULL,home_id=NULL,checked_out=NULL,checked_out_by=NULL WHERE id=%s",(loaner_id.upper(),))
     conn.commit(); home_name=row.get('home_name','Unknown'); cur.close(); conn.close(); return jsonify({'success':True,'item':row['name'],'home':home_name})
 
@@ -1267,10 +1306,22 @@ def supply_log():
 
 # ── HousekeepingSupplyCentral ───────────────────────────────────────────────────
 
+AMENITY_CATEGORIES = {'Guest Amenities', 'Kitchen', 'Laundry', 'Trash & Liners'}
+
+def category_to_bucket(category):
+    """Amenities: Guest Amenities, Kitchen, Laundry, Trash & Liners.
+    Everything else (Maintenance, Cleaning Supplies, and any future category
+    not explicitly listed as an amenity) is Cleaning Supplies."""
+    return 'Amenities' if category in AMENITY_CATEGORIES else 'Cleaning Supplies'
+
 @app.route('/api/hk-supplies', methods=['GET'])
 def get_hk_supplies():
+    bucket = request.args.get('bucket')
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM hk_supply_items ORDER BY category,name")
+    if bucket:
+        cur.execute("SELECT * FROM hk_supply_items WHERE bucket=%s ORDER BY category,name", (bucket,))
+    else:
+        cur.execute("SELECT * FROM hk_supply_items ORDER BY category,name")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
 @app.route('/api/hk-supplies', methods=['POST'])
@@ -1281,9 +1332,10 @@ def add_hk_supply():
     quantity=int(data.get('quantity',0)); threshold=int(data.get('low_stock_threshold',5))
     unit=data.get('unit','units').strip()
     if not name: return jsonify({'error':'Name required'}),400
+    bucket = category_to_bucket(category)
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        cur.execute("INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central()))
+        cur.execute("INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at,bucket) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central(),bucket))
         sid=cur.fetchone()['id']; qr=make_hk_supply_qr(sid)
         cur.execute("UPDATE hk_supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
         conn.commit(); cur.close(); conn.close()
@@ -1296,8 +1348,10 @@ def add_hk_supply():
 def update_hk_supply(sid):
     data=request.json or {}
     if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
+    category = data.get('category')
+    bucket = category_to_bucket(category) if category else None
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("UPDATE hk_supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
+    cur.execute("UPDATE hk_supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s,bucket=COALESCE(%s,bucket) WHERE id=%s",(data.get('name'),category,int(data.get('low_stock_threshold',5)),data.get('unit','units'),bucket,sid))
     cur.execute("SELECT qr_code FROM hk_supply_items WHERE id=%s",(sid,)); row=cur.fetchone()
     if row and not row['qr_code']:
         qr = make_hk_supply_qr(sid)
@@ -1366,8 +1420,8 @@ def seed_hk_supplies():
             else:
                 threshold = max(5, int(qty * 0.1))
             cur.execute(
-                "INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-                (name, category, qty, threshold, unit, now_central())
+                "INSERT INTO hk_supply_items (name,category,quantity,low_stock_threshold,unit,created_at,bucket) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (name, category, qty, threshold, unit, now_central(), category_to_bucket(category))
             )
             sid = cur.fetchone()[0]
             qr = make_hk_supply_qr(sid)
@@ -1418,6 +1472,68 @@ def get_order(oid):
     order['items'] = cur.fetchall()
     cur.close(); conn.close()
     return jsonify(order)
+
+@app.route('/api/orders/parse-receipt', methods=['POST'])
+def parse_receipt():
+    """Reads an uploaded receipt/packing-slip photo (or PDF) and extracts
+    vendor + line items, so staff can drop a receipt instead of typing an
+    order in by hand. Requires ANTHROPIC_API_KEY set as a Railway env var —
+    this runs server-side (unlike a browser-only call, which would have no
+    key and no way to reach the API once deployed)."""
+    if not ANTHROPIC_API_KEY:
+        return jsonify({'error': "Receipt scanning isn't set up yet — an admin needs to add an ANTHROPIC_API_KEY environment variable in Railway."}), 503
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    file_bytes = f.read()
+    if not file_bytes:
+        return jsonify({'error': 'Uploaded file was empty'}), 400
+    media_type = f.mimetype or 'image/jpeg'
+    is_pdf = media_type == 'application/pdf'
+    if not is_pdf and media_type not in ('image/jpeg', 'image/png', 'image/webp', 'image/gif'):
+        media_type = 'image/jpeg'
+    b64_data = base64.b64encode(file_bytes).decode()
+    content_block = {
+        'type': 'document' if is_pdf else 'image',
+        'source': {'type': 'base64', 'media_type': media_type, 'data': b64_data}
+    }
+    prompt = (
+        'This is a photo of a receipt or packing slip from a supply order. '
+        'Extract the vendor name and every line item you can clearly read. '
+        'Respond with ONLY raw JSON, no markdown code fences, no commentary, in exactly this shape: '
+        '{"vendor": "string or null", "items": [{"name": "string", "quantity": number, "unit_price": number or null}]}. '
+        'If a value truly cannot be read, use null for that field rather than guessing. '
+        'Do not invent items that are not actually on the receipt.'
+    )
+    payload = json.dumps({
+        'model': 'claude-sonnet-5',
+        'max_tokens': 1500,
+        'messages': [{'role': 'user', 'content': [content_block, {'type': 'text', 'text': prompt}]}]
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.anthropic.com/v1/messages',
+        data=payload,
+        headers={'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01'},
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read().decode())
+    except Exception as e:
+        print(f'[Receipt parse] API call failed: {e}', flush=True)
+        return jsonify({'error': 'Could not reach the receipt-scanning service — please enter items manually.'}), 502
+    try:
+        text = ''.join(b.get('text', '') for b in result.get('content', []) if b.get('type') == 'text')
+        cleaned = text.strip()
+        if cleaned.startswith('```'):
+            cleaned = cleaned.strip('`')
+            if cleaned.lower().startswith('json'):
+                cleaned = cleaned[4:]
+        parsed = json.loads(cleaned)
+    except Exception as e:
+        print(f'[Receipt parse] Could not parse model response: {e} | raw={result}', flush=True)
+        return jsonify({'error': 'Could not read that receipt clearly — please enter the items manually.'}), 422
+    return jsonify({'success': True, 'vendor': parsed.get('vendor'), 'items': parsed.get('items', [])})
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():
@@ -1540,6 +1656,79 @@ def cancel_order(oid):
 
 
 # ── Staff PIN Management ──────────────────────────────────────────────────────
+
+PACK_FORMULA_SEED = [
+    {'address': '1735 east co hwy 30a #203', 'property_name': '1735 East Co Hwy 30A #203', 'king': 1, 'queen': 2, 'twin': 0, 'towels': 12, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 0},
+    {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '124 sunset ridge lane', 'property_name': '124 Sunset Ridge Lane', 'king': 2, 'queen': 0, 'twin': 5, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '1217 western lake drive', 'property_name': '1217 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '134 royal fern way', 'property_name': '134 Royal Fern Way', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '138 east royal fern way', 'property_name': '138 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '142 mystic cobalt street', 'property_name': '142 Mystic Cobalt Street', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '157 sunflower street', 'property_name': '157 Sunflower Street', 'king': 4, 'queen': 2, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
+    {'address': '176 red cedar way', 'property_name': '176 Red Cedar Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '179 pine needle way', 'property_name': '179 Pine Needle Way', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 8},
+    {'address': '184 east royal fern way', 'property_name': '184 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '1352 western lake drive', 'property_name': '1352 Western Lake Drive', 'king': 2, 'queen': 0, 'twin': 6, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8},
+    {'address': '202 east royal fern way', 'property_name': '202 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8},
+    {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '22 flatwood street', 'property_name': '22 Flatwood Street', 'king': 4, 'queen': 0, 'twin': 9, 'towels': 30, 'hand': 16, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '25 lake district lane', 'property_name': '25 Lake District Lane', 'king': 1, 'queen': 4, 'twin': 1, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '25 rain lily lane', 'property_name': '25 Rain Lily Lane', 'king': 5, 'queen': 4, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
+    {'address': '254 spartina circle', 'property_name': '254 Spartina Circle', 'king': 2, 'queen': 4, 'twin': 1, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '255 garfield street', 'property_name': '255 Garfield Street', 'king': 3, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '260 needlerush drive', 'property_name': '260 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '262 garfield street', 'property_name': '262 Garfield Street', 'king': 3, 'queen': 1, 'twin': 6, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '271 red cedar way', 'property_name': '271 Red Cedar Way', 'king': 5, 'queen': 0, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '2743 e co hwy 30a, unit 303', 'property_name': '2743 E Co Hwy 30A, Unit 303', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '29 royal fern way', 'property_name': '29 Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '295 salt box lane', 'property_name': '295 Salt Box Lane', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '2912 e. co hwy 30a', 'property_name': '2912 E. Co Hwy 30A', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 16, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 8},
+    {'address': '31 bluejack street', 'property_name': '31 Bluejack Street', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '349 needlerush drive', 'property_name': '349 Needlerush Drive', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '35 suzanne drive', 'property_name': '35 Suzanne Drive', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '369 spartina circle', 'property_name': '369 Spartina Circle', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '37 red cedar way', 'property_name': '37 Red Cedar Way', 'king': 1, 'queen': 4, 'twin': 0, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '379 east royal fern way', 'property_name': '379 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '394 western lake drive', 'property_name': '394 Western Lake Drive', 'king': 1, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '406 red cedar way', 'property_name': '406 Red Cedar Way', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '410 pine needle way', 'property_name': '410 Pine Needle Way', 'king': 2, 'queen': 1, 'twin': 8, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '422 pine needle way', 'property_name': '422 Pine Needle Way', 'king': 2, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '428 red cedar way', 'property_name': '428 Red Cedar Way', 'king': 4, 'queen': 3, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
+    {'address': '43 sand hill circle', 'property_name': '43 Sand Hill Circle', 'king': 4, 'queen': 0, 'twin': 5, 'towels': 36, 'hand': 12, 'wash': 24, 'mats': 6, 'pool': 0},
+    {'address': '433 pine needle way', 'property_name': '433 Pine Needle Way', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '44 thicket circle', 'property_name': '44 Thicket Circle', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '46 pine needle way', 'property_name': '46 Pine Needle Way', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '446 western lake drive', 'property_name': '446 Western Lake Drive', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '442 east royal fern way', 'property_name': '442 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '49 bluejack street', 'property_name': '49 Bluejack Street', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '5 pond cypress way', 'property_name': '5 Pond Cypress Way', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '51 mistflower lane', 'property_name': '51 Mistflower Lane', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '53 muhly circle', 'property_name': '53 Muhly Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
+    {'address': '65 pond cypress circle', 'property_name': '65 Pond Cypress Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '672 western lake drive', 'property_name': '672 Western Lake Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '70 scrub oak circle', 'property_name': '70 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
+    {'address': '70 sunset ridge lane', 'property_name': '70 Sunset Ridge Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '72 needlerush drive', 'property_name': '72 Needlerush Drive', 'king': 2, 'queen': 1, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '728 western lake drive', 'property_name': '728 Western Lake Drive', 'king': 2, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '73 holly street', 'property_name': '73 Holly Street', 'king': 4, 'queen': 4, 'twin': 8, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 16},
+    {'address': '73 pond cypress circle', 'property_name': '73 Pond Cypress Circle', 'king': 5, 'queen': 2, 'twin': 3, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
+    {'address': '75 east summersweet lane', 'property_name': '75 East Summersweet Lane', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '80 scrub oak circle', 'property_name': '80 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
+    {'address': '86 sunset ridge lane', 'property_name': '86 Sunset Ridge Lane', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '9 running oak circle', 'property_name': '9 Running Oak Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '90 flatwood street', 'property_name': '90 Flatwood Street', 'king': 4, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '91 bluejack street', 'property_name': '91 Bluejack Street', 'king': 3, 'queen': 0, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
+    {'address': '93 needlerush drive', 'property_name': '93 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+    {'address': '97 east summersweet lane', 'property_name': '97 East Summersweet Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
+]
 
 STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'inspector', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Kim', 'warehouse', '6460'], ['April', 'warehouse', '1544']]
 
@@ -2644,10 +2833,466 @@ def decide_po_request(rid):
     return jsonify({'success':True})
 
 
+# ── PackListCentral ───────────────────────────────────────────────────────────
+# Daily/future-dated linen packing checklist per property, sourced from real
+# reservation arrivals (forecast_reservations) and real per-property linen
+# formulas (pack_list_formula, loaded from the housekeeping packing list
+# spreadsheet). Marking a property "packed" decrements the real Housekeeping
+# Supply stock (hk_supply_items, via forecast_pack_list.supplies — the same
+# numbers ForecastCentral already uses) AND stages the specific scanned bag
+# tag(s) for a chosen cleaner, feeding straight into the existing pickup flow.
+# Linen counts themselves are NOT tracked as inventory — just shown as a
+# checklist — per Kristin's call that it's not worth maintaining that stock.
+
+def today_central():
+    return now_central()[:10]
+
+@app.route('/api/pack-list/formula-match-check', methods=['GET'])
+def pack_formula_match_check():
+    """Two-way audit between pack_list_formula and homes: catches formula
+    entries that don't match a real home (typos, renamed/dropped properties)
+    AND homes that don't have a formula yet (new properties, or ones never
+    entered) — so this stays correct as properties change, not just today."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT address, property_name FROM pack_list_formula ORDER BY property_name")
+    formula_rows = cur.fetchall()
+    cur.execute("SELECT id, name FROM homes ORDER BY name")
+    home_rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    home_keys = {r['name'].lower().strip() for r in home_rows}
+    formula_keys = {r['address'] for r in formula_rows}
+
+    unmatched_formula = [r for r in formula_rows if r['address'] not in home_keys]
+    homes_missing_formula = [r for r in home_rows if r['name'].lower().strip() not in formula_keys]
+
+    return jsonify({
+        'formula_total': len(formula_rows),
+        'unmatched_formula_count': len(unmatched_formula),
+        'unmatched_formula': unmatched_formula,
+        'homes_missing_formula_count': len(homes_missing_formula),
+        'homes_missing_formula': homes_missing_formula,
+    })
+
+@app.route('/api/pack-list/seed-formula', methods=['POST'])
+def seed_pack_formula():
+    """Load/refresh per-property linen packing formula. Admin PIN required."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn = get_db(); cur = conn.cursor()
+    ts = now_central()
+    upserted = 0
+    for row in PACK_FORMULA_SEED:
+        addr = row['name'].lower().strip()
+        cur.execute("""
+            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (address) DO UPDATE SET
+                property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
+                twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
+                mats=EXCLUDED.mats, pool=EXCLUDED.pool, updated_at=EXCLUDED.updated_at
+        """, (addr, row['name'], row['king'], row['queen'], row['twin'], row['towels'],
+              row['hand'], row['wash'], row['mats'], row['pool'], ts))
+        upserted += 1
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Seeded/refreshed packing formula', f'{upserted} properties', resolve_performer(data))
+    return jsonify({'success': True, 'upserted': upserted})
+
+def parse_breezeway_assignments_csv(content):
+    """Parse a Breezeway task export → list of {address, date, raw_assignee}.
+    Property field looks like 'X - X' (duplicated); Due date is already
+    YYYY-MM-DD. Later rows for the same address+date win (last one in file)."""
+    import csv, io
+    reader = csv.DictReader(io.StringIO(content))
+    out = {}
+    for row in reader:
+        prop = (row.get('Property') or '').strip()
+        date = (row.get('Due date') or '').strip()
+        assignee = (row.get('Assignees') or '').strip()
+        if not prop or not date:
+            continue
+        address = prop.split(' - ')[0].strip().lower()
+        out[(address, date)] = assignee
+    return [{'address': a, 'date': d, 'raw_assignee': ra} for (a, d), ra in out.items()]
+
+def match_cleaner_name(raw_assignee, cleaners, aliases):
+    """Try to resolve a Breezeway assignee string to a real cleaner record.
+    Handles multiple assignees separated by ';', known name aliases (e.g.
+    'Mario Diaz' -> 'Mario Cruz'), and 'Person + Company' strings where the
+    SandersCentral cleaner name is a substring (e.g. 'Derron Ebanks A&D
+    Cleaning' contains 'A&D Cleaning')."""
+    if not raw_assignee: return None
+    for segment in raw_assignee.split(';'):
+        seg = segment.strip()
+        if not seg: continue
+        key = seg.lower()
+        if key in aliases:
+            target = aliases[key].lower()
+            for c in cleaners:
+                if c['name'].lower() == target: return c
+        for c in cleaners:
+            if c['name'].lower() == key: return c
+        for c in cleaners:
+            if c['name'].lower() in key: return c
+    return None
+
+@app.route('/api/pack-list/upload-assignments', methods=['POST'])
+def upload_pack_assignments():
+    """Upload a Breezeway (or similar) cleaner-assignment CSV export."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    content = f.read().decode('utf-8-sig', errors='replace')
+    rows = parse_breezeway_assignments_csv(content)
+    if not rows:
+        return jsonify({'error': 'No valid assignment data found in file'}), 400
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,name FROM cleaners WHERE active=1")
+    cleaners = cur.fetchall()
+    cur.execute("SELECT breezeway_name,cleaner_name FROM cleaner_name_aliases")
+    aliases = {r['breezeway_name'].lower(): r['cleaner_name'] for r in cur.fetchall()}
+
+    ts = now_central()
+    matched, unmatched = 0, []
+    for row in rows:
+        cleaner = match_cleaner_name(row['raw_assignee'], cleaners, aliases)
+        cur.execute("""
+            INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (address,assignment_date) DO UPDATE SET
+                cleaner_id=EXCLUDED.cleaner_id, cleaner_name=EXCLUDED.cleaner_name,
+                raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at
+        """, (row['address'], row['date'], cleaner['id'] if cleaner else None,
+              cleaner['name'] if cleaner else None, row['raw_assignee'], ts))
+        if cleaner: matched += 1
+        else: unmatched.append({'address': row['address'], 'date': row['date'], 'raw_assignee': row['raw_assignee']})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Uploaded cleaner assignments', f'{matched}/{len(rows)} matched', request.form.get('staff_name', 'Unknown'))
+    return jsonify({'success': True, 'total_rows': len(rows), 'matched': matched, 'unmatched': unmatched})
+
+@app.route('/api/cleaner-aliases', methods=['GET'])
+def get_cleaner_aliases():
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM cleaner_name_aliases ORDER BY breezeway_name")
+    rows = cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/cleaner-aliases', methods=['POST'])
+def add_cleaner_alias():
+    data = request.json or {}
+    breezeway_name = (data.get('breezeway_name') or '').strip().lower()
+    cleaner_name = (data.get('cleaner_name') or '').strip()
+    if not breezeway_name or not cleaner_name:
+        return jsonify({'error': 'breezeway_name and cleaner_name are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO cleaner_name_aliases (breezeway_name,cleaner_name,created_at) VALUES (%s,%s,%s)
+        ON CONFLICT (breezeway_name) DO UPDATE SET cleaner_name=EXCLUDED.cleaner_name
+    """, (breezeway_name, cleaner_name, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Added cleaner alias', f'{breezeway_name} → {cleaner_name}', resolve_performer(data))
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list', methods=['GET'])
+def get_pack_list():
+    """Daily (or future-dated) pack list: every property with a reservation
+    arriving that day, plus any last-minute adds, matched to its real linen
+    formula and today's packed/staged status."""
+    date_str = (request.args.get('date') or today_central()).strip()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("""SELECT DISTINCT unit_address FROM forecast_reservations
+                   WHERE TO_DATE(arrive,'MM/DD/YYYY') = %s::date""", (date_str,))
+    addrs = set(r['unit_address'].lower().strip() for r in cur.fetchall())
+
+    cur.execute("SELECT * FROM pack_emergency_adds WHERE pack_date=%s ORDER BY id DESC", (date_str,))
+    emerg_rows = cur.fetchall()
+    emerg_map = {}
+    for e in emerg_rows:
+        key = e['address'].lower().strip()
+        addrs.add(key)
+        emerg_map[key] = e
+
+    cur.execute("SELECT * FROM pack_list_formula")
+    formulas = {f['address']: f for f in cur.fetchall()}
+
+    cur.execute("SELECT * FROM pack_list_status WHERE pack_date=%s", (date_str,))
+    statuses = {s['address']: s for s in cur.fetchall()}
+
+    cur.execute("SELECT * FROM pack_cleaner_assignments WHERE assignment_date=%s", (date_str,))
+    assignments = {a['address']: a for a in cur.fetchall()}
+
+    properties = []
+    for addr in sorted(addrs):
+        f = formulas.get(addr)
+        st = statuses.get(addr)
+        asn = assignments.get(addr)
+        properties.append({
+            'address': addr,
+            'property_name': f['property_name'] if f else emerg_map.get(addr, {}).get('address', addr),
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool')} if f else None,
+            'is_emergency': addr in emerg_map,
+            'emergency_notes': emerg_map[addr]['notes'] if addr in emerg_map else None,
+            'packed': bool(st),
+            'packed_by': st['packed_by'] if st else None,
+            'packed_at': st['packed_at'] if st else None,
+            'cleaner_name': st['cleaner_name'] if st else None,
+            'staged_bags': (st['staged_bag_ids'] or '').split(',') if st and st['staged_bag_ids'] else [],
+            'assigned_cleaner_id': asn['cleaner_id'] if asn else None,
+            'assigned_cleaner_name': asn['cleaner_name'] if asn else None,
+            'assigned_raw': asn['raw_assignee'] if asn and not asn['cleaner_id'] else None,
+        })
+    cur.close(); conn.close()
+    return jsonify({'date': date_str, 'properties': properties})
+
+@app.route('/api/pack-list/pack', methods=['POST'])
+def pack_property():
+    """Mark a property packed: decrements real linen stock AND stages the
+    specific bag tag(s) that were scanned for this turnover — never
+    'whatever's available', since bag count varies and each tag needs to
+    be individually accounted for (that's how shortages at return get caught)."""
+    data = request.json or {}
+    address = (data.get('address') or '').strip()
+    pack_date = (data.get('pack_date') or '').strip()
+    packed_by = (data.get('packed_by') or '').strip()
+    cleaner_id = data.get('cleaner_id')
+    bag_ids = [str(b).strip().upper() for b in (data.get('bag_ids') or []) if str(b).strip()]
+    if not address or not pack_date or not packed_by or not cleaner_id or not bag_ids:
+        return jsonify({'error': 'address, pack_date, packed_by, cleaner_id, and at least one scanned bag_id are required'}), 400
+    addr_key = address.lower().strip()
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM pack_list_status WHERE address=%s AND pack_date=%s", (addr_key, pack_date))
+    if cur.fetchone():
+        cur.close(); conn.close(); return jsonify({'error': 'Already packed for this date'}), 400
+
+    cur.execute("SELECT id,name FROM cleaners WHERE id=%s AND active=1", (cleaner_id,))
+    cleaner = cur.fetchone()
+    if not cleaner:
+        cur.close(); conn.close(); return jsonify({'error': 'Invalid cleaner'}), 400
+
+    cur.execute("SELECT id,name FROM homes WHERE LOWER(TRIM(name))=%s", (addr_key,))
+    home = cur.fetchone()
+    if not home:
+        cur.close(); conn.close()
+        return jsonify({'error': f'No home on file matching "{address}" — add it under Homes first'}), 404
+
+    # Validate every scanned bag actually belongs to this home and is available.
+    cur.execute("SELECT id,home_id,status FROM bags WHERE id = ANY(%s)", (bag_ids,))
+    found = {b['id']: b for b in cur.fetchall()}
+    problems = []
+    for bid in bag_ids:
+        b = found.get(bid)
+        if not b: problems.append(f'{bid}: not found')
+        elif b['home_id'] != home['id']: problems.append(f'{bid}: belongs to a different home')
+        elif b['status'] != 'in': problems.append(f'{bid}: already {b["status"]}')
+    if problems:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Bag scan problem — ' + '; '.join(problems)}), 400
+
+    ts = now_central()
+    shortfalls = []
+    # Pull real HK Supply usage for this property from the same table ForecastCentral
+    # already uses (forecast_pack_list.supplies), and decrement the real hk_supply_items
+    # stock — this is the inventory that actually matters for forecasting.
+    cur.execute("SELECT supplies FROM forecast_pack_list WHERE address=%s", (addr_key,))
+    fpl = cur.fetchone()
+    if fpl and fpl['supplies']:
+        for item_name, qty_needed in fpl['supplies'].items():
+            if not qty_needed: continue
+            cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
+            item = cur.fetchone()
+            if not item: continue
+            new_qty = item['quantity'] - qty_needed
+            if new_qty < 0:
+                shortfalls.append({'item': item_name, 'needed': qty_needed, 'available': item['quantity']})
+                new_qty = 0
+            cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s", (new_qty, item['id']))
+            cur.execute(
+                "INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,'pack_deduct',%s,%s,%s,%s,%s)",
+                (item['id'], qty_needed, new_qty, packed_by, ts, f'Packed: {address}')
+            )
+
+    for bag_id in bag_ids:
+        cur.execute(
+            "UPDATE bags SET status='staged',cleaner_id=%s,staged_at=%s,picked_up_at=NULL,overdue_alerted=0 WHERE id=%s",
+            (cleaner['id'], ts, bag_id)
+        )
+        cur.execute(
+            "INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,staff_name) VALUES (%s,%s,%s,'Staged',%s,%s)",
+            (bag_id, home['id'], cleaner['id'], ts, packed_by)
+        )
+
+    cur.execute("""INSERT INTO pack_list_status (address,pack_date,packed_by,packed_at,staged_bag_ids,cleaner_id,cleaner_name,created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (addr_key, pack_date, packed_by, ts, ','.join(bag_ids), cleaner['id'], cleaner['name'], ts))
+    conn.commit(); cur.close(); conn.close()
+    detail = f'{len(bag_ids)} bag(s) staged for {cleaner["name"]}: {", ".join(bag_ids)}'
+    if shortfalls: detail += f' — SHORTFALL: {", ".join(s["item"] for s in shortfalls)}'
+    log_audit('PackListCentral', 'Packed & staged', address, packed_by, detail)
+    return jsonify({'success': True, 'staged_bags': bag_ids, 'cleaner': cleaner['name'], 'shortfalls': shortfalls})
+
+@app.route('/api/pack-list/unpack', methods=['POST'])
+def unpack_property():
+    """Undo a pack — only allowed if the bag(s) haven't been picked up yet.
+    Does NOT auto-restore linen stock (avoids double-counting); restock
+    manually via the Linen Inventory tab if needed."""
+    data = request.json or {}
+    address = (data.get('address') or '').strip().lower()
+    pack_date = (data.get('pack_date') or '').strip()
+    staff_name = (data.get('staff_name') or '').strip()
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s", (address, pack_date))
+    st = cur.fetchone()
+    if not st:
+        cur.close(); conn.close(); return jsonify({'error': 'Not packed'}), 404
+
+    bag_ids = [b for b in (st['staged_bag_ids'] or '').split(',') if b]
+    if bag_ids:
+        cur.execute("SELECT id,home_id,status FROM bags WHERE id = ANY(%s)", (bag_ids,))
+        bags = cur.fetchall()
+        if any(b['status'] == 'out' for b in bags):
+            cur.close(); conn.close(); return jsonify({'error': 'Already picked up by the cleaner — cannot undo'}), 400
+        ts = now_central()
+        for b in bags:
+            cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,overdue_alerted=0 WHERE id=%s", (b['id'],))
+            cur.execute(
+                "INSERT INTO transactions (bag_id,home_id,action,timestamp,staff_name) VALUES (%s,%s,'Unstaged (pack undo)',%s,%s)",
+                (b['id'], b['home_id'], ts, staff_name or None)
+            )
+    cur.execute("DELETE FROM pack_list_status WHERE id=%s", (st['id'],))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Undid pack', address, staff_name, '')
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list/flags', methods=['GET'])
+def get_pack_flags():
+    resolved = request.args.get('resolved')
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    q = "SELECT * FROM pack_flags WHERE 1=1"; params = []
+    if resolved is not None:
+        q += " AND resolved=%s"; params.append(int(resolved))
+    q += " ORDER BY id DESC LIMIT 200"
+    cur.execute(q, params)
+    rows = cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/pack-list/flags', methods=['POST'])
+def create_pack_flag():
+    data = request.json or {}
+    item_name = (data.get('item_name') or '').strip()
+    issue_type = (data.get('issue_type') or '').strip()
+    flagged_by = (data.get('flagged_by') or '').strip()
+    if not item_name or not issue_type or not flagged_by:
+        return jsonify({'error': 'item_name, issue_type, and flagged_by are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    ts = now_central()
+    cur.execute("""INSERT INTO pack_flags (address,item_name,issue_type,notes,flagged_by,flagged_at,pack_date,resolved)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,0)""",
+                ((data.get('address') or '').strip() or None, item_name, issue_type,
+                 (data.get('notes') or '').strip() or None, flagged_by, ts, (data.get('pack_date') or '').strip() or None))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Flagged supply issue', item_name, flagged_by, issue_type)
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list/flags/<int:fid>/resolve', methods=['POST'])
+def resolve_pack_flag(fid):
+    data = request.json or {}
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE pack_flags SET resolved=1 WHERE id=%s", (fid,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Resolved flag', str(fid), resolve_performer(data))
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list/emergency', methods=['GET'])
+def get_pack_emergency():
+    pack_date = request.args.get('date')
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    q = "SELECT * FROM pack_emergency_adds WHERE 1=1"; params = []
+    if pack_date: q += " AND pack_date=%s"; params.append(pack_date)
+    q += " ORDER BY id DESC"
+    cur.execute(q, params)
+    rows = cur.fetchall()
+    for r in rows:
+        cur.execute("SELECT staff_name FROM pack_emergency_acks WHERE emergency_id=%s", (r['id'],))
+        r['acked_by'] = [a['staff_name'] for a in cur.fetchall()]
+    cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/pack-list/emergency', methods=['POST'])
+def add_pack_emergency():
+    data = request.json or {}
+    address = (data.get('address') or '').strip()
+    pack_date = (data.get('pack_date') or '').strip()
+    added_by = (data.get('added_by') or '').strip()
+    if not address or not pack_date or not added_by:
+        return jsonify({'error': 'address, pack_date, and added_by are required'}), 400
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    ts = now_central()
+    cur.execute(
+        "INSERT INTO pack_emergency_adds (address,notes,pack_date,added_by,added_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (address, (data.get('notes') or '').strip() or None, pack_date, added_by, ts)
+    )
+    eid = cur.fetchone()['id']
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Last-minute add', address, added_by, pack_date)
+    return jsonify({'success': True, 'id': eid})
+
+@app.route('/api/pack-list/emergency/<int:eid>/ack', methods=['POST'])
+def ack_pack_emergency(eid):
+    data = request.json or {}
+    staff_name = (data.get('staff_name') or '').strip()
+    if not staff_name:
+        return jsonify({'error': 'staff_name is required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO pack_emergency_acks (emergency_id,staff_name,acked_at) VALUES (%s,%s,%s)", (eid, staff_name, now_central()))
+        conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+    cur.close(); conn.close()
+    return jsonify({'success': True})
+
+
 # ── Overdue check scheduler ─────────────────────────────────────────────────
 # Runs both overdue checks automatically on a fixed interval, so alerts fire
 # on their own instead of relying on someone opening the right page.
 OVERDUE_CHECK_INTERVAL_SECONDS = 1800  # 30 minutes
+
+@app.route('/api/inventory-counts/weekly-task-status', methods=['GET'])
+def inventory_weekly_task_status():
+    """Tells the dashboard whether today is the weekly inventory-count task
+    day, and whether it's already been completed today — no email, this is
+    a real to-do item on the warehouse dashboard that clears itself once
+    an actual count has been submitted."""
+    day_names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+    enabled = get_setting('inventory_reminder_enabled', 'true') == 'true'
+    target_day = int(get_setting('inventory_reminder_day', '2'))  # default Wednesday
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    is_task_day = enabled and now.weekday() == target_day
+    completed_today = False
+    if is_task_day:
+        today_str = now.strftime('%Y-%m-%d')
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT 1 FROM inventory_counts WHERE created_at LIKE %s LIMIT 1", (today_str + '%',))
+        completed_today = cur.fetchone() is not None
+        cur.close(); conn.close()
+    return jsonify({'is_task_day': is_task_day, 'completed_today': completed_today, 'task_day_name': day_names[target_day]})
+
+@app.route('/api/settings/inventory-reminder', methods=['GET'])
+def get_inventory_reminder_setting():
+    return jsonify({
+        'enabled': get_setting('inventory_reminder_enabled', 'true') == 'true',
+        'day': int(get_setting('inventory_reminder_day', '2')),
+    })
+
+@app.route('/api/settings/inventory-reminder', methods=['POST'])
+def set_inventory_reminder_setting():
+    data = request.json or {}
+    set_setting('inventory_reminder_enabled', 'true' if data.get('enabled', True) else 'false')
+    if 'day' in data:
+        set_setting('inventory_reminder_day', str(int(data['day'])))
+    return jsonify({'success': True})
 
 def background_overdue_loop():
     while True:
