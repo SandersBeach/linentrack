@@ -2994,6 +2994,30 @@ def add_cleaner_alias():
     log_audit('PackListCentral', 'Added cleaner alias', f'{breezeway_name} → {cleaner_name}', resolve_performer(data))
     return jsonify({'success': True})
 
+@app.route('/api/pack-list/productivity', methods=['GET'])
+def pack_list_productivity():
+    """Per-employee pack counts over a date range — admin-only reporting,
+    not exposed to warehouse staff."""
+    start = request.args.get('start')
+    end = request.args.get('end')
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    q = "SELECT packed_by, staged_bag_ids FROM pack_list_status WHERE 1=1"
+    params = []
+    if start: q += " AND pack_date >= %s"; params.append(start)
+    if end: q += " AND pack_date <= %s"; params.append(end)
+    cur.execute(q, params)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    summary = {}
+    for r in rows:
+        name = r['packed_by'] or 'Unknown'
+        bags = len([b for b in (r['staged_bag_ids'] or '').split(',') if b])
+        entry = summary.setdefault(name, {'packed_by': name, 'properties_packed': 0, 'bags_staged': 0})
+        entry['properties_packed'] += 1
+        entry['bags_staged'] += bags
+    result = sorted(summary.values(), key=lambda x: -x['properties_packed'])
+    return jsonify(result)
+
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
     """Daily (or future-dated) pack list: every property with a reservation
