@@ -407,7 +407,7 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'log', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request'],
+  warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'log', 'amenities_inventory', 'orders'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'store', 'po_request'],
   inspector: ['amenities_inventory', 'cleaning_inventory', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
@@ -1608,7 +1608,10 @@ function toggleCountArea(area) {
   card.classList.toggle('selected', chk.checked);
 }
 
+let _countReturnTarget = 'inventory_count';
+
 async function startCount() {
+  _countReturnTarget = 'inventory_count';
   const areas = [];
   if (document.getElementById('chk-loaners')?.checked) areas.push('loaners');
   if (document.getElementById('chk-supplies')?.checked) areas.push('supplies');
@@ -1757,11 +1760,12 @@ function renderCountReport(data) {
     html+=`<div class="count-row"><div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel}</div></div><div class="count-row-right"><span style="font-size:13px;font-weight:600">${done?(item.type==='loaner'?counted===1?'1 found':'Missing':counted+' '+item.unit):'—'}</span>${statusHtml}</div></div>`;
   });
   html += '</div>';
-  html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="renderInventoryCount()">← Back to counts</button></div>`;
+  html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="${_countReturnTarget==='amenities_inventory'?"showTab('amenities_inventory')":"renderInventoryCount()"}">← Back to counts</button></div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 
-async function viewPastCount(countId) {
+async function viewPastCount(countId, returnTarget) {
+  if (returnTarget) _countReturnTarget = returnTarget;
   const res = await fetch(`/api/inventory-counts/${countId}`);
   const c = await res.json();
   const details = JSON.parse(c.details||'{}');
@@ -1786,6 +1790,7 @@ async function loadHKSupplies() {
 }
 
 let _hkBucket = null; // 'Amenities' | 'Cleaning Supplies' — set by whichever tab is active
+let _hkAutoOpenCount = false; // set by the Wednesday dashboard task to jump straight to the Count subtab
 
 async function renderAmenitiesInventory(gen) { _hkBucket = 'Amenities'; await renderHKSupplyShared(gen, '🧴 Amenities Inventory'); }
 async function renderCleaningInventory(gen) { _hkBucket = 'Cleaning Supplies'; await renderHKSupplyShared(gen, '🧽 Cleaning Supplies Inventory'); }
@@ -1797,6 +1802,7 @@ async function renderHKSupplyShared(gen, title) {
   const cats = [...new Set(bucketItems.map(s=>s.category))].sort();
   const catFilter = `<select id="hk-cat-filter" onchange="renderHKCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
   const showStoreSubtab = _hkBucket === 'Cleaning Supplies';
+  const showCountSubtab = _hkBucket === 'Amenities';
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">${title}</div>
@@ -1807,6 +1813,7 @@ async function renderHKSupplyShared(gen, title) {
       <button class="subtab" id="hkt-log" onclick="hkSubtab('log')">Activity Log</button>
       <button class="subtab" id="hkt-lowstock" onclick="hkSubtab('lowstock')">⚠️ Low Stock</button>
       ${showStoreSubtab ? `<button class="subtab" id="hkt-store" onclick="hkSubtab('store')">🏪 SBR Store</button>` : ''}
+      ${showCountSubtab ? `<button class="subtab" id="hkt-count" onclick="hkSubtab('count')">📋 Count</button>` : ''}
     </div>
     <div id="hkv-inventory">${catFilter}<div id="hk-cards" class="supply-grid"></div></div>
     <div id="hkv-log" style="display:none"><div id="hk-log-table"></div></div>
@@ -1819,12 +1826,14 @@ async function renderHKSupplyShared(gen, title) {
         ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
       </div>
       <div id="store-body"></div>
-    </div>` : ''}`;
+    </div>` : ''}
+    ${showCountSubtab ? `<div id="hkv-count" style="display:none"><div id="amenities-count-body"></div></div>` : ''}`;
   renderHKCards();
+  if (_hkAutoOpenCount && showCountSubtab) { _hkAutoOpenCount = false; hkSubtab('count'); }
 }
 
 function hkSubtab(tab) {
-  ['inventory','log','lowstock','store'].forEach(t => {
+  ['inventory','log','lowstock','store','count'].forEach(t => {
     const el = document.getElementById('hkv-'+t);
     if (el) el.style.display = t===tab?'block':'none';
     const btn = document.getElementById('hkt-'+t);
@@ -1833,6 +1842,39 @@ function hkSubtab(tab) {
   if (tab==='log') loadHKLog();
   if (tab==='lowstock') renderHKLowStockCards();
   if (tab==='store') storeSubtab('inventory');
+  if (tab==='count') renderAmenitiesCountHome();
+}
+
+async function renderAmenitiesCountHome() {
+  const el = document.getElementById('amenities-count-body');
+  if (!el) return;
+  if (_countSession) { renderCountInProgress(); return; }
+  const pastCounts = await fetch('/api/inventory-counts').then(r=>r.json());
+  const amenityCounts = pastCounts.filter(c => c.areas === 'amenities');
+  let pastHtml = '';
+  if (amenityCounts.length) {
+    pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
+      amenityCounts.slice(0,10).map(c=>{
+        const variances = c.variances || 0;
+        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color: var(--green-dark)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id},'amenities_inventory')">View</button></div>`;
+      }).join('') + '</div>';
+  }
+  el.innerHTML = `<div class="card">
+    <div class="card-title">Start new count</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Scan each item and enter the quantity you physically find — no expected counts shown, so this stays an honest blind count.</p>
+    <button class="btn btn-primary btn-full" onclick="startAmenitiesCount()">Begin count</button>
+  </div>${pastHtml}`;
+}
+
+async function startAmenitiesCount() {
+  _countReturnTarget = 'amenities_inventory';
+  await loadHKSupplies();
+  const items = _hkSupplies.filter(s => s.bucket === 'Amenities').map(s => ({
+    id: 'A-'+s.id, label: s.name, tag: s.category, type: 'supply',
+    expected: s.quantity, expectedLabel: `${s.quantity} ${s.unit}`, unit: s.unit, category: s.category, supplyId: s.id
+  }));
+  _countSession = { areas: ['amenities'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
+  renderCountInProgress();
 }
 
 function renderHKCards() {
@@ -3142,7 +3184,7 @@ function renderPackListBody(unacked, invTask) {
           <div class="card-title" style="color:var(--green-dark);margin-bottom:2px">📋 This week's task: Inventory Count</div>
           <div class="row-sub">It's ${invTask.task_day_name} — run this week's count to clear this.</div>
         </div>
-        <button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showTab('inventory_count')">Go to InventoryCentral →</button>
+        <button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="_hkAutoOpenCount=true;showTab('amenities_inventory')">Go to Amenities Inventory →</button>
       </div>
     </div>`;
   }
