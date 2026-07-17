@@ -16,7 +16,7 @@
     --blue: #185FA5; --blue-light: #E6F1FB; --blue-mid: #378ADD;
     --coral: #D85A30; --coral-light: #FAECE7; --coral-dark: #993C1D;
     --amber: #854F0B; --amber-light: #FAEEDA;
-    --green: #3B6D11; --green-light: #EAF3DE;
+    --green: #89BBBE; --green-light: #E7F1F2; --green-dark: #3D5B5D;
     --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
     --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
     --radius: 10px; --radius-sm: 6px;
@@ -85,24 +85,9 @@
   .badge-in { background: var(--teal-light); color: var(--teal-dark); }
   .badge-count { background: var(--blue-light); color: var(--blue); }
   .badge-warn { background: var(--amber-light); color: var(--amber); }
-  .badge-ok { background: var(--green-light); color: var(--green); }
+  .badge-ok { background: var(--green-light); color: var(--green-dark); }
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); }
   .row:last-child { border-bottom: none; }
-  .status-card-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
-  .status-card-header:hover .expand-btn { border-color: var(--teal-mid); color: var(--teal-dark); }
-  .status-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .status-card-left > div { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .expand-btn { width: 22px; height: 22px; border-radius: 50%; border: 0.5px solid var(--gray-200); background: var(--gray-50); color: var(--gray-700); font-size: 14px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
-  .status-card-body { margin-top: 8px; }
-  .status-card-body.collapsed { display: none; }
-  .scan-cam-btn { width:100%; padding:11px; border-radius:var(--radius-sm); border:0.5px solid var(--teal-mid); background:var(--teal-light); color:var(--teal-dark); font-size:14px; font-weight:600; cursor:pointer; font-family:var(--font); margin-top:10px; }
-  .scan-cam-btn:active { transform: scale(0.98); }
-  .cam-overlay { position:fixed; inset:0; background:#000; z-index:1000; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-  .cam-video-wrap { position:relative; width:100%; max-width:480px; aspect-ratio:1/1; overflow:hidden; }
-  .cam-video-wrap video { width:100%; height:100%; object-fit:cover; }
-  .cam-frame { position:absolute; inset:12%; border:3px solid var(--teal-mid); border-radius:16px; box-shadow:0 0 0 2000px rgba(0,0,0,0.35); pointer-events:none; }
-  .cam-status { color:#fff; font-size:15px; text-align:center; padding:1rem 1.25rem; min-height:20px; transition: color 0.15s; }
-  .cam-close { position:absolute; top:16px; right:16px; background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:50%; width:40px; height:40px; font-size:18px; cursor:pointer; z-index:1001; }
   .row-main { flex: 1; min-width: 0; }
   .row-title { font-size: 13px; font-weight: 500; }
   .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
@@ -163,7 +148,7 @@
   .count-input:focus { border-color: var(--teal); }
   .variance-pos { color: var(--amber); font-weight: 600; font-size: 12px; }
   .variance-neg { color: var(--coral-dark); font-weight: 600; font-size: 12px; }
-  .variance-ok { color: var(--green); font-weight: 600; font-size: 12px; }
+  .variance-ok { color: var(--green-dark); font-weight: 600; font-size: 12px; }
   .report-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1rem; }
   .report-stat { border-radius: var(--radius-sm); padding: 0.75rem 1rem; text-align: center; }
   .report-stat .rnum { font-size: 22px; font-weight: 700; line-height: 1; }
@@ -369,17 +354,44 @@
   </div>
 </div>
 
-<!-- ── Phone camera QR scan overlay (reusable across scan screens) ── -->
-<div id="cam-overlay" class="cam-overlay" style="display:none">
-  <button class="cam-close" onclick="closeCameraScan()">✕</button>
-  <div class="cam-video-wrap">
-    <video id="cam-video" autoplay playsinline muted></video>
-    <div class="cam-frame"></div>
+<div id="modal-pack-cleaner" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePackModal()">
+  <div class="modal-box">
+    <h3 id="pack-modal-title-text">Mark packed</h3>
+    <input type="hidden" id="pack-modal-address">
+    <label>Which cleaner is this for?</label>
+    <select id="pack-modal-cleaner"><option value="">Select cleaner...</option></select>
+    <label>Scan each bag tag being packed</label>
+    <input id="pack-modal-scan" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="off"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();scanPackBag();}">
+    <div id="pack-modal-scan-err" style="font-size:12px;color:var(--coral-dark);min-height:16px;margin-top:4px"></div>
+    <div id="pack-modal-bag-list" style="margin-top:6px"></div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-ghost" style="flex:1" onclick="closePackModal()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" onclick="confirmPack()">✓ Pack &amp; stage</button>
+    </div>
   </div>
-  <div class="cam-status" id="cam-status">Point your camera at the item tag QR code</div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<div id="modal-pack-flag" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box">
+    <h3>Flag a supply issue</h3>
+    <input type="hidden" id="flag-modal-address">
+    <label>Item</label>
+    <input id="flag-modal-item" placeholder="e.g. King Sheet Sets">
+    <label>Issue type</label>
+    <select id="flag-modal-type">
+      <option>Out of stock</option><option>Running low</option><option>Item damaged</option>
+      <option>Wrong item</option><option>Other</option>
+    </select>
+    <label>Notes (optional)</label>
+    <input id="flag-modal-notes" placeholder="Any extra detail...">
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-pack-flag').style.display='none'">Cancel</button>
+      <button class="btn btn-danger" style="flex:1" onclick="submitPackFlag()">Submit to Admin →</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
 let role = null;
@@ -393,14 +405,13 @@ let _hkSupplies = [];
 let _ordersModuleFilter = 'housekeeping';
 let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
-let _loanerStaff = [];
 
 const TABS = {
-  warehouse: ['scan', 'overdue', 'status', 'homes', 'log', 'hk_supply', 'orders', 'po_request'],
+  warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'log', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'store', 'po_request'],
-  inspector: ['store', 'hk_supply', 'po_request'],
+  inspector: ['amenities_inventory', 'cleaning_inventory', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'hk_supply', 'orders', 'forecast', 'store', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -409,10 +420,14 @@ const TAB_LABELS = {
   supply_scan: '🧰 SupplyCentral', supply_status: 'Supply Inventory',
   inventory_count: '📋 InventoryCentral',
   po_request: '📝 POCentral',
-  hk_supply: '🧴 Housekeeping Supplies',
+  amenities_inventory: '🧴 Amenities Inventory',
+  cleaning_inventory: '🧽 Cleaning Supplies Inventory',
   orders: '📦 Orders',
   forecast: '🔮 Forecast',
-  store: '🏪 Store'
+  store: '🏪 Store',
+  pack_list: '📋 Pack List',
+  pack_flags: '⚠️ Flag Issue',
+  pack_emergency: '⚡ Last-Min Add'
 };
 let currentTab = 'scan';
 let _availableTabs = [];
@@ -450,7 +465,6 @@ async function submitPin() {
     const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
-    fetch('/api/maintenance_staff').then(r=>r.json()).then(d => { _loanerStaff = d; });
     const defaultView = sessionStorage.getItem('defaultView');
     if (defaultView === 'loaners' && (userRoles.includes('maintenance') || userRoles.includes('admin'))) {
       sessionStorage.removeItem('defaultView');
@@ -472,7 +486,7 @@ function logout() {
   ['modal-supply-item','modal-supply-tx','modal-supply-qr'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
-  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit'].forEach(id => {
+  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag'].forEach(id => {
     const el = document.getElementById(id); if (el) el.remove();
   });
   document.getElementById('login').style.display = 'flex';
@@ -503,10 +517,14 @@ const MODULE_NAMES = {
   supply_status: 'SupplyCentral',
   inventory_count: 'InventoryCentral',
   po_request: 'POCentral',
-  hk_supply: 'HousekeepingSupplyCentral',
+  amenities_inventory: 'HousekeepingSupplyCentral',
+  cleaning_inventory: 'HousekeepingSupplyCentral',
   orders: 'OrdersCentral',
   forecast: 'ForecastCentral',
-  store: 'StoreCentral'
+  store: 'StoreCentral',
+  pack_list: 'PackListCentral',
+  pack_flags: 'PackListCentral',
+  pack_emergency: 'PackListCentral'
 };
 function showTab(t) {
   currentTab = t;
@@ -525,10 +543,14 @@ function showTab(t) {
     supply_scan: renderSupplyScan, supply_status: renderSupplyStatus,
     inventory_count: renderInventoryCount,
     po_request: renderPORequest,
-    hk_supply: renderHKSupply,
+    amenities_inventory: renderAmenitiesInventory,
+    cleaning_inventory: renderCleaningInventory,
     orders: renderOrders,
     forecast: renderForecast,
-    store: renderStore
+    store: renderStore,
+    pack_list: renderPackList,
+    pack_flags: renderPackFlags,
+    pack_emergency: renderPackEmergency
   };
   if (fns[t]) {
     document.getElementById('main-content').innerHTML = '<div style="padding:2.5rem;text-align:center;color:var(--gray-400);font-size:13px">Loading…</div>';
@@ -592,13 +614,9 @@ function renderSessionLog() {
   const log = scanState.sessionLog;
   if (!log.length) return;
   const errors = log.filter(l=>l.error).length;
-  const warns = log.filter(l=>l.warn && !l.error).length;
-  let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${warns?`<span class="badge badge-warn">${warns} light</span>`:''}${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
+  let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
   [...log].reverse().forEach(l => {
-    const badgeClass = l.error ? 'badge-out' : l.warn ? 'badge-warn' : l.action==='out' ? 'badge-out' : 'badge-in';
-    const badgeText = l.error ? 'Error' : l.warn ? 'Light' : l.action==='out' ? 'Out' : 'In';
-    const textColor = l.error ? 'var(--coral)' : l.warn ? 'var(--amber)' : 'var(--gray-400)';
-    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${textColor}">${l.msg}</div></div><span class="badge ${badgeClass}">${badgeText}</span></div>`;
+    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span></div>`;
   });
   html += '</div>';
   const el = document.getElementById('session-log');
@@ -683,49 +701,23 @@ async function renderStatus(gen) {
     <div class="search-row"><input type="text" id="status-q" placeholder="Search bag, home, or cleaner..." oninput="filterStatus()" /><select id="status-f" onchange="filterStatus()" style="width:150px"><option value="">All</option><option value="out">With cleaners</option><option value="in">At warehouse</option></select></div><div id="status-body">`;
   // Staged bags section
   Object.entries(byCleanerStaged).sort().forEach(([name, bags]) => {
-    html += `<div class="card" data-section="staged">
-      <div class="status-card-header" onclick="toggleStatusCard(this)">
-        <div class="status-card-left"><button class="expand-btn">+</button><div>${name}</div></div>
-        <span class="badge badge-warn">${bags.length} staged</span>
-      </div>
-      <div class="status-card-body collapsed">`;
+    html += `<div class="card" data-section="staged"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-warn">${bags.length} staged</span></div>`;
     bags.forEach(b => { const since=b.staged_at?new Date(b.staged_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">⏳ Staged ${since} — awaiting pickup</div></div><span class="badge badge-warn">Staged</span></div>`; });
-    html += `</div></div>`;
+    html += `</div>`;
   });
   // Out bags section
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
-    html += `<div class="card" data-section="out">
-      <div class="status-card-header" onclick="toggleStatusCard(this)">
-        <div class="status-card-left"><button class="expand-btn">+</button><div>${name}</div></div>
-        <span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span>
-      </div>
-      <div class="status-card-body collapsed">`;
+    html += `<div class="card" data-section="out"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span></div>`;
     bags.forEach(b => { const since=b.picked_up_at?new Date(b.picked_up_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Picked up ${since}</div>`:'<div class="row-sub" style="color:var(--amber)">⚠️ No pickup time recorded — can\'t tell if overdue</div>'}</div><span class="badge badge-out">Out</span></div>`; });
-    html += `</div></div>`;
+    html += `</div>`;
   });
-  if (inWarehouse.length) {
-    html += `<div class="card" data-section="in">
-      <div class="status-card-header" onclick="toggleStatusCard(this)">
-        <div class="status-card-left"><button class="expand-btn">+</button><div>At warehouse</div></div>
-        <span class="badge badge-in">${inWarehouse.length} bags</span>
-      </div>
-      <div class="status-card-body collapsed">`;
-    inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;});
-    html += `</div></div>`;
-  }
+  if (inWarehouse.length) { html+=`<div class="card" data-section="in"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">At warehouse</div><span class="badge badge-in">${inWarehouse.length} bags</span></div>`; inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;}); html+=`</div>`; }
   html += `</div>`;
   document.getElementById('main-content').innerHTML = html;
 }
-function toggleStatusCard(headerEl) {
-  const body = headerEl.nextElementSibling;
-  const btn = headerEl.querySelector('.expand-btn');
-  if (!body) return;
-  const collapsed = body.classList.toggle('collapsed');
-  if (btn) btn.textContent = collapsed ? '+' : '–';
-}
 function filterStatus() {
   const q=(document.getElementById('status-q')?.value||'').toLowerCase(); const f=document.getElementById('status-f')?.value||'';
-  document.querySelectorAll('[data-section]').forEach(sec => { const section=sec.dataset.section; if(f&&section!==f){sec.style.display='none';return;} sec.style.display=''; if(q){let any=false;sec.querySelectorAll('[data-search]').forEach(r=>{const match=r.dataset.search.includes(q);r.style.display=match?'':'none';if(match)any=true;});sec.style.display=any?'':'none'; if(any){const body=sec.querySelector('.status-card-body');const btn=sec.querySelector('.expand-btn');if(body)body.classList.remove('collapsed');if(btn)btn.textContent='–';}}else{sec.querySelectorAll('[data-search]').forEach(r=>r.style.display='');} });
+  document.querySelectorAll('[data-section]').forEach(sec => { const section=sec.dataset.section; if(f&&section!==f){sec.style.display='none';return;} sec.style.display=''; if(q){let any=false;sec.querySelectorAll('[data-search]').forEach(r=>{const match=r.dataset.search.includes(q);r.style.display=match?'':'none';if(match)any=true;});sec.style.display=any?'':'none';}else{sec.querySelectorAll('[data-search]').forEach(r=>r.style.display='');} });
 }
 
 // ── Homes Tab ──────────────────────────────────────────────────────────────────
@@ -759,15 +751,7 @@ async function renderHomes(gen) {
   Object.entries(homeMap).sort((a,b)=>(a[1].code||'').localeCompare(b[1].code||'')).forEach(([name,{code,bags,loaners,storeLoans}]) => {
     const out=bags.filter(b=>b.status==='out'); const inW=bags.filter(b=>b.status==='in'); const staged=bags.filter(b=>b.status==='staged');
     const totalItems = bags.length + loaners.length + storeLoans.length;
-    html+=`<div class="card home-card" data-home="${name.toLowerCase()}">
-      <div class="status-card-header" onclick="toggleStatusCard(this)">
-        <div class="status-card-left">
-          <button class="expand-btn">+</button>
-          <div style="white-space:normal;overflow:visible;text-overflow:clip"><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400);font-weight:400">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div>
-      </div>
-      <div class="status-card-body collapsed">`;
+    html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div><div style="display:flex;gap:6px;flex-wrap:wrap">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div></div>`;
     if (bags.length) {
       html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🧺 Linens</div>`;
       bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):b.status==='staged'?'⏳ Staged, awaiting pickup':'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':b.status==='staged'?'badge-warn':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':b.status==='staged'?'Staged':'In'}</span></div>`;});
@@ -783,7 +767,7 @@ async function renderHomes(gen) {
     if (!bags.length && !loaners.length && !storeLoans.length) {
       html += `<div style="font-size:12px;color:var(--gray-400);padding:4px 0">Nothing currently tracked at this property</div>`;
     }
-    html+=`</div></div>`;
+    html+=`</div>`;
   });
   html+=`</div>`;
   if (unmatchedStoreLoans.length) {
@@ -793,7 +777,7 @@ async function renderHomes(gen) {
   }
   document.getElementById('main-content').innerHTML = html;
 }
-function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{const match=!q||c.dataset.home.includes(q); c.style.display=match?'':'none'; if(match&&q){const body=c.querySelector('.status-card-body');const btn=c.querySelector('.expand-btn');if(body)body.classList.remove('collapsed');if(btn)btn.textContent='–';}}); }
+function filterHomes() { const q=(document.getElementById('home-q')?.value||'').toLowerCase(); document.querySelectorAll('.home-card').forEach(c=>{c.style.display=!q||c.dataset.home.includes(q)?'':'none';}); }
 
 // ── Log Tab ────────────────────────────────────────────────────────────────────
 async function renderLog(gen) {
@@ -808,7 +792,7 @@ async function renderLog(gen) {
   </div>`;
   if (!log.length) { html += '<div class="empty">No activity yet</div>'; document.getElementById('main-content').innerHTML = html; return; }
   html += '<div class="card" style="padding:0.75rem 1.25rem">';
-  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.weight_lbs!=null?' · <strong>'+e.weight_lbs+' lbs</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
+  log.forEach(e => { const isReturn=e.action==='Returned'; const dt=new Date(e.ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name}</div><div class="row-sub">${dt} · ${e.cleaner_name}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}${e.notes?' · <em>'+e.notes+'</em>':''}</div></div></div>`; });
   html += '</div>';
   document.getElementById('main-content').innerHTML = html;
 }
@@ -828,21 +812,34 @@ async function printPickupQR() {
   const data = await res.json();
   const win = window.open('', '_blank');
   win.document.write(`<html><head><title>Bag Pickup — Wall QR</title><style>
-    body{font-family:sans-serif;text-align:center;padding:60px}
-    h1{font-size:28px;margin-bottom:8px}
+    body{font-family:sans-serif;text-align:center;padding:50px}
+    h1{font-size:26px;margin-bottom:4px}
+    h2{font-size:20px;margin-bottom:20px;color:#555;font-weight:500}
     p{font-size:16px;color:#555;margin-bottom:30px}
     img{width:320px;height:320px}
-    .steps{max-width:420px;margin:30px auto 0;text-align:left;font-size:14px;color:#333;line-height:1.8}
+    .steps-wrap{display:flex;gap:30px;justify-content:center;max-width:720px;margin:30px auto 0}
+    .steps{flex:1;text-align:left;font-size:14px;color:#333;line-height:1.8}
+    .steps strong{display:block;margin-bottom:6px;font-size:15px}
   </style></head><body>
     <h1>📱 Scan to Pick Up Your Bags</h1>
-    <p>Sanders Beach Rentals · LinenTrack</p>
+    <h2>Escanee para Recoger sus Bolsas</h2>
+    <p>Sanders Beach Rentals · SandersCentral</p>
     <img src="${data.qr_code}">
-    <div class="steps">
-      <strong>How to use:</strong><br>
-      1. Open your phone camera and scan this code<br>
-      2. Enter your 5-digit PIN<br>
-      3. Scan each bag as you pick it up<br>
-      4. Your 24-hour return clock starts once confirmed
+    <div class="steps-wrap">
+      <div class="steps">
+        <strong>How to use:</strong>
+        1. Open your phone camera and scan this code<br>
+        2. Enter your 5-digit PIN<br>
+        3. Scan each bag as you pick it up<br>
+        4. Your 24-hour return clock starts once confirmed
+      </div>
+      <div class="steps">
+        <strong>Cómo usarlo:</strong>
+        1. Abra la cámara de su teléfono y escanee este código<br>
+        2. Ingrese su PIN de 5 dígitos<br>
+        3. Escanee cada bolsa al recogerla<br>
+        4. Su plazo de devolución de 24 horas comienza una vez confirmado
+      </div>
     </div>
     <script>window.onload=()=>window.print()<\/script>
   </body></html>`);
@@ -993,31 +990,15 @@ async function deleteCleaner(id,name) { if(!confirm(`Remove ${name}?`))return; c
 async function renderSettings(gen) {
   const homes = await fetch('/api/homes').then(r => r.json());
   const cleanerEmailSetting = await fetch('/api/settings/cleaner-emails-enabled').then(r => r.json()).catch(()=>({enabled:false}));
+  const invReminderSetting = await fetch('/api/settings/inventory-reminder').then(r => r.json()).catch(()=>({enabled:true,day:2}));
   if (_stale(gen)) return;
   let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
-    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><div class="form-row"><div><label>Expected linen weight (lbs, optional)</label><input type="number" id="new-home-weight" placeholder="e.g. 45" min="0" step="0.1" /></div><div></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
+    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
     <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="card"><div class="card-title">All homes</div>`;
-  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out${h.expected_weight_lbs?` · expected ~${parseFloat(h.expected_weight_lbs)} lbs`:''}</div></div><div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="showEditHomeModal(${h.id},'${h.name.replace(/'/g,"\\'")}','${h.code}',${h.expected_weight_lbs||'null'})">Edit</button>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div></div>`;});
+  homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div>`;});
   html+=`</div>`;
-  html += `<div class="card"><div class="card-title">🧺 Laundry Weight Reconciliation</div>
-    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Since there's no scale at the warehouse, this compares an <strong>expected</strong> total — the sum of each home's expected linen weight for every bag checked in during a period — against the <strong>actual</strong> total your laundry vendor reports for that same batch. A big gap can mean linens aren't all making it back.</p>
-    <div class="form-row">
-      <div><label>Period start</label><input type="date" id="lb-start"></div>
-      <div><label>Period end</label><input type="date" id="lb-end"></div>
-    </div>
-    <button class="btn btn-ghost btn-sm" onclick="calcExpectedBatchWeight()">Calculate expected weight</button>
-    <div id="lb-expected-result" style="font-size:13px;color:var(--gray-700);margin:10px 0"></div>
-    <div class="form-row">
-      <div><label>Actual weight from vendor (lbs)</label><input type="number" id="lb-actual" min="0" step="0.1" placeholder="e.g. 320"></div>
-      <div><label>Notes (optional)</label><input type="text" id="lb-notes" placeholder="e.g. invoice #4521"></div>
-    </div>
-    <button class="btn btn-primary btn-sm" onclick="saveLaundryBatch()">Save comparison</button>
-    <div id="lb-save-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:16px"></div>
-    <div class="section-header" style="margin-top:1.25rem"><h2 style="font-size:13px">Past comparisons</h2></div>
-    <div id="laundry-batch-history"><button class="btn btn-ghost btn-sm" onclick="loadLaundryBatches()">Load history</button></div>
-  </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Staff & PINs</h2></div>
     <div class="card"><div class="card-title">Staff members</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Manage individual staff PINs. Each person logs in with their own 4-digit PIN.</p>
@@ -1041,7 +1022,46 @@ async function renderSettings(gen) {
     </div>
     <div id="cleaner-email-toggle-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     </div>`;
-  html += `<div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Weekly Inventory Task</h2></div>
+    <div class="card">
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Shows warehouse staff a task on their Pack List dashboard on the chosen day, reminding them to run an inventory count. It clears itself automatically once a count is actually submitted that day — no email involved.</p>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <button class="btn ${invReminderSetting.enabled?'btn-primary':'btn-ghost'}" id="inv-reminder-toggle-btn" onclick="toggleInventoryReminder()">
+        ${invReminderSetting.enabled ? '✅ ON' : '🔒 OFF'}
+      </button>
+      <select id="inv-reminder-day" onchange="setInventoryReminderDay(this.value)" style="width:auto">
+        ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d,i)=>`<option value="${i}" ${invReminderSetting.day==i?'selected':''}>${d}</option>`).join('')}
+      </select>
+    </div>
+    <div id="inv-reminder-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Pack List</h2></div>
+    <div class="card"><div class="card-title">Load packing formula</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Loads the real per-property linen packing formula (king/queen/twin sets, towels, etc.) from the master spreadsheet, shown as a checklist on the Pack List tab. This is display-only — packing decrements real Housekeeping Supply stock (below), not a separate linen count. Safe to re-run any time the formula changes.</p>
+    <button class="btn btn-primary" onclick="seedPackFormula()">Load Packing Formula</button>
+    <div id="seed-formula-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="checkPackFormulaMatches()">Check for unmatched addresses</button>
+    <div id="pl-match-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div></div>
+    <div class="card"><div class="card-title">Upload cleaner assignments</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload a Breezeway (or similar) task export. Pre-fills the assigned cleaner on the Pack List so Kim/April don't have to pick one manually — still overridable. Re-upload any time assignments change.</p>
+    <div id="pl-assign-drop" ondragover="fcDragOver(event,'pl-assign-drop')" ondragleave="fcDragLeave('pl-assign-drop')" ondrop="fcDrop(event,'pl-assign-file','pl-assign-drop','pl-assign-name')"
+      style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
+      onclick="document.getElementById('pl-assign-file').click()">
+      <div style="font-size:24px;margin-bottom:6px">📄</div>
+      <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
+      <div id="pl-assign-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
+    </div>
+    <input type="file" id="pl-assign-file" accept=".csv" style="display:none" onchange="fcFileSelected('pl-assign-file','pl-assign-name')">
+    <button class="btn btn-primary btn-full" onclick="uploadCleanerAssignments()">Upload Assignments</button>
+    <div id="pl-assign-msg" style="font-size:13px;margin-top:8px;min-height:18px"></div></div>
+    <div class="card"><div class="card-title">Cleaner name mappings</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">When an uploaded assignment name doesn't match anyone in Cleaners, add a mapping here so future uploads resolve it automatically.</p>
+    <label>Name as it appears in the export</label><input id="pl-alias-src" placeholder="e.g. Mario Diaz">
+    <label>Maps to this cleaner</label><input id="pl-alias-dest" placeholder="e.g. Mario Cruz">
+    <button class="btn btn-primary" style="margin-top:10px" onclick="addCleanerAlias()">Add Mapping</button>
+    <div id="pl-alias-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    <div id="pl-alias-list" style="margin-top:12px"></div></div>
+  <div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
     <div class="card"><div class="card-title">Load real inventory</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the current housekeeping supply inventory from the master list. <strong>This will replace all existing HK supply quantities.</strong> Only do this once, or when resetting to baseline.</p>
     <button class="btn btn-primary" onclick="seedHKSupplies()">Load HK Inventory</button></div></div>
@@ -1080,6 +1100,25 @@ async function renderSettings(gen) {
     <div id="loaner-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
   document.getElementById('main-content').innerHTML = html;
+  loadCleanerAliases();
+}
+async function toggleInventoryReminder() {
+  const btn = document.getElementById('inv-reminder-toggle-btn');
+  const current = await fetch('/api/settings/inventory-reminder').then(r=>r.json()).catch(()=>({enabled:true}));
+  const next = !current.enabled;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/settings/inventory-reminder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:next})});
+    await res.json();
+    document.getElementById('inv-reminder-msg').textContent = next ? '✓ Weekly reminder is on.' : '✓ Weekly reminder is off.';
+    renderSettings();
+  } catch(e) { alert('Connection error'); btn.disabled=false; }
+}
+async function setInventoryReminderDay(day) {
+  try {
+    await fetch('/api/settings/inventory-reminder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({day:parseInt(day)})});
+    document.getElementById('inv-reminder-msg').textContent = '✓ Reminder day updated.';
+  } catch(e) { alert('Connection error'); }
 }
 async function toggleCleanerEmails() {
   const btn = document.getElementById('cleaner-email-toggle-btn');
@@ -1206,94 +1245,7 @@ async function savePins() {
   await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined,staff_name:_currentStaffName})});
   document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
-async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); const weightRaw=document.getElementById('new-home-weight')?.value?.trim(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,expected_weight_lbs:weightRaw||null,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
-
-function showEditHomeModal(id, name, code, expectedWeight) {
-  const modal = document.createElement('div');
-  modal.className='modal-overlay'; modal.id='modal-home-edit';
-  modal.innerHTML=`<div class="modal-box" style="max-width:400px">
-    <h3>Edit: ${name}</h3>
-    <label>Home name</label>
-    <input type="text" id="eh-name" value="${name}">
-    <label style="margin-top:0.75rem">Code</label>
-    <input type="text" id="eh-code" value="${code}">
-    <label style="margin-top:0.75rem">Expected linen weight (lbs)</label>
-    <input type="number" id="eh-weight" min="0" step="0.1" value="${expectedWeight!==null?expectedWeight:''}" placeholder="e.g. 45">
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="document.getElementById('modal-home-edit').remove()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitEditHome(${id})">Save Changes</button>
-    </div>
-  </div>`;
-  document.body.appendChild(modal);
-}
-
-async function submitEditHome(id) {
-  const name=document.getElementById('eh-name')?.value?.trim();
-  const code=document.getElementById('eh-code')?.value?.trim().toUpperCase();
-  const weightRaw=document.getElementById('eh-weight')?.value?.trim();
-  if(!name||!code){alert('Name and code are required');return;}
-  const r=await fetch(`/api/homes/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,expected_weight_lbs:weightRaw||null,staff_name:_currentStaffName})});
-  const d=await r.json(); if(!r.ok){alert(d.error);return;}
-  document.getElementById('modal-home-edit')?.remove();
-  renderSettings();
-}
-
-async function calcExpectedBatchWeight() {
-  const start = document.getElementById('lb-start')?.value;
-  const end = document.getElementById('lb-end')?.value;
-  const resultEl = document.getElementById('lb-expected-result');
-  if (!start || !end) { resultEl.innerHTML = '<span style="color:var(--coral-dark)">Pick a start and end date first.</span>'; return; }
-  resultEl.textContent = 'Calculating...';
-  const data = await fetch(`/api/laundry-batches/expected?start=${start}&end=${end}`).then(r=>r.json()).catch(()=>null);
-  if (!data || data.error) { resultEl.innerHTML = `<span style="color:var(--coral-dark)">${data?.error||'Error calculating expected weight'}</span>`; return; }
-  let html = `Expected: <strong>${data.expected_total_weight_lbs} lbs</strong> — based on ${data.bag_count} bag check-in${data.bag_count!==1?'s':''} in this period.`;
-  if (data.homes_missing_expected_weight.length) {
-    html += `<br><span style="color:var(--amber)">⚠️ ${data.homes_missing_expected_weight.length} home(s) checked in during this period don't have an expected weight set, so they're not counted: ${data.homes_missing_expected_weight.join(', ')}</span>`;
-  }
-  resultEl.innerHTML = html;
-}
-
-async function saveLaundryBatch() {
-  const start = document.getElementById('lb-start')?.value;
-  const end = document.getElementById('lb-end')?.value;
-  const actual = document.getElementById('lb-actual')?.value?.trim();
-  const notes = document.getElementById('lb-notes')?.value?.trim();
-  const msgEl = document.getElementById('lb-save-msg');
-  if (!start || !end) { msgEl.innerHTML = '<span style="color:var(--coral-dark)">Pick a start and end date first.</span>'; return; }
-  msgEl.textContent = 'Saving...';
-  const r = await fetch('/api/laundry-batches', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ period_start:start, period_end:end, actual_weight_lbs:actual||null, notes, staff_name:_currentStaffName }) });
-  const data = await r.json();
-  if (!r.ok) { msgEl.innerHTML = `<span style="color:var(--coral-dark)">${data.error}</span>`; return; }
-  msgEl.textContent = '✓ Saved';
-  document.getElementById('lb-actual').value = '';
-  document.getElementById('lb-notes').value = '';
-  loadLaundryBatches();
-}
-
-async function loadLaundryBatches() {
-  const area = document.getElementById('laundry-batch-history');
-  if (!area) return;
-  area.innerHTML = '<p style="font-size:13px;color:var(--gray-400)">Loading...</p>';
-  const batches = await fetch('/api/laundry-batches').then(r=>r.json()).catch(()=>[]);
-  if (!batches.length) { area.innerHTML = '<p style="font-size:13px;color:var(--gray-400);font-style:italic">No comparisons saved yet.</p>'; return; }
-  area.innerHTML = batches.map(b => {
-    const flagged = b.variance_pct !== null && b.variance_pct < -15;
-    return `<div class="row" style="${flagged?'background:var(--coral-light);border-radius:6px;padding:10px 8px':''}">
-      <div class="row-main">
-        <div class="row-title">${b.period_start} → ${b.period_end}${flagged?` <span class="badge badge-out">${b.variance_pct}%</span>`:''}</div>
-        <div class="row-sub">Expected: ${b.expected_weight_lbs??'—'} lbs · Actual: ${b.actual_weight_lbs??'not entered'} lbs${b.variance_pct!==null?` · ${b.variance_pct>0?'+':''}${b.variance_pct}% vs expected`:''} · ${b.bag_count||0} bags${b.notes?' · <em>'+b.notes+'</em>':''}</div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="deleteLaundryBatch(${b.id})">Remove</button>
-    </div>`;
-  }).join('');
-}
-
-async function deleteLaundryBatch(id) {
-  if (!confirm('Remove this saved comparison?')) return;
-  await fetch(`/api/laundry-batches/${id}`, { method:'DELETE' });
-  loadLaundryBatches();
-}
+async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){alert('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
 async function deleteHome(id,name) { if(!confirm(`Remove ${name}?`))return; const r=await fetch('/api/homes/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} renderSettings(); }
 async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){alert('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id),staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){alert(d.error);return;} document.getElementById('bag-msg').textContent=`✓ Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
 
@@ -1334,30 +1286,26 @@ function checkPendingSupplyScan() {
 }
 
 // ── LoanerTrack ────────────────────────────────────────────────────────────────
-let loanerScanState = { staff: [], homes: [], selectedStaff: null, sessionLog: [], mode: 'out' };
+let loanerScanState = { homes: [], sessionLog: [], mode: 'out' };
 
 async function renderLoanerScan(gen) {
-  const [sr, hr] = await Promise.all([fetch('/api/maintenance_staff').then(r=>r.json()), fetch('/api/homes').then(r=>r.json())]);
+  const hr = await fetch('/api/homes').then(r=>r.json());
   if (_stale(gen)) return;
-  loanerScanState.staff = sr; loanerScanState.homes = hr;
-  const staffOpts = sr.map(s=>`<option value="${s.id}" ${loanerScanState.selectedStaff==s.id?'selected':''}>${s.name}</option>`).join('');
+  loanerScanState.homes = hr;
   const homeOpts = hr.map(h=>`<option value="${h.id}">${h.name}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
     <div class="card"><div class="card-title">Session mode</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'#E2B04A':''};border-color:${loanerScanState.mode==='out'?'#E2B04A':''}" onclick="setLoanerMode('out')">Deploying to home</button>
-        <button class="btn ${loanerScanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setLoanerMode('in')">Retrieving from home</button>
+        <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'#E2B04A':''};border-color:${loanerScanState.mode==='out'?'#E2B04A':''}" onclick="setLoanerMode('out')">Checking out</button>
+        <button class="btn ${loanerScanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setLoanerMode('in')">Checking in</button>
       </div>
-      <div id="loaner-staff-row" style="${loanerScanState.mode==='out'?'':'display:none'}">
-        <label>Staff member for this trip</label>
-        <select id="loaner-staff-sel" onchange="loanerScanState.selectedStaff=this.value" style="margin-bottom:8px"><option value="">Select staff...</option>${staffOpts}</select>
+      <div id="loaner-home-row" style="${loanerScanState.mode==='out'?'':'display:none'}">
         <label>Delivering to home</label>
         <select id="loaner-home-sel" style="margin-bottom:12px"><option value="">Select home...</option>${homeOpts}</select>
       </div>
       <label>Scan loaner item tag</label>
       <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" />
       <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
-      <button class="scan-cam-btn" onclick="openCameraScan('loaner-scan-input', processLoanerScan, 'Point your camera at the loaner item tag QR code')">📷 Scan with phone camera</button>
     </div>
     <div id="loaner-session-log"></div>`;
   document.getElementById('loaner-scan-input')?.focus();
@@ -1368,13 +1316,11 @@ async function processLoanerScan() {
   if(id.includes('LOANER=')||id.includes('loaner=')){const match=id.match(/[Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);if(match)id=match[1].toUpperCase();}else{id=id.toUpperCase();}
   if(!id)return; input.value='';
   if(loanerScanState.mode==='out'){
-    const staff_id=document.getElementById('loaner-staff-sel')?.value||loanerScanState.selectedStaff; const home_id=document.getElementById('loaner-home-sel')?.value;
-    if(!staff_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a staff member first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
+    const home_id=document.getElementById('loaner-home-sel')?.value;
     if(!home_id){loanerScanState.sessionLog.push({id,name:'—',msg:'Select a home first',error:true});renderLoanerSessionLog();document.getElementById('loaner-scan-input')?.focus();return;}
-    loanerScanState.selectedStaff=staff_id;
-    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_id:parseInt(staff_id),home_id:parseInt(home_id),staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Deployed to ${data.home} by ${data.staff}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/deploy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({home_id:parseInt(home_id),staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Checked out to ${data.home} by ${data.staff}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
   }else{
-    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:'',staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Retrieved from ${data.home}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
+    try{const r=await fetch(`/api/loaner/${encodeURIComponent(id)}/retrieve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:'',staff_name:_currentStaffName})});const data=await r.json();if(r.ok)loanerScanState.sessionLog.push({id,name:data.item,msg:`Checked in from ${data.home}`,error:false});else loanerScanState.sessionLog.push({id,name:'—',msg:data.error,error:true});}catch(e){loanerScanState.sessionLog.push({id,name:'—',msg:'Connection error',error:true});}
   }
   renderLoanerSessionLog(); document.getElementById('loaner-scan-input')?.focus();
 }
@@ -1384,90 +1330,13 @@ function renderLoanerSessionLog() {
   [...log].reverse().forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span>${l.name&&l.name!=='—'?' · '+l.name:''}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':loanerScanState.mode==='out'?'badge-out':'badge-in'}">${l.error?'Error':loanerScanState.mode==='out'?'Out':'In'}</span></div>`;});
   html+='</div>'; const el=document.getElementById('loaner-session-log'); if(el)el.innerHTML=html;
 }
-
-// ── Phone camera QR scan (reusable across scan screens) ─────────────────────
-// openCameraScan(targetInputId, onResult, promptText) opens the full-screen
-// camera, and on a detected code fills targetInputId with the raw value then
-// calls onResult() — the same function that normally runs on Enter/scanner-submit.
-let _camStream = null;
-let _camRunning = false;
-let _camCanvas = null;
-let _camCtx = null;
-let _camLastCode = null;
-let _camLastTime = 0;
-let _camTargetInputId = null;
-let _camOnResult = null;
-let _camPrompt = 'Point your camera at the tag QR code';
-
-async function openCameraScan(targetInputId, onResult, promptText) {
-  _camTargetInputId = targetInputId;
-  _camOnResult = onResult;
-  _camPrompt = promptText || 'Point your camera at the tag QR code';
-  const overlay = document.getElementById('cam-overlay');
-  const video = document.getElementById('cam-video');
-  const status = document.getElementById('cam-status');
-  status.style.color = '#fff'; status.style.fontWeight = 'normal';
-  overlay.style.display = 'flex';
-  if (typeof jsQR === 'undefined') {
-    status.textContent = 'Scanner library failed to load — check your internet connection and try again, or use manual entry.';
-    return;
-  }
-  status.textContent = _camPrompt;
-  if (!_camCanvas) { _camCanvas = document.createElement('canvas'); _camCtx = _camCanvas.getContext('2d', { willReadFrequently: true }); }
-  try {
-    _camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    video.srcObject = _camStream;
-    await video.play();
-    _camRunning = true;
-    _camLastCode = null; _camLastTime = 0;
-    requestAnimationFrame(camScanLoop);
-  } catch (e) {
-    status.textContent = 'Could not access camera — check camera permission for this browser.';
-  }
-}
-
-function closeCameraScan() {
-  _camRunning = false;
-  const overlay = document.getElementById('cam-overlay');
-  overlay.style.display = 'none';
-  if (_camStream) { _camStream.getTracks().forEach(tr => tr.stop()); _camStream = null; }
-}
-
-function camScanLoop() {
-  if (!_camRunning) return;
-  const video = document.getElementById('cam-video');
-  if (video.readyState === video.HAVE_ENOUGH_DATA && typeof jsQR !== 'undefined') {
-    _camCanvas.width = video.videoWidth;
-    _camCanvas.height = video.videoHeight;
-    _camCtx.drawImage(video, 0, 0, _camCanvas.width, _camCanvas.height);
-    const imgData = _camCtx.getImageData(0, 0, _camCanvas.width, _camCanvas.height);
-    const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
-    const now = Date.now();
-    if (code && code.data && (code.data !== _camLastCode || now - _camLastTime > 2000)) {
-      _camLastCode = code.data; _camLastTime = now;
-      handleCameraResult(code.data);
-    }
-  }
-  if (_camRunning) requestAnimationFrame(camScanLoop);
-}
-
-function handleCameraResult(raw) {
-  const status = document.getElementById('cam-status');
-  status.style.color = '#fff'; status.style.fontWeight = 'normal';
-  status.textContent = '✓ Code detected...';
-  if (navigator.vibrate) navigator.vibrate(80);
-  const input = document.getElementById(_camTargetInputId);
-  if (input) input.value = raw;
-  if (typeof _camOnResult === 'function') _camOnResult();
-  setTimeout(() => { if (_camRunning) status.textContent = _camPrompt; }, 1200);
-}
 async function renderLoanerStatus(gen) {
   document.getElementById('main-content').innerHTML='<div class="card">Loading...</div>';
   const loaners=await fetch('/api/loaners').then(r=>r.json());
   if (_stale(gen)) return;
   const out=loaners.filter(l=>l.status==='out'); const inW=loaners.filter(l=>l.status==='in');
-  let html=`<div class="stat-grid"><div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Deployed</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div></div>`;
-  if(out.length){html+='<div class="card"><div class="card-title">Currently deployed</div>';out.forEach(l=>{const since=l.checked_out?new Date(l.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';const who=l.checked_out_by||l.staff_name;html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${who?' · '+who:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
+  let html=`<div class="stat-grid"><div class="stat"><div class="stat-num">${loaners.length}</div><div class="stat-lbl">Total items</div></div><div class="stat"><div class="stat-num" style="color:var(--coral)">${out.length}</div><div class="stat-lbl">Checked out</div></div><div class="stat"><div class="stat-num" style="color:var(--teal)">${inW.length}</div><div class="stat-lbl">At warehouse</div></div></div>`;
+  if(out.length){html+='<div class="card"><div class="card-title">Currently checked out</div>';out.forEach(l=>{const since=l.checked_out?new Date(l.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';const who=l.checked_out_by||l.staff_name;html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div><div class="row-sub">${l.home_name}${who?' · '+who:''}${since?' · since '+since:''}</div></div><span class="badge badge-out">Out</span></div>`;});html+='</div>';}
   if(inW.length){html+='<div class="card"><div class="card-title">At warehouse</div>';const cats={};inW.forEach(l=>{if(!cats[l.category])cats[l.category]=[];cats[l.category].push(l);});Object.entries(cats).sort().forEach(([cat,items])=>{html+=`<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;items.forEach(l=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><span class="badge badge-in">In</span></div>`;});});html+='</div>';}
   document.getElementById('main-content').innerHTML=html;
 }
@@ -1478,7 +1347,7 @@ async function renderLoanerLog(gen) {
   const loanerLog=log.filter(e=>e.activity_type==='loaner');
   if(!loanerLog.length){document.getElementById('main-content').innerHTML='<div class="empty">No loaner activity yet</div>';return;}
   let html='<div class="card" style="padding:0.75rem 1.25rem"><div class="card-title" style="margin-bottom:0.75rem">Loaner activity log</div>';
-  loanerLog.forEach(e=>{const isReturn=e.action==='Retrieved';html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div><div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}</div></div></div>`;});
+  loanerLog.forEach(e=>{const isReturn=e.action==='Checked in';html+=`<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isReturn?'badge-in':'badge-out'}" style="margin-right:6px">${e.action}</span><span class="tag">${e.bag_id}</span> · ${e.home_name||'—'}</div><div class="row-sub">${e.ts} · ${e.cleaner_name||'—'}${e.staff_name?' · by <strong>'+e.staff_name+'</strong>':''}</div></div></div>`;});
   html+='</div>'; document.getElementById('main-content').innerHTML=html;
 }
 
@@ -1540,9 +1409,8 @@ function renderSupplyCards() {
       <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions">
         <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">📤 Take</button>
-        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button>
-        <button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">🔲</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button>
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1552,14 +1420,14 @@ function renderLowStockCards() {
   const low = _supplies.filter(s=>s.quantity<=s.low_stock_threshold);
   const grid = document.getElementById('supply-lowstock-cards');
   if (!grid) return;
-  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--green);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">✅ All items are well stocked!</div>'; return; }
   grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
     <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
     <div class="supply-cat">${item.category}</div>
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
-    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button></div>
+    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button></div>
   </div>`).join('');
 }
 
@@ -1711,7 +1579,7 @@ async function renderInventoryCount(gen) {
     pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
       pastCounts.slice(0,10).map(c=>{
         const variances = c.variances || 0;
-        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at} — ${c.areas}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color:var(--green)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button></div>`;
+        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at} — ${c.areas}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color: var(--green-dark)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id})">View</button></div>`;
       }).join('') + '</div>';
   }
   document.getElementById('main-content').innerHTML = `
@@ -1748,7 +1616,7 @@ async function startCount() {
   let items = [];
   if (areas.includes('loaners')) {
     const loaners = await fetch('/api/loaners').then(r=>r.json());
-    loaners.forEach(l => items.push({ id:'L-'+l.id, label:l.name, tag:l.id, type:'loaner', expected: l.status==='in'?1:0, expectedLabel: l.status==='in'?'In warehouse':'Deployed out', category:l.category }));
+    loaners.forEach(l => items.push({ id:'L-'+l.id, label:l.name, tag:l.id, type:'loaner', expected: l.status==='in'?1:0, expectedLabel: l.status==='in'?'In warehouse':'Checked out', category:l.category }));
   }
   if (areas.includes('supplies')) {
     const supplies = await fetch('/api/supplies').then(r=>r.json());
@@ -1768,17 +1636,12 @@ function renderCountInProgress() {
   function itemRow(item) {
     const done = s.counts.hasOwnProperty(item.id);
     const countedQty = s.counts[item.id];
-    let varianceHtml = '';
-    if (done) {
-      if (item.type==='loaner') { varianceHtml = countedQty===1 ? '<span class="variance-ok">✓ Found</span>' : '<span class="variance-neg">✗ Missing</span>'; }
-      else { const diff = countedQty - item.expected; if (diff===0) varianceHtml = '<span class="variance-ok">✓ Match</span>'; else if (diff>0) varianceHtml = `<span class="variance-pos">+${diff} over</span>`; else varianceHtml = `<span class="variance-neg">${diff} short</span>`; }
-    }
     const inputVal = done ? countedQty : '';
     return `<div class="count-row" id="crow-${item.id}">
-      <div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel} · <span class="tag" style="font-size:10px">${item.tag}</span></div></div>
-      <div class="count-row-right">${varianceHtml}
+      <div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)"><span class="tag" style="font-size:10px">${item.tag}</span></div></div>
+      <div class="count-row-right">${done ? '<span class="tag" style="font-size:10px">✓ counted</span>' : ''}
         ${item.type==='loaner'
-          ? `<button class="btn btn-sm ${done&&countedQty===1?'btn-primary':'btn-ghost'}" onclick="countLoaner('${item.id}',1)" style="${done&&countedQty===1?'background:var(--green)':''}">Found</button><button class="btn btn-sm ${done&&countedQty===0?'btn-danger':'btn-ghost'}" onclick="countLoaner('${item.id}',0)">Missing</button>`
+          ? `<button class="btn btn-sm ${done&&countedQty===1?'btn-primary':'btn-ghost'}" onclick="countLoaner('${item.id}',1)" style="${done&&countedQty===1?'background:var(--green);color:var(--green-dark)':''}">Found</button><button class="btn btn-sm ${done&&countedQty===0?'btn-danger':'btn-ghost'}" onclick="countLoaner('${item.id}',0)">Missing</button>`
           : `<input class="count-input" type="number" min="0" value="${inputVal}" placeholder="—" onchange="countSupply('${item.id}',this.value)" oninput="countSupply('${item.id}',this.value)">`}
       </div>
     </div>`;
@@ -1866,7 +1729,7 @@ function renderCountReport(data) {
     </div>
     <div class="report-stat-grid">
       <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)"><div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div></div>
-      <div class="report-stat" style="background:var(--green-light)"><div class="rnum" style="color:var(--green)">${data.matchCount}</div><div class="rlbl" style="color:var(--green)">Match</div></div>
+      <div class="report-stat" style="background:var(--green-light)"><div class="rnum" style="color: var(--green-dark)">${data.matchCount}</div><div class="rlbl" style="color: var(--green-dark)">Match</div></div>
       <div class="report-stat" style="background:var(--coral-light)"><div class="rnum" style="color:var(--coral-dark)">${shorts.length}</div><div class="rlbl" style="color:var(--coral-dark)">Short/missing</div></div>
       <div class="report-stat" style="background:var(--amber-light)"><div class="rnum" style="color:var(--amber)">${overs.length}</div><div class="rlbl" style="color:var(--amber)">Over count</div></div>
     </div>`;
@@ -1881,7 +1744,7 @@ function renderCountReport(data) {
     });
     html += '</div>';
   } else {
-    html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:15px;font-weight:600;color:var(--green)">Perfect count — no variances!</div></div>`;
+    html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:15px;font-weight:600;color: var(--green-dark)">Perfect count — no variances!</div></div>`;
   }
   html += `<div class="card"><div class="card-title">Full count detail</div>`;
   (data.items || []).forEach(item => {
@@ -1922,39 +1785,60 @@ async function loadHKSupplies() {
   _hkSupplies = await res.json();
 }
 
-async function renderHKSupply(gen) {
+let _hkBucket = null; // 'Amenities' | 'Cleaning Supplies' — set by whichever tab is active
+
+async function renderAmenitiesInventory(gen) { _hkBucket = 'Amenities'; await renderHKSupplyShared(gen, '🧴 Amenities Inventory'); }
+async function renderCleaningInventory(gen) { _hkBucket = 'Cleaning Supplies'; await renderHKSupplyShared(gen, '🧽 Cleaning Supplies Inventory'); }
+
+async function renderHKSupplyShared(gen, title) {
   await loadHKSupplies();
   if (_stale(gen)) return;
-  const cats = [...new Set(_hkSupplies.map(s=>s.category))].sort();
+  const bucketItems = _hkSupplies.filter(s => s.bucket === _hkBucket);
+  const cats = [...new Set(bucketItems.map(s=>s.category))].sort();
   const catFilter = `<select id="hk-cat-filter" onchange="renderHKCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
+  const showStoreSubtab = _hkBucket === 'Cleaning Supplies';
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">🧴 Housekeeping Supplies</div>
+      <div style="font-size:15px;font-weight:600">${title}</div>
       ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="hkt-inventory" onclick="hkSubtab('inventory')">Inventory</button>
       <button class="subtab" id="hkt-log" onclick="hkSubtab('log')">Activity Log</button>
       <button class="subtab" id="hkt-lowstock" onclick="hkSubtab('lowstock')">⚠️ Low Stock</button>
+      ${showStoreSubtab ? `<button class="subtab" id="hkt-store" onclick="hkSubtab('store')">🏪 SBR Store</button>` : ''}
     </div>
     <div id="hkv-inventory">${catFilter}<div id="hk-cards" class="supply-grid"></div></div>
     <div id="hkv-log" style="display:none"><div id="hk-log-table"></div></div>
-    <div id="hkv-lowstock" style="display:none"><div id="hk-lowstock-cards" class="supply-grid"></div></div>`;
+    <div id="hkv-lowstock" style="display:none"><div id="hk-lowstock-cards" class="supply-grid"></div></div>
+    ${showStoreSubtab ? `<div id="hkv-store" style="display:none">
+      <div class="subtab-bar">
+        <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
+        <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
+        <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
+        ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
+      </div>
+      <div id="store-body"></div>
+    </div>` : ''}`;
   renderHKCards();
 }
 
 function hkSubtab(tab) {
-  ['inventory','log','lowstock'].forEach(t => {
-    document.getElementById('hkv-'+t).style.display = t===tab?'block':'none';
-    document.getElementById('hkt-'+t).classList.toggle('active', t===tab);
+  ['inventory','log','lowstock','store'].forEach(t => {
+    const el = document.getElementById('hkv-'+t);
+    if (el) el.style.display = t===tab?'block':'none';
+    const btn = document.getElementById('hkt-'+t);
+    if (btn) btn.classList.toggle('active', t===tab);
   });
   if (tab==='log') loadHKLog();
   if (tab==='lowstock') renderHKLowStockCards();
+  if (tab==='store') storeSubtab('inventory');
 }
 
 function renderHKCards() {
   const filter = document.getElementById('hk-cat-filter')?.value || '';
-  const items = filter ? _hkSupplies.filter(s=>s.category===filter) : _hkSupplies;
+  let items = _hkSupplies.filter(s => s.bucket === _hkBucket);
+  if (filter) items = items.filter(s=>s.category===filter);
   const grid = document.getElementById('hk-cards');
   if (!grid) return;
   if (!items.length) { grid.innerHTML='<p style="color:var(--gray-400);font-style:italic;grid-column:1/-1">No items found. '+(userRoles.includes('admin')?'Add one above.':'')+'</p>'; return; }
@@ -1971,26 +1855,25 @@ function renderHKCards() {
       <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions">
         <button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
-        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
-        <button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
   }).join('');
 }
 
 function renderHKLowStockCards() {
-  const low = _hkSupplies.filter(s=>s.quantity<=s.low_stock_threshold);
+  const low = _hkSupplies.filter(s=>s.bucket === _hkBucket && s.quantity<=s.low_stock_threshold);
   const grid = document.getElementById('hk-lowstock-cards');
   if (!grid) return;
-  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--green);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">✅ All items are well stocked!</div>'; return; }
   grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
     <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
     <div class="supply-cat">${item.category}</div>
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
-    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>
+    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>
   </div>`).join('');
 }
 
@@ -2201,6 +2084,14 @@ async function renderPlaceOrderForm() {
   body.innerHTML = `
     <div class="card">
       <div class="card-title">New order — ${_ordersModuleFilter === 'housekeeping' ? 'Housekeeping Supplies' : 'Maintenance Supplies'}</div>
+      <div id="receipt-drop" ondragover="rcptDragOver(event)" ondragleave="rcptDragLeave(event)" ondrop="rcptDrop(event)"
+        style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.25rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:1rem"
+        onclick="document.getElementById('receipt-file').click()">
+        <div style="font-size:22px;margin-bottom:4px">🧾</div>
+        <div style="font-size:13px;color:var(--gray-400)">Drop a receipt or packing slip photo here, or <span style="color:var(--teal);font-weight:600">click to browse</span> — I'll fill in the items below</div>
+      </div>
+      <input type="file" id="receipt-file" accept="image/*,application/pdf" style="display:none" onchange="handleReceiptFile(this.files[0])">
+      <div id="receipt-msg" style="font-size:13px;margin-bottom:1rem;min-height:18px"></div>
       <div class="form-row">
         <div><label>Vendor (optional)</label><input type="text" id="po-vendor" placeholder="e.g. Amazon, Sam's Club"></div>
       </div>
@@ -2213,6 +2104,44 @@ async function renderPlaceOrderForm() {
       <div id="place-order-msg" style="margin-top:10px;font-size:13px;color:var(--teal);text-align:center;min-height:18px"></div>
     </div>`;
   renderOrderItemRows();
+}
+
+function rcptDragOver(e) { e.preventDefault(); document.getElementById('receipt-drop').style.borderColor = 'var(--teal)'; }
+function rcptDragLeave(e) { document.getElementById('receipt-drop').style.borderColor = 'var(--gray-200)'; }
+function rcptDrop(e) {
+  e.preventDefault();
+  document.getElementById('receipt-drop').style.borderColor = 'var(--gray-200)';
+  const file = e.dataTransfer.files[0];
+  if (file) handleReceiptFile(file);
+}
+
+async function handleReceiptFile(file) {
+  if (!file) return;
+  const msg = document.getElementById('receipt-msg');
+  msg.textContent = '🧾 Reading receipt...'; msg.style.color = 'var(--gray-400)';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/api/orders/parse-receipt', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok || data.error) { msg.textContent = '✗ ' + (data.error || 'Could not read that receipt.'); msg.style.color = 'var(--coral-dark)'; return; }
+    if (data.vendor) document.getElementById('po-vendor').value = data.vendor;
+    if (data.items && data.items.length) {
+      _placeOrderItems = data.items.map(it => ({
+        item_name: it.name || '', matched_supply_id: '',
+        cases_ordered: it.quantity != null ? it.quantity : 1, units_per_case: 1,
+        unit_label: 'units', price: it.unit_price != null ? it.unit_price : ''
+      }));
+      renderOrderItemRows();
+      msg.textContent = `✓ Pulled ${data.items.length} item(s) from the receipt — please double-check them below before placing the order.`;
+      msg.style.color = 'var(--teal-dark)';
+    } else {
+      msg.textContent = '⚠ Could not find any line items on that receipt — please enter them manually.';
+      msg.style.color = 'var(--coral-dark)';
+    }
+  } catch (e) {
+    msg.textContent = '✗ Connection error — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
 }
 
 function renderOrderItemRows() {
@@ -2392,10 +2321,7 @@ async function resolveOrderDiscrepancy(orderId) {
 let _storeItems = [];
 
 async function renderStore(gen) {
-  const res = await fetch('/api/store/items');
-  _storeItems = await res.json();
   if (_stale(gen)) return;
-
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">🏪 StoreCentral</div>
@@ -2410,8 +2336,9 @@ async function renderStore(gen) {
   storeSubtab('inventory');
 }
 
-function storeSubtab(tab) {
-  document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
+async function storeSubtab(tab) {
+  if (tab === 'inventory') { try { _storeItems = await fetch('/api/store/items').then(r=>r.json()); } catch(e) {} }
+  document.querySelectorAll('.subtab[id^="st-t-"]').forEach(b=>b.classList.remove('active'));
   document.getElementById('st-t-'+tab)?.classList.add('active');
   if (tab==='inventory') renderStoreInventory();
   else if (tab==='loans') renderActiveLoans();
@@ -2450,7 +2377,7 @@ function renderStoreCards() {
       ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
-        <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color:var(--green)" onclick="showStoreRestockModal(${item.id})">📥 Restock</button>
+        <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color: var(--green-dark)" onclick="showStoreRestockModal(${item.id})">📥 Restock</button>
         ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`).join('');
@@ -2624,7 +2551,7 @@ async function renderStoreLog() {
       <div class="row-main">
         <div class="row-title">
           <span class="badge ${isSold?'badge-out':'badge-warn'}" style="margin-right:6px">${isSold?'💰 Sold Out':'📤 Loan'}</span>
-          ${tx.item_name}${isReturned?' <span style="color:var(--green);font-size:11px">✓ Returned</span>':''}
+          ${tx.item_name}${isReturned?' <span style="color: var(--green-dark);font-size:11px">✓ Returned</span>':''}
         </div>
         <div class="row-sub">${tx.timestamp} · ${tx.performed_by} · qty ${tx.quantity} · ${tx.property_address}${tx.price&&isSold?` · $${(parseFloat(tx.price)*tx.quantity).toFixed(2)}`:''}</div>
         ${tx.notes?`<div class="row-sub" style="font-style:italic">${tx.notes}</div>`:''}
@@ -2819,11 +2746,11 @@ function renderForecastResults(data, from, to) {
         <div class="rnum">${data.properties_matched}</div><div class="rlbl" style="color:var(--gray-400)">Properties</div>
       </div>
       <div class="report-stat" style="background:${shortfalls.length?'var(--coral-light)':'var(--green-light)'}">
-        <div class="rnum" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green)'}">${shortfalls.length}</div>
-        <div class="rlbl" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green)'}">Need Ordering</div>
+        <div class="rnum" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green-dark)'}">${shortfalls.length}</div>
+        <div class="rlbl" style="color:${shortfalls.length?'var(--coral-dark)':'var(--green-dark)'}">Need Ordering</div>
       </div>
       <div class="report-stat" style="background:var(--green-light)">
-        <div class="rnum" style="color:var(--green)">${sufficient.length}</div><div class="rlbl" style="color:var(--green)">Sufficient</div>
+        <div class="rnum" style="color: var(--green-dark)">${sufficient.length}</div><div class="rlbl" style="color: var(--green-dark)">Sufficient</div>
       </div>
     </div>`;
 
@@ -2878,7 +2805,7 @@ function renderForecastResults(data, from, to) {
       <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.current_stock}</td>
       <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">${r.on_order}</td>
       <td style="padding:6px 8px;border-bottom:0.5px solid var(--gray-100);text-align:right">
-        ${r.ok ? '<span style="color:var(--green);font-weight:600">✓ OK</span>' : `<span style="color:var(--coral-dark);font-weight:600">-${r.shortfall}</span>`}
+        ${r.ok ? '<span style="color: var(--green-dark);font-weight:600">✓ OK</span>' : `<span style="color:var(--coral-dark);font-weight:600">-${r.shortfall}</span>`}
       </td>
     </tr>`;
   });
@@ -2998,11 +2925,11 @@ async function renderBoxPacking() {
             <div class="stat-lbl">Boxes needed</div>
           </div>
           <div class="stat" style="background:${data.can_pack >= data.boxes_needed ? 'var(--green-light)' : 'var(--coral-light)'}">
-            <div class="stat-num" style="color:${data.can_pack >= data.boxes_needed ? 'var(--green)' : 'var(--coral-dark)'}">${data.can_pack}</div>
+            <div class="stat-num" style="color:${data.can_pack >= data.boxes_needed ? 'var(--green-dark)' : 'var(--coral-dark)'}">${data.can_pack}</div>
             <div class="stat-lbl">Can pack now</div>
           </div>
           <div class="stat" style="background:${shortfall > 0 ? 'var(--coral-light)' : 'var(--green-light)'}">
-            <div class="stat-num" style="color:${shortfall > 0 ? 'var(--coral-dark)' : 'var(--green)'}">${shortfall > 0 ? '-'+shortfall : '✓'}</div>
+            <div class="stat-num" style="color:${shortfall > 0 ? 'var(--coral-dark)' : 'var(--green-dark)'}">${shortfall > 0 ? '-'+shortfall : '✓'}</div>
             <div class="stat-lbl">${shortfall > 0 ? 'Shortfall' : 'Sufficient'}</div>
           </div>
         </div>
@@ -3024,7 +2951,7 @@ async function renderBoxPacking() {
 
         ${data.can_pack >= data.boxes_needed ? `
         <div style="background:var(--green-light);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:1rem">
-          <div style="font-size:13px;font-weight:600;color:var(--green)">✅ You have enough supplies to pack all ${data.boxes_needed} boxes needed!</div>
+          <div style="font-size:13px;font-weight:600;color: var(--green-dark)">✅ You have enough supplies to pack all ${data.boxes_needed} boxes needed!</div>
         </div>` : ''}
       </div>
 
@@ -3046,10 +2973,10 @@ async function renderBoxPacking() {
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.per_box}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.needed_total}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.in_stock}</td>
-              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center;font-weight:600;color:${ing.can_support_boxes >= data.boxes_needed ? 'var(--green)' : 'var(--coral-dark)'}">${ing.can_support_boxes}</td>
+              <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center;font-weight:600;color:${ing.can_support_boxes >= data.boxes_needed ? 'var(--green-dark)' : 'var(--coral-dark)'}">${ing.can_support_boxes}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">
                 ${ing.ok
-                  ? '<span style="color:var(--green);font-weight:600">✓ OK</span>'
+                  ? '<span style="color: var(--green-dark);font-weight:600">✓ OK</span>'
                   : `<span style="color:var(--coral-dark);font-weight:600">-${ing.short}</span>`}
               </td>
             </tr>`).join('')}
@@ -3102,6 +3029,416 @@ async function uploadReservations() {
   } catch(e) {
     msg.textContent = '✗ Upload failed — please try again.';
     msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── PackListCentral ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+let packListState = { date: null, properties: [], cleaners: [] };
+let packModalState = { address: '', scannedBags: [] };
+let celebratedDates = new Set();
+
+function triggerPackCelebration(dateLabel) {
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:9999;';
+  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  const colors = ['#FDE68A', '#FCA5A5', '#93C5FD', '#6EE7B7', '#F9A8D4', '#C4B5FD'];
+  const particles = [];
+  const bursts = [
+    { x: canvas.width * 0.25, y: canvas.height * 0.35 },
+    { x: canvas.width * 0.75, y: canvas.height * 0.3 },
+    { x: canvas.width * 0.5, y: canvas.height * 0.5 }
+  ];
+  bursts.forEach((origin, bi) => {
+    setTimeout(() => {
+      for (let i = 0; i < 60; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 2 + Math.random() * 6;
+        particles.push({
+          x: origin.x, y: origin.y,
+          vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          size: 3 + Math.random() * 4, life: 60 + Math.random() * 30
+        });
+      }
+    }, bi * 200);
+  });
+
+  const msg = document.createElement('div');
+  msg.textContent = `🎉 All packed for ${dateLabel}! 🎉`;
+  msg.style.cssText = 'position:fixed;top:20%;left:50%;transform:translate(-50%,-50%);font-size:20px;font-weight:600;color:var(--teal-dark);background:white;padding:14px 24px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:10000;pointer-events:none;opacity:0;transition:opacity 0.3s;';
+  document.body.appendChild(msg);
+  requestAnimationFrame(() => { msg.style.opacity = '1'; });
+
+  let frame = 0;
+  function animate() {
+    frame++;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
+      ctx.globalAlpha = Math.max(0, p.life / 90);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+    });
+    ctx.globalAlpha = 1;
+    for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
+    if (frame < 150) {
+      requestAnimationFrame(animate);
+    } else {
+      canvas.remove();
+      msg.style.opacity = '0';
+      setTimeout(() => msg.remove(), 400);
+    }
+  }
+  animate();
+}
+
+function todayISO() {
+  const d = new Date();
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+async function renderPackList(gen) {
+  if (!packListState.date) packListState.date = todayISO();
+  const [plRes, clRes, emRes, invRes] = await Promise.all([
+    fetch('/api/pack-list?date=' + packListState.date),
+    fetch('/api/cleaners'),
+    fetch('/api/pack-list/emergency?date=' + packListState.date),
+    fetch('/api/inventory-counts/weekly-task-status')
+  ]);
+  const pl = await plRes.json();
+  packListState.cleaners = await clRes.json();
+  packListState.properties = pl.properties;
+  const emergAdds = await emRes.json();
+  const invTask = await invRes.json();
+  if (_stale(gen)) return;
+  const unacked = emergAdds.filter(e => !e.acked_by.includes(_currentStaffName));
+  renderPackListBody(unacked, invTask);
+}
+
+function renderPackListBody(unacked, invTask) {
+  const props = packListState.properties;
+  const packed = props.filter(p => p.packed).length;
+  const total = props.length;
+  const pct = total ? Math.round(packed / total * 100) : 0;
+  if (total > 0 && packed === total) {
+    if (!celebratedDates.has(packListState.date)) {
+      celebratedDates.add(packListState.date);
+      setTimeout(() => triggerPackCelebration(packListState.date), 300);
+    }
+  } else {
+    celebratedDates.delete(packListState.date);
+  }
+  let html = '';
+  if (invTask && invTask.is_task_day && !invTask.completed_today) {
+    html += `<div class="card" style="background:#E7F1F2;border-color:#89BBBE">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="color:var(--green-dark);margin-bottom:2px">📋 This week's task: Inventory Count</div>
+          <div class="row-sub">It's ${invTask.task_day_name} — run this week's count to clear this.</div>
+        </div>
+        <button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showTab('inventory_count')">Go to InventoryCentral →</button>
+      </div>
+    </div>`;
+  }
+  if (unacked && unacked.length) {
+    html += `<div class="card" style="background:#FEF3C7;border-color:#FCD34D">
+      <div class="card-title" style="color:#92400E">⚡ Last-minute additions</div>
+      ${unacked.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.address}</div><div class="row-sub">Added by ${e.added_by} · ${e.added_at}${e.notes?' · '+e.notes:''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${e.id})">Acknowledged</button></div>`).join('')}
+    </div>`;
+  }
+  html += `<div class="card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <label style="margin:0">Date</label>
+    <input type="date" id="pl-date" value="${packListState.date}" onchange="changePackListDate(this.value)" style="width:auto">
+    <span class="badge badge-count">${packed}/${total} packed</span>
+    ${total ? `<div style="flex:1;min-width:120px;background:var(--gray-100);border-radius:6px;height:6px;overflow:hidden"><div style="height:100%;background:var(--teal);width:${pct}%"></div></div>` : ''}
+  </div>
+  <div id="pl-cards"></div>`;
+  document.getElementById('main-content').innerHTML = html;
+  const cardsEl = document.getElementById('pl-cards');
+  if (!props.length) { cardsEl.innerHTML = '<div class="empty">No arrivals scheduled for this date.</div>'; return; }
+  cardsEl.innerHTML = props.map(p => {
+    const f = p.formula;
+    return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
+      ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div>
+          <div style="font-weight:600;font-size:14px">${p.property_name}</div>
+          ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}</div>` : '<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>'}
+        </div>
+        <div style="text-align:right">
+          ${p.packed
+            ? `<div class="badge badge-ok">✓ Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="undoPack('${p.address}')">Undo</button>`
+            : `${p.assigned_cleaner_name ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : p.assigned_raw ? `<div class="row-sub" style="color:var(--coral-dark)">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>` : ''}
+               <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}')">✓ Mark packed</button>
+               <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}')" style="margin-left:6px">⚠ Flag</button>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function changePackListDate(v) { packListState.date = v; showTab('pack_list'); }
+
+function openPackModal(address) {
+  const p = packListState.properties.find(x => x.address === address);
+  const opts = packListState.cleaners.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('pack-modal-address').value = address;
+  document.getElementById('pack-modal-title-text').textContent = 'Mark packed: ' + address;
+  document.getElementById('pack-modal-cleaner').innerHTML = '<option value="">Select cleaner...</option>' + opts;
+  if (p && p.assigned_cleaner_id) document.getElementById('pack-modal-cleaner').value = p.assigned_cleaner_id;
+  packModalState = { address, scannedBags: [] };
+  document.getElementById('pack-modal-scan').value = '';
+  document.getElementById('pack-modal-scan-err').textContent = '';
+  renderPackModalBagList();
+  document.getElementById('modal-pack-cleaner').style.display = 'flex';
+  setTimeout(() => document.getElementById('pack-modal-scan')?.focus(), 50);
+}
+
+function closePackModal() { document.getElementById('modal-pack-cleaner').style.display = 'none'; }
+
+function renderPackModalBagList() {
+  const el = document.getElementById('pack-modal-bag-list');
+  if (!el) return;
+  if (!packModalState.scannedBags.length) { el.innerHTML = '<div class="row-sub">No bags scanned yet.</div>'; return; }
+  el.innerHTML = packModalState.scannedBags.map((b, i) =>
+    `<div class="row"><div class="row-main"><div class="row-title">${b}</div></div><button class="btn btn-ghost btn-sm" onclick="removePackModalBag(${i})">✕</button></div>`
+  ).join('');
+}
+function removePackModalBag(i) { packModalState.scannedBags.splice(i, 1); renderPackModalBagList(); }
+
+async function scanPackBag() {
+  const input = document.getElementById('pack-modal-scan');
+  const bagId = input.value.trim().toUpperCase();
+  input.value = '';
+  const errEl = document.getElementById('pack-modal-scan-err');
+  errEl.textContent = '';
+  if (!bagId) return;
+  if (packModalState.scannedBags.includes(bagId)) { errEl.textContent = 'Already scanned.'; return; }
+  try {
+    const res = await fetch(`/api/bag/${encodeURIComponent(bagId)}`);
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = 'Bag not found.'; return; }
+    if ((data.home_name || '').toLowerCase().trim() !== packModalState.address.toLowerCase().trim()) {
+      errEl.textContent = `That bag belongs to ${data.home_name}, not ${packModalState.address}.`; return;
+    }
+    if (data.status !== 'in') {
+      errEl.textContent = `That bag is already ${data.status === 'staged' ? 'staged' : 'checked out'}.`; return;
+    }
+    packModalState.scannedBags.push(bagId);
+    renderPackModalBagList();
+  } catch (e) { errEl.textContent = 'Connection error.'; }
+}
+
+async function confirmPack() {
+  const address = document.getElementById('pack-modal-address').value;
+  const cleanerId = document.getElementById('pack-modal-cleaner').value;
+  if (!cleanerId) { alert('Select a cleaner'); return; }
+  if (!packModalState.scannedBags.length) { alert('Scan at least one bag'); return; }
+  const res = await fetch('/api/pack-list/pack', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, pack_date: packListState.date, packed_by: _currentStaffName, cleaner_id: cleanerId, bag_ids: packModalState.scannedBags })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error'); return; }
+  closePackModal();
+  if (data.shortfalls && data.shortfalls.length) {
+    alert('Packed, but short on: ' + data.shortfalls.map(s => `${s.item} (needed ${s.needed}, had ${s.available})`).join(', '));
+  }
+  showTab('pack_list');
+}
+
+async function undoPack(address) {
+  if (!confirm('Undo packing for ' + address + '? Only works if the bag has not been picked up yet.')) return;
+  const res = await fetch('/api/pack-list/unpack', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, pack_date: packListState.date, staff_name: _currentStaffName })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error'); return; }
+  showTab('pack_list');
+}
+
+async function ackEmergency(id) {
+  await fetch(`/api/pack-list/emergency/${id}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name: _currentStaffName }) });
+  showTab('pack_list');
+}
+
+function openFlagModal(address) {
+  document.getElementById('flag-modal-address').value = address || '';
+  document.getElementById('flag-modal-item').value = '';
+  document.getElementById('flag-modal-type').value = 'Out of stock';
+  document.getElementById('flag-modal-notes').value = '';
+  document.getElementById('modal-pack-flag').style.display = 'flex';
+}
+async function submitPackFlag() {
+  const address = document.getElementById('flag-modal-address').value;
+  const item_name = document.getElementById('flag-modal-item').value.trim();
+  const issue_type = document.getElementById('flag-modal-type').value;
+  const notes = document.getElementById('flag-modal-notes').value.trim();
+  if (!item_name) { alert('Enter an item'); return; }
+  const res = await fetch('/api/pack-list/flags', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, item_name, issue_type, notes, flagged_by: _currentStaffName, pack_date: packListState.date || todayISO() })
+  });
+  document.getElementById('modal-pack-flag').style.display = 'none';
+  if (res.ok) showTab(currentTab);
+}
+
+async function renderPackFlags(gen) {
+  const res = await fetch('/api/pack-list/flags');
+  const flags = await res.json();
+  if (_stale(gen)) return;
+  let html = '';
+  if (!userRoles.includes('admin')) {
+    html += `<div class="card"><div class="card-title">Flag a supply issue</div>
+      <label>Item</label><input id="pf-item" placeholder="e.g. King Sheet Sets">
+      <label>Issue type</label><select id="pf-type"><option>Out of stock</option><option>Running low</option><option>Item damaged</option><option>Wrong item</option><option>Other</option></select>
+      <label>Property (optional)</label><input id="pf-address" placeholder="Property name">
+      <label>Notes</label><input id="pf-notes" placeholder="Any extra detail...">
+      <button class="btn btn-danger" style="margin-top:10px;width:100%" onclick="submitPackFlagForm()">Submit to Admin →</button>
+    </div>`;
+  }
+  const open = flags.filter(f => !f.resolved);
+  const resolved = flags.filter(f => f.resolved);
+  html += `<div class="card"><div class="card-title">Open flags (${open.length})</div>`;
+  html += open.length ? open.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.item_name} — ${f.issue_type}</div><div class="row-sub">${f.address ? f.address + ' · ' : ''}${f.flagged_by} · ${f.flagged_at}${f.notes ? ' · ' + f.notes : ''}</div></div>${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" onclick="resolvePackFlag(${f.id})">✓ Resolve</button>` : ''}</div>`).join('') : '<div class="empty">No open flags.</div>';
+  html += '</div>';
+  if (userRoles.includes('admin') && resolved.length) {
+    html += `<div class="card"><div class="card-title">Resolved</div>` + resolved.slice(0, 20).map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.item_name} — ${f.issue_type}</div><div class="row-sub">${f.flagged_by} · ${f.flagged_at}</div></div></div>`).join('') + '</div>';
+  }
+  document.getElementById('main-content').innerHTML = html;
+}
+function submitPackFlagForm() {
+  const item_name = document.getElementById('pf-item').value.trim();
+  const issue_type = document.getElementById('pf-type').value;
+  const address = document.getElementById('pf-address').value.trim();
+  const notes = document.getElementById('pf-notes').value.trim();
+  if (!item_name) { alert('Enter an item'); return; }
+  fetch('/api/pack-list/flags', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_name, issue_type, address, notes, flagged_by: _currentStaffName })
+  }).then(() => showTab('pack_flags'));
+}
+async function resolvePackFlag(id) {
+  await fetch(`/api/pack-list/flags/${id}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name: _currentStaffName }) });
+  showTab('pack_flags');
+}
+
+async function renderPackEmergency(gen) {
+  if (!packListState.date) packListState.date = todayISO();
+  const res = await fetch('/api/pack-list/emergency?date=' + packListState.date);
+  const rows = await res.json();
+  if (_stale(gen)) return;
+  document.getElementById('main-content').innerHTML = `
+    <div class="card">
+      <div class="card-title">⚡ Add last-minute property</div>
+      <label>Date</label><input type="date" id="pe-date" value="${packListState.date}" onchange="packListState.date=this.value;showTab('pack_emergency')">
+      <label>Property name</label><input id="pe-address" placeholder="Must match a home name exactly">
+      <label>Notes for Kim &amp; April</label><input id="pe-notes" placeholder="Optional">
+      <button class="btn btn-danger" style="width:100%;margin-top:10px" onclick="submitPackEmergency()">⚡ Send alert</button>
+    </div>
+    <div class="card"><div class="card-title">This date's adds (${rows.length})</div>
+    ${rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title">⚡ ${r.address}</div><div class="row-sub">${r.added_by} · ${r.added_at}${r.notes ? ' · ' + r.notes : ''} · Acked: ${r.acked_by.length ? r.acked_by.join(', ') : 'Pending'}</div></div></div>`).join('') : '<div class="empty">No last-minute adds for this date.</div>'}
+    </div>`;
+}
+async function submitPackEmergency() {
+  const address = document.getElementById('pe-address').value.trim();
+  const notes = document.getElementById('pe-notes').value.trim();
+  if (!address) { alert('Enter a property name'); return; }
+  const res = await fetch('/api/pack-list/emergency', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, notes, pack_date: packListState.date, added_by: _currentStaffName })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error'); return; }
+  showTab('pack_emergency');
+}
+
+async function uploadCleanerAssignments() {
+  const file = document.getElementById('pl-assign-file')?.files[0];
+  if (!file) { alert('Please select a CSV file.'); return; }
+  const msg = document.getElementById('pl-assign-msg');
+  msg.textContent = 'Uploading...'; msg.style.color = 'var(--gray-400)';
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('staff_name', _currentStaffName);
+  try {
+    const res = await fetch('/api/pack-list/upload-assignments', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.error) { msg.textContent = '✗ ' + data.error; msg.style.color = 'var(--coral-dark)'; return; }
+    msg.innerHTML = `✓ ${data.matched}/${data.total_rows} matched to a cleaner.` +
+      (data.unmatched.length ? `<br>Unmatched: ${data.unmatched.map(u => `${u.address} (${u.date}): "${u.raw_assignee}"`).join(', ')}` : '');
+    msg.style.color = data.unmatched.length ? 'var(--coral-dark)' : 'var(--teal-dark)';
+  } catch (e) {
+    msg.textContent = '✗ Upload failed — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function addCleanerAlias() {
+  const src = document.getElementById('pl-alias-src').value.trim();
+  const dest = document.getElementById('pl-alias-dest').value.trim();
+  if (!src || !dest) { alert('Enter both names'); return; }
+  const res = await fetch('/api/cleaner-aliases', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ breezeway_name: src, cleaner_name: dest, staff_name: _currentStaffName })
+  });
+  if (res.ok) {
+    document.getElementById('pl-alias-src').value = ''; document.getElementById('pl-alias-dest').value = '';
+    document.getElementById('pl-alias-msg').textContent = `✓ Mapped "${src}" → "${dest}"`;
+    loadCleanerAliases();
+  }
+}
+async function loadCleanerAliases() {
+  const res = await fetch('/api/cleaner-aliases');
+  const rows = await res.json();
+  const el = document.getElementById('pl-alias-list');
+  if (!el) return;
+  el.innerHTML = rows.length ? rows.map(r => `<div class="row-sub">"${r.breezeway_name}" → <strong>${r.cleaner_name}</strong></div>`).join('') : '<div class="row-sub">No mappings yet.</div>';
+}
+
+async function checkPackFormulaMatches() {
+  const msg = document.getElementById('pl-match-msg');
+  msg.textContent = 'Checking...'; msg.style.color = 'var(--gray-400)';
+  try {
+    const res = await fetch('/api/pack-list/formula-match-check');
+    const data = await res.json();
+    let parts = [];
+    if (!data.unmatched_formula_count) {
+      parts.push(`✓ All ${data.formula_total} formula entries match a home on file.`);
+    } else {
+      parts.push(`⚠ ${data.unmatched_formula_count} of ${data.formula_total} formula entries don't match any home:<br>` +
+        data.unmatched_formula.map(u => `• ${u.property_name} <span style="color:var(--gray-400)">(${u.address})</span>`).join('<br>'));
+    }
+    if (data.homes_missing_formula_count) {
+      parts.push(`<br>⚠ ${data.homes_missing_formula_count} home(s) have no packing formula yet:<br>` +
+        data.homes_missing_formula.map(h => `• ${h.name}`).join('<br>'));
+    }
+    msg.innerHTML = parts.join('<br><br>');
+    msg.style.color = (data.unmatched_formula_count || data.homes_missing_formula_count) ? 'var(--coral-dark)' : 'var(--teal-dark)';
+  } catch (e) {
+    msg.textContent = '✗ Check failed — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function seedPackFormula() {
+  if (!confirm('This will load/refresh the per-property packing formula from the master spreadsheet. Continue?')) return;
+  const btn = event.target;
+  btn.textContent = 'Loading...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/pack-list/seed-formula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin }) });
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent = 'Load Packing Formula'; btn.disabled = false; return; }
+    document.getElementById('seed-formula-msg').textContent = `✓ ${data.upserted} properties loaded.`;
+    btn.textContent = 'Load Packing Formula'; btn.disabled = false;
+    checkPackFormulaMatches();
+  } catch (e) {
+    alert('Connection error'); btn.textContent = 'Load Packing Formula'; btn.disabled = false;
   }
 }
 
