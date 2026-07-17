@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Warehouse Check-In Screen</title>
+<style>
+  :root {
+    --teal: #1D9E75; --teal-dark: #0F6E56;
+    --gray-50: #F7F7F5; --gray-400: #9A9A94; --gray-900: #1A1A18;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-user-select: none; user-select: none; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font); background: var(--gray-900); color: white;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; text-align: center; padding: 2rem;
+  }
+  h1 { font-size: clamp(24px, 4vw, 36px); font-weight: 700; margin-bottom: 0.5rem; }
+  p.sub { color: #B5B5B0; font-size: clamp(14px, 2vw, 18px); margin-bottom: 2rem; }
+  .qr-box {
+    background: white; border-radius: 24px; padding: 24px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+  }
+  .qr-box img { width: min(50vw, 420px); height: min(50vw, 420px); display: block; }
+  .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--teal); display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .footer { margin-top: 2rem; font-size: 13px; color: var(--gray-400); }
+</style>
+</head>
+<body>
+  <h1>📱 Scan to Check In Your Bags</h1>
+  <p class="sub">Open your phone camera and point it at this code</p>
+  <div class="qr-box"><img id="qr-img" src="" alt="QR code"></div>
+  <div class="footer"><span class="pulse"></span>This code refreshes automatically — always scan the current one</div>
+
+  <script>
+    async function refreshCode() {
+      try {
+        const res = await fetch('/api/warehouse-checkin/current-token');
+        const data = await res.json();
+        document.getElementById('qr-img').src = data.qr_code;
+      } catch (e) {
+        // Keep showing the last successfully loaded code on a transient network error
+        console.error('Failed to refresh warehouse check-in code', e);
+      }
+    }
+    refreshCode();
+    setInterval(refreshCode, 900000); // 15 minutes — matches the server's rotation window
+  </script>
+</body>
+</html>

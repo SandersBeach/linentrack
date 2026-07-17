@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Check In Bags</title>
+<style>
+  :root {
+    --teal: #1D9E75; --teal-light: #E1F5EE; --teal-dark: #0F6E56;
+    --coral: #D85A30; --coral-light: #FAECE7; --coral-dark: #993C1D;
+    --gray-50: #F7F7F5; --gray-100: #EFEFEC; --gray-200: #D8D8D3;
+    --gray-400: #9A9A94; --gray-700: #444441; --gray-900: #1A1A18;
+    --radius: 10px; --radius-sm: 6px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); margin: 0; padding: 1.25rem; min-height: 100vh; }
+  .wrap { max-width: 420px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  p.sub { color: var(--gray-700); font-size: 14px; margin-bottom: 1.5rem; }
+  .card { background: white; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+  input { width: 100%; padding: 14px; font-size: 16px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-family: var(--font); margin-bottom: 10px; }
+  button { width: 100%; padding: 14px; font-size: 15px; font-weight: 600; border: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font); }
+  .btn-primary { background: var(--teal); color: white; }
+  .btn-primary:disabled { background: var(--gray-200); color: var(--gray-400); }
+  .error-box { background: var(--coral-light); color: var(--coral-dark); padding: 12px 14px; border-radius: var(--radius-sm); font-size: 14px; margin-bottom: 1rem; }
+  .success-box { background: var(--teal-light); color: var(--teal-dark); padding: 12px 14px; border-radius: var(--radius-sm); font-size: 14px; margin-bottom: 1rem; }
+  .bag-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
+  .bag-row:last-child { border-bottom: none; }
+  .bag-home { font-size: 14px; font-weight: 600; }
+  .bag-tag { font-size: 11px; color: var(--gray-400); font-family: monospace; }
+  .badge-done { background: var(--teal-light); color: var(--teal-dark); font-size: 11px; padding: 3px 9px; border-radius: 12px; font-weight: 600; }
+  .center { text-align: center; padding: 2rem 1rem; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📦 Check In Your Bags</h1>
+  <p class="sub" id="page-sub">Enter your PIN to get started.</p>
+
+  <div id="err" class="error-box hidden"></div>
+
+  <!-- Step 1: PIN entry -->
+  <div id="step-pin" class="card">
+    <input type="tel" inputmode="numeric" id="pin-input" placeholder="Enter your 4-5 digit PIN" maxlength="6" autofocus>
+    <button class="btn-primary" onclick="submitPin()">Continue</button>
+  </div>
+
+  <!-- Step 2: bag list -->
+  <div id="step-bags" class="hidden">
+    <div class="card">
+      <label style="font-size:12px;color:var(--gray-700);text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:8px">Scan each bag tag</label>
+      <input type="text" id="bag-scan-input" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="characters">
+    </div>
+    <div class="card" id="bag-list-card">
+      <div id="bag-list"></div>
+    </div>
+  </div>
+
+  <div id="step-done" class="card center hidden">
+    <div style="font-size:36px;margin-bottom:8px">✅</div>
+    <div style="font-size:16px;font-weight:700">All bags checked in!</div>
+    <div style="font-size:13px;color:var(--gray-700);margin-top:4px">You're all set. Thanks!</div>
+  </div>
+
+  <div id="step-expired" class="card center hidden">
+    <div style="font-size:36px;margin-bottom:8px">⏱️</div>
+    <div style="font-size:15px;font-weight:700">This code has expired</div>
+    <div style="font-size:13px;color:var(--gray-700);margin-top:4px">Please scan the screen in the warehouse again to get a fresh code.</div>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token') || '';
+let session = null; // { session_id, cleaner_id, cleaner_name }
+let outBags = [];
+
+function showError(msg) {
+  const el = document.getElementById('err');
+  el.textContent = msg; el.classList.remove('hidden');
+}
+function clearError() { document.getElementById('err').classList.add('hidden'); }
+
+if (!token) {
+  document.getElementById('step-pin').classList.add('hidden');
+  document.getElementById('step-expired').classList.remove('hidden');
+  document.getElementById('page-sub').textContent = '';
+}
+
+async function submitPin() {
+  clearError();
+  const pin = document.getElementById('pin-input').value.trim();
+  if (!pin) { showError('Enter your PIN.'); return; }
+  try {
+    const res = await fetch('/api/warehouse-checkin/start-session', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, cleaner_pin: pin })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 401 && data.error && data.error.includes('expired')) {
+        document.getElementById('step-pin').classList.add('hidden');
+        document.getElementById('step-expired').classList.remove('hidden');
+        return;
+      }
+      showError(data.error || 'Something went wrong.');
+      return;
+    }
+    session = { session_id: data.session_id, cleaner_id: data.cleaner_id, cleaner_name: data.cleaner_name };
+    document.getElementById('page-sub').textContent = `Hi ${data.cleaner_name} — scan each bag you're returning.`;
+    document.getElementById('step-pin').classList.add('hidden');
+    document.getElementById('step-bags').classList.remove('hidden');
+    await loadOutBags();
+    document.getElementById('bag-scan-input').focus();
+  } catch (e) {
+    showError('Connection error — please try again.');
+  }
+}
+
+async function loadOutBags() {
+  const res = await fetch(`/api/cleaner/${session.cleaner_id}/out-bags`);
+  outBags = await res.json();
+  renderBagList();
+}
+
+function renderBagList() {
+  const el = document.getElementById('bag-list');
+  if (!outBags.length) {
+    document.getElementById('step-bags').classList.add('hidden');
+    document.getElementById('step-done').classList.remove('hidden');
+    return;
+  }
+  el.innerHTML = outBags.map(b => `
+    <div class="bag-row" id="bag-row-${b.id}">
+      <div><div class="bag-home">${b.home_name}</div><div class="bag-tag">${b.id}</div></div>
+    </div>`).join('');
+}
+
+document.getElementById('bag-scan-input').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const input = e.target;
+  let id = input.value.trim().toUpperCase();
+  input.value = '';
+  if (!id) return;
+  clearError();
+  const match = outBags.find(b => b.id.toUpperCase() === id);
+  if (!match) { showError(`Bag ${id} isn't checked out to you — check the tag and try again.`); return; }
+  try {
+    const res = await fetch('/api/warehouse-checkin/checkin-bag', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: session.session_id, cleaner_id: session.cleaner_id, bag_id: id })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 401) {
+        document.getElementById('step-bags').classList.add('hidden');
+        document.getElementById('step-expired').classList.remove('hidden');
+        return;
+      }
+      showError(data.error || 'Could not check that bag in.');
+      return;
+    }
+    outBags = outBags.filter(b => b.id.toUpperCase() !== id);
+    const row = document.getElementById('bag-row-' + match.id);
+    if (row) { row.innerHTML += '<span class="badge-done">✓ Checked in</span>'; setTimeout(() => row.remove(), 600); }
+    setTimeout(renderBagList, 650);
+  } catch (e) {
+    showError('Connection error — please try again.');
+  }
+});
+
+document.getElementById('pin-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitPin(); });
+</script>
+</body>
+</html>
