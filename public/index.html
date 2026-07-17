@@ -411,7 +411,7 @@ const TABS = {
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'store', 'po_request'],
   inspector: ['amenities_inventory', 'cleaning_inventory', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -427,7 +427,8 @@ const TAB_LABELS = {
   store: '🏪 Store',
   pack_list: '📋 Pack List',
   pack_flags: '⚠️ Flag Issue',
-  pack_emergency: '⚡ Last-Min Add'
+  pack_emergency: '⚡ Last-Min Add',
+  pack_productivity: '📊 Pack Productivity'
 };
 let currentTab = 'scan';
 let _availableTabs = [];
@@ -524,7 +525,8 @@ const MODULE_NAMES = {
   store: 'StoreCentral',
   pack_list: 'PackListCentral',
   pack_flags: 'PackListCentral',
-  pack_emergency: 'PackListCentral'
+  pack_emergency: 'PackListCentral',
+  pack_productivity: 'PackListCentral'
 };
 function showTab(t) {
   currentTab = t;
@@ -550,7 +552,8 @@ function showTab(t) {
     store: renderStore,
     pack_list: renderPackList,
     pack_flags: renderPackFlags,
-    pack_emergency: renderPackEmergency
+    pack_emergency: renderPackEmergency,
+    pack_productivity: renderPackProductivity
   };
   if (fns[t]) {
     document.getElementById('main-content').innerHTML = '<div style="padding:2.5rem;text-align:center;color:var(--gray-400);font-size:13px">Loading…</div>';
@@ -3139,11 +3142,53 @@ function triggerPackCelebration(dateLabel) {
   animate();
 }
 
+let _prodRange = null;
+
+function daysAgoISO(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+async function renderPackProductivity(gen) {
+  if (!_prodRange) _prodRange = { start: daysAgoISO(6), end: todayISO() };
+  const data = await fetch(`/api/pack-list/productivity?start=${_prodRange.start}&end=${_prodRange.end}`).then(r=>r.json());
+  if (_stale(gen)) return;
+  const maxPacked = Math.max(1, ...data.map(d=>d.properties_packed));
+  document.getElementById('main-content').innerHTML = `
+    <div class="card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:1rem">
+      <label style="margin:0">From</label>
+      <input type="date" id="prod-start" value="${_prodRange.start}" onchange="_prodRange.start=this.value;showTab('pack_productivity')" style="width:auto">
+      <label style="margin:0">To</label>
+      <input type="date" id="prod-end" value="${_prodRange.end}" onchange="_prodRange.end=this.value;showTab('pack_productivity')" style="width:auto">
+      <div style="display:flex;gap:6px;margin-left:auto">
+        <button class="btn btn-ghost btn-sm" onclick="_prodRange={start:daysAgoISO(6),end:todayISO()};showTab('pack_productivity')">Last 7 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="_prodRange={start:daysAgoISO(29),end:todayISO()};showTab('pack_productivity')">Last 30 days</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Properties packed by employee</div>
+      ${data.length ? data.map(d => `
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+            <strong>${d.packed_by}</strong>
+            <span>${d.properties_packed} propert${d.properties_packed===1?'y':'ies'} · ${d.bags_staged} bag${d.bags_staged===1?'':'s'}</span>
+          </div>
+          <div style="background:var(--gray-100);border-radius:6px;height:10px;overflow:hidden">
+            <div style="height:100%;background:var(--teal);width:${Math.round(d.properties_packed/maxPacked*100)}%"></div>
+          </div>
+        </div>`).join('') : '<div class="empty">No packing activity in this date range.</div>'}
+    </div>`;
+}
+
 function todayISO() {
   const d = new Date();
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 }
+
+let _packListRefreshTimer = null;
 
 async function renderPackList(gen) {
   if (!packListState.date) packListState.date = todayISO();
@@ -3161,6 +3206,27 @@ async function renderPackList(gen) {
   if (_stale(gen)) return;
   const unacked = emergAdds.filter(e => !e.acked_by.includes(_currentStaffName));
   renderPackListBody(unacked, invTask);
+
+  if (_packListRefreshTimer) clearInterval(_packListRefreshTimer);
+  _packListRefreshTimer = setInterval(async () => {
+    if (currentTab !== 'pack_list') { clearInterval(_packListRefreshTimer); _packListRefreshTimer = null; return; }
+    // Don't refresh out from under someone mid-scan or mid-flag
+    const packModalOpen = document.getElementById('modal-pack-cleaner')?.style.display === 'flex';
+    const flagModalOpen = document.getElementById('modal-pack-flag')?.style.display === 'flex';
+    if (packModalOpen || flagModalOpen) return;
+    try {
+      const [plR, emR, invR] = await Promise.all([
+        fetch('/api/pack-list?date=' + packListState.date),
+        fetch('/api/pack-list/emergency?date=' + packListState.date),
+        fetch('/api/inventory-counts/weekly-task-status')
+      ]);
+      const plData = await plR.json();
+      const emData = await emR.json();
+      const invData = await invR.json();
+      packListState.properties = plData.properties;
+      renderPackListBody(emData.filter(e => !e.acked_by.includes(_currentStaffName)), invData);
+    } catch (e) { /* silent — next tick will retry */ }
+  }, 30000);
 }
 
 function renderPackListBody(unacked, invTask) {
