@@ -3480,8 +3480,10 @@ async function uploadCleanerAssignments() {
     const res = await fetch('/api/pack-list/upload-assignments', { method: 'POST', body: formData });
     const data = await res.json();
     if (data.error) { msg.textContent = '✗ ' + data.error; msg.style.color = 'var(--coral-dark)'; return; }
-    msg.innerHTML = `✓ ${data.matched}/${data.total_rows} matched to a cleaner.` +
-      (data.unmatched.length ? `<br>Unmatched: ${data.unmatched.map(u => `${u.address} (${u.date}): "${u.raw_assignee}"`).join(', ')}` : '');
+    let parts = [`✓ ${data.matched}/${data.total_rows} matched to a cleaner.`];
+    if (data.unassigned) parts.push(`${data.unassigned} row(s) don't have a cleaner assigned in Breezeway yet — nothing to do, just re-upload once they're scheduled.`);
+    if (data.unmatched.length) parts.push(`⚠ ${data.unmatched.length} row(s) have a name that didn't match any cleaner: ` + data.unmatched.map(u => `${u.address} (${u.date}): "${u.raw_assignee}"`).join(', '));
+    msg.innerHTML = parts.join('<br>');
     msg.style.color = data.unmatched.length ? 'var(--coral-dark)' : 'var(--teal-dark)';
   } catch (e) {
     msg.textContent = '✗ Upload failed — please try again.'; msg.style.color = 'var(--coral-dark)';
