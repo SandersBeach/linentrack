@@ -2919,22 +2919,23 @@ def parse_breezeway_assignments_csv(content):
 def match_cleaner_name(raw_assignee, cleaners, aliases):
     """Try to resolve a Breezeway assignee string to a real cleaner record.
     Handles multiple assignees separated by ';', known name aliases (e.g.
-    'Mario Diaz' -> 'Mario Cruz'), and 'Person + Company' strings where the
+    'Mario Diaz' -> 'Mario Cruz'), 'Person + Company' strings where the
     SandersCentral cleaner name is a substring (e.g. 'Derron Ebanks A&D
-    Cleaning' contains 'A&D Cleaning')."""
+    Cleaning' contains 'A&D Cleaning'), and real-world whitespace quirks
+    (e.g. Breezeway exporting 'Elizabeth  Varo' with a double space)."""
     if not raw_assignee: return None
     for segment in raw_assignee.split(';'):
-        seg = segment.strip()
+        seg = ' '.join(segment.split())  # collapse any run of whitespace to a single space, and strip
         if not seg: continue
         key = seg.lower()
         if key in aliases:
-            target = aliases[key].lower()
+            target = ' '.join(aliases[key].split()).lower()
             for c in cleaners:
-                if c['name'].lower() == target: return c
+                if ' '.join(c['name'].split()).lower() == target: return c
         for c in cleaners:
-            if c['name'].lower() == key: return c
+            if ' '.join(c['name'].split()).lower() == key: return c
         for c in cleaners:
-            if c['name'].lower() in key: return c
+            if ' '.join(c['name'].split()).lower() in key: return c
     return None
 
 @app.route('/api/pack-list/upload-assignments', methods=['POST'])
@@ -2955,9 +2956,10 @@ def upload_pack_assignments():
     aliases = {r['breezeway_name'].lower(): r['cleaner_name'] for r in cur.fetchall()}
 
     ts = now_central()
-    matched, unmatched = 0, []
+    matched, unmatched, unassigned = 0, [], 0
     for row in rows:
-        cleaner = match_cleaner_name(row['raw_assignee'], cleaners, aliases)
+        raw = ' '.join((row['raw_assignee'] or '').split())
+        cleaner = match_cleaner_name(raw, cleaners, aliases)
         cur.execute("""
             INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at)
             VALUES (%s,%s,%s,%s,%s,%s)
@@ -2966,11 +2968,15 @@ def upload_pack_assignments():
                 raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at
         """, (row['address'], row['date'], cleaner['id'] if cleaner else None,
               cleaner['name'] if cleaner else None, row['raw_assignee'], ts))
-        if cleaner: matched += 1
-        else: unmatched.append({'address': row['address'], 'date': row['date'], 'raw_assignee': row['raw_assignee']})
+        if cleaner:
+            matched += 1
+        elif not raw:
+            unassigned += 1
+        else:
+            unmatched.append({'address': row['address'], 'date': row['date'], 'raw_assignee': row['raw_assignee']})
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Uploaded cleaner assignments', f'{matched}/{len(rows)} matched', request.form.get('staff_name', 'Unknown'))
-    return jsonify({'success': True, 'total_rows': len(rows), 'matched': matched, 'unmatched': unmatched})
+    return jsonify({'success': True, 'total_rows': len(rows), 'matched': matched, 'unassigned': unassigned, 'unmatched': unmatched})
 
 @app.route('/api/cleaner-aliases', methods=['GET'])
 def get_cleaner_aliases():
