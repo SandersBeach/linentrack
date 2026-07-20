@@ -416,7 +416,7 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
-const APP_BUILD = '2026-07-17-7'; // must match server.py's APP_BUILD — bump both together on deploy
+const APP_BUILD = '2026-07-17-9'; // must match server.py's APP_BUILD — bump both together on deploy
 
 function startVersionCheck() {
   setInterval(async () => {
@@ -1609,7 +1609,7 @@ function printSupplyQR() {
 // ── InventoryCount ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
-let _countSessions = { inventory_count: null, amenities_inventory: null };
+let _countSessions = { inventory_count: null, amenities_inventory: null, store: null };
 let _countScanBuffer = '';
 
 async function renderInventoryCount(gen) {
@@ -1692,9 +1692,12 @@ function renderCountInProgress() {
       </div>
     </div>`;
   }
+  const countTitle = _countReturnTarget === 'amenities_inventory' ? '📋 Amenities Count — Count in progress'
+    : _countReturnTarget === 'store' ? '📋 Store Count — Count in progress'
+    : '📋 InventoryCentral — Count in progress';
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">📋 InventoryCentral — Count in progress</div>
+      <div style="font-size:15px;font-weight:600">${countTitle}</div>
       <span class="badge badge-count">${counted}/${total} done</span>
     </div>
     <div class="card">
@@ -1742,6 +1745,7 @@ function cancelCount() {
   if (!confirm('Cancel this count? Progress will be lost.')) return;
   _countSessions[_countReturnTarget] = null;
   if (_countReturnTarget === 'amenities_inventory') showTab('amenities_inventory');
+  else if (_countReturnTarget === 'store') showTab(currentTab === 'store' ? 'store' : 'cleaning_inventory');
   else renderInventoryCount();
 }
 
@@ -1808,7 +1812,10 @@ function renderCountReport(data) {
     html+=`<div class="count-row"><div class="count-row-left"><div style="font-size:13px;font-weight:500">${item.label}</div><div style="font-size:11px;color:var(--gray-400)">Expected: ${item.expectedLabel}</div></div><div class="count-row-right"><span style="font-size:13px;font-weight:600">${done?(item.type==='loaner'?counted===1?'1 found':'Missing':counted+' '+item.unit):'—'}</span>${statusHtml}</div></div>`;
   });
   html += '</div>';
-  html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="${_countReturnTarget==='amenities_inventory'?"showTab('amenities_inventory')":"renderInventoryCount()"}">← Back to counts</button></div>`;
+  const backAction = _countReturnTarget==='amenities_inventory' ? "showTab('amenities_inventory')"
+    : _countReturnTarget==='store' ? `showTab('${currentTab==='store'?'store':'cleaning_inventory'}')`
+    : "renderInventoryCount()";
+  html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="${backAction}">← Back to counts</button></div>`;
   document.getElementById('main-content').innerHTML = html;
 }
 
@@ -1871,6 +1878,7 @@ async function renderHKSupplyShared(gen, title) {
         <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
         <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
         <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
+        <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">📋 Count</button>
         ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
       </div>
       <div id="store-body"></div>
@@ -2421,9 +2429,43 @@ async function renderStore(gen) {
       <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
       <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
       <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
+      <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">📋 Count</button>
     </div>
     <div id="store-body"></div>`;
   storeSubtab('inventory');
+}
+
+async function renderStoreCountHome() {
+  const el = document.getElementById('store-body');
+  if (!el) return;
+  if (_countSessions.store) { renderCountInProgress(); return; }
+  if (!_storeItems.length) { try { _storeItems = await fetch('/api/store/items').then(r=>r.json()); } catch(e) {} }
+  const pastCounts = await fetch('/api/inventory-counts').then(r=>r.json());
+  const storeCounts = pastCounts.filter(c => c.areas === 'store');
+  let pastHtml = '';
+  if (storeCounts.length) {
+    pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
+      storeCounts.slice(0,10).map(c=>{
+        const variances = c.variances || 0;
+        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color: var(--green-dark)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id},'store')">View</button></div>`;
+      }).join('') + '</div>';
+  }
+  el.innerHTML = `<div class="card">
+    <div class="card-title">Start new count</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Scan each item and enter the quantity you physically find — no expected counts shown, so this stays an honest blind count.</p>
+    <button class="btn btn-primary btn-full" onclick="startStoreCount()">Begin count</button>
+  </div>${pastHtml}`;
+}
+
+async function startStoreCount() {
+  _countReturnTarget = 'store';
+  if (!_storeItems.length) { try { _storeItems = await fetch('/api/store/items').then(r=>r.json()); } catch(e) {} }
+  const items = _storeItems.map(s => ({
+    id: 'ST-'+s.id, label: s.name, tag: s.category, type: 'supply',
+    expected: s.quantity, expectedLabel: `${s.quantity} in stock`, unit: 'ea', category: s.category, supplyId: s.id
+  }));
+  _countSessions.store = { areas: ['store'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
+  renderCountInProgress();
 }
 
 async function storeSubtab(tab) {
@@ -2433,6 +2475,7 @@ async function storeSubtab(tab) {
   if (tab==='inventory') renderStoreInventory();
   else if (tab==='loans') renderActiveLoans();
   else if (tab==='log') renderStoreLog();
+  else if (tab==='count') renderStoreCountHome();
 }
 
 // ── Inventory ────────────────────────────────────────────────
