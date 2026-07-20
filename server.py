@@ -186,6 +186,10 @@ def init_db():
             low_stock_threshold INTEGER NOT NULL DEFAULT 5, unit TEXT NOT NULL DEFAULT 'units',
             created_at TEXT NOT NULL, qr_code TEXT
         );
+        CREATE TABLE IF NOT EXISTS supply_item_contents (
+            id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES hk_supply_items(id) ON DELETE CASCADE,
+            content_text TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS hk_supply_transactions (
             id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES hk_supply_items(id),
             action TEXT NOT NULL, quantity INTEGER NOT NULL, quantity_after INTEGER NOT NULL,
@@ -1379,6 +1383,29 @@ def update_hk_supply(sid):
     conn.commit(); cur.close(); conn.close()
     log_audit('HousekeepingSupplyCentral', 'Edited supply item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
+
+@app.route('/api/hk-supplies/<int:sid>/contents', methods=['GET'])
+def get_supply_contents(sid):
+    """What's inside an item (e.g. what actually goes in a Kitchen Amenity
+    Box) — a simple editable checklist, since contents change over time."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT content_text FROM supply_item_contents WHERE supply_id=%s ORDER BY sort_order,id", (sid,))
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return jsonify([r['content_text'] for r in rows])
+
+@app.route('/api/hk-supplies/<int:sid>/contents', methods=['PUT'])
+def update_supply_contents(sid):
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    items = [x.strip() for x in (data.get('items') or []) if x.strip()]
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM supply_item_contents WHERE supply_id=%s", (sid,))
+    for i, text in enumerate(items):
+        cur.execute("INSERT INTO supply_item_contents (supply_id,content_text,sort_order) VALUES (%s,%s,%s)", (sid, text, i))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('HousekeepingSupplyCentral', 'Updated item contents', str(sid), resolve_performer(data))
+    return jsonify({'success': True})
 
 @app.route('/api/hk-supplies/<int:sid>/transaction', methods=['POST'])
 def hk_supply_transaction(sid):
