@@ -3261,15 +3261,23 @@ function triggerPackCelebration(dateLabel) {
 
 let _prodRange = null;
 
-function daysAgoISO(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
+function daysAgoISO(baseDateStr, n) {
+  const d = new Date(baseDateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+async function setProdRangeLast(days) {
+  const today = await getServerToday();
+  _prodRange = { start: daysAgoISO(today, days - 1), end: today };
+  showTab('pack_productivity');
 }
 
 async function renderPackProductivity(gen) {
-  if (!_prodRange) _prodRange = { start: daysAgoISO(6), end: todayISO() };
+  if (!_prodRange) {
+    const today = await getServerToday();
+    _prodRange = { start: daysAgoISO(today, 6), end: today };
+  }
   const data = await fetch(`/api/pack-list/productivity?start=${_prodRange.start}&end=${_prodRange.end}`).then(r=>r.json());
   if (_stale(gen)) return;
   const maxPacked = Math.max(1, ...data.map(d=>d.properties_packed));
@@ -3280,8 +3288,8 @@ async function renderPackProductivity(gen) {
       <label style="margin:0">To</label>
       <input type="date" id="prod-end" value="${_prodRange.end}" onchange="_prodRange.end=this.value;showTab('pack_productivity')" style="width:auto">
       <div style="display:flex;gap:6px;margin-left:auto">
-        <button class="btn btn-ghost btn-sm" onclick="_prodRange={start:daysAgoISO(6),end:todayISO()};showTab('pack_productivity')">Last 7 days</button>
-        <button class="btn btn-ghost btn-sm" onclick="_prodRange={start:daysAgoISO(29),end:todayISO()};showTab('pack_productivity')">Last 30 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="setProdRangeLast(7)">Last 7 days</button>
+        <button class="btn btn-ghost btn-sm" onclick="setProdRangeLast(30)">Last 30 days</button>
       </div>
     </div>
     <div class="card">
@@ -3305,10 +3313,25 @@ function todayISO() {
   return local.toISOString().slice(0, 10);
 }
 
+let _serverTodayCache = null;
+async function getServerToday() {
+  // Single source of truth for "today" — the server's Central-time clock,
+  // never the device's own timezone (which can silently drift and show the
+  // wrong day's Pack List if any device's clock/timezone isn't Central).
+  if (_serverTodayCache) return _serverTodayCache;
+  try {
+    const data = await fetch('/api/today').then(r => r.json());
+    _serverTodayCache = data.date;
+  } catch (e) {
+    _serverTodayCache = todayISO(); // only falls back to device time if the server is unreachable
+  }
+  return _serverTodayCache;
+}
+
 let _packListRefreshTimer = null;
 
 async function renderPackList(gen) {
-  if (!packListState.date) packListState.date = todayISO();
+  if (!packListState.date) packListState.date = await getServerToday();
   const [plRes, clRes, emRes, invRes] = await Promise.all([
     fetch('/api/pack-list?date=' + packListState.date),
     fetch('/api/cleaners'),
@@ -3386,7 +3409,7 @@ function renderPackListBody(unacked, invTask) {
   <div id="pl-cards"></div>`;
   document.getElementById('main-content').innerHTML = html;
   const cardsEl = document.getElementById('pl-cards');
-  if (!props.length) { cardsEl.innerHTML = '<div class="empty">No arrivals scheduled for this date.</div>'; return; }
+  if (!props.length) { cardsEl.innerHTML = '<div class="empty">No checkouts scheduled for this date.</div>'; return; }
   cardsEl.innerHTML = props.map(p => {
     const f = p.formula;
     return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
@@ -3544,7 +3567,7 @@ async function submitPackFlag() {
   if (!item_name) { alert('Enter an item'); return; }
   const res = await fetch('/api/pack-list/flags', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, item_name, issue_type, notes, flagged_by: _currentStaffName, pack_date: packListState.date || todayISO() })
+    body: JSON.stringify({ address, item_name, issue_type, notes, flagged_by: _currentStaffName, pack_date: packListState.date || await getServerToday() })
   });
   document.getElementById('modal-pack-flag').style.display = 'none';
   if (res.ok) showTab(currentTab);
@@ -3591,7 +3614,7 @@ async function resolvePackFlag(id) {
 }
 
 async function renderPackEmergency(gen) {
-  if (!packListState.date) packListState.date = todayISO();
+  if (!packListState.date) packListState.date = await getServerToday();
   const res = await fetch('/api/pack-list/emergency?date=' + packListState.date);
   const rows = await res.json();
   if (_stale(gen)) return;
