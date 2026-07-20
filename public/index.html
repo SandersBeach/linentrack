@@ -248,9 +248,6 @@
   <div class="login-card">
     <div class="login-logo"><span>Sanders</span>Central</div>
     <div class="login-sub">Warehouse · Admin · Maintenance · Coordinator</div>
-    <div style="margin-bottom:1.25rem">
-      <button class="btn" style="width:100%;background:var(--teal-light);color:var(--teal-dark);border:0.5px solid var(--teal-mid);font-size:13px;font-weight:600;padding:10px;justify-content:center" onclick="showPOPreLogin()">📝 Submit a Purchase Request</button>
-    </div>
     <div class="pin-dots" id="pin-dots">
       <div class="pin-dot" id="d0"></div>
       <div class="pin-dot" id="d1"></div>
@@ -479,10 +476,10 @@ let _placeOrderItems = [];
 
 const TABS = {
   warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders', 'store', 'po_request'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders', 'store'],
   inspector: ['amenities_inventory', 'store'],
-  coordinator: ['inventory_count', 'orders', 'po_request'],
-  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  coordinator: ['inventory_count', 'orders'],
+  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
