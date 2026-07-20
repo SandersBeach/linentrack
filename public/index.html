@@ -416,7 +416,7 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
-const APP_BUILD = '2026-07-17-5'; // must match server.py's APP_BUILD — bump both together on deploy
+const APP_BUILD = '2026-07-17-6'; // must match server.py's APP_BUILD — bump both together on deploy
 
 function startVersionCheck() {
   setInterval(async () => {
@@ -451,7 +451,7 @@ let _placeOrderItems = [];
 const TABS = {
   warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'log', 'amenities_inventory', 'orders'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders', 'store', 'po_request'],
-  inspector: ['amenities_inventory', 'cleaning_inventory', 'po_request'],
+  inspector: ['amenities_inventory', 'store'],
   coordinator: ['inventory_count', 'po_request'],
   admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
