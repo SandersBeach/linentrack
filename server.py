@@ -1,4 +1,4 @@
-import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets
+import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets, hashlib
 from flask import Flask, request, jsonify, send_from_directory, Response
 from datetime import datetime, timedelta
 import psycopg2
@@ -593,7 +593,17 @@ def make_loaner_qr(loaner_id):
 
 # ── Static routes ─────────────────────────────────────────────────────────────
 
-APP_BUILD = '2026-07-17-9'  # bump this string with each meaningful frontend deploy
+def _compute_app_build():
+    """Auto-computed from the actual deployed index.html, so it's never wrong
+    and never depends on remembering to manually bump a version string."""
+    try:
+        index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'public', 'index.html')
+        with open(index_path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()[:12]
+    except Exception:
+        return 'unknown'
+
+APP_BUILD = _compute_app_build()
 
 @app.route('/api/app-version', methods=['GET'])
 def app_version():
@@ -2845,11 +2855,13 @@ def decide_po_request(rid):
 
 # ── PackListCentral ───────────────────────────────────────────────────────────
 # Daily/future-dated linen packing checklist per property, sourced from real
-# reservation arrivals (forecast_reservations) and real per-property linen
-# formulas (pack_list_formula, loaded from the housekeeping packing list
-# spreadsheet). Marking a property "packed" decrements the real Housekeeping
-# Supply stock (hk_supply_items, via forecast_pack_list.supplies — the same
-# numbers ForecastCentral already uses) AND stages the specific scanned bag
+# reservation checkouts (forecast_reservations, matched on departure date —
+# packing happens after the outgoing guest leaves, not when the next one
+# arrives) and real per-property linen formulas (pack_list_formula, loaded
+# from the housekeeping packing list spreadsheet). Marking a property "packed"
+# decrements the real Housekeeping Supply stock (hk_supply_items, via
+# forecast_pack_list.supplies — the same numbers ForecastCentral already uses)
+# AND stages the specific scanned bag
 # tag(s) for a chosen cleaner, feeding straight into the existing pickup flow.
 # Linen counts themselves are NOT tracked as inventory — just shown as a
 # checklist — per Kristin's call that it's not worth maintaining that stock.
@@ -3079,16 +3091,30 @@ def pack_list_productivity():
     result = sorted(summary.values(), key=lambda x: -x['properties_packed'])
     return jsonify(result)
 
+@app.route('/api/today', methods=['GET'])
+def api_today():
+    """The single source of truth for 'what day is it' — Central time, server
+    clock. Nothing in the frontend should compute today's date from the
+    device's own clock/timezone; that drifts from the business's actual
+    timezone whenever a device is set to something else."""
+    return jsonify({'date': today_central()})
+
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
     """Daily (or future-dated) pack list: every property with a reservation
-    arriving that day, plus any last-minute adds, matched to its real linen
-    formula and today's packed/staged status."""
+    CHECKING OUT that day, plus any last-minute adds, matched to its real
+    linen formula and today's packed/staged status. Deliberately anchored to
+    checkout/departure date, not check-in — packing happens after the
+    outgoing guest leaves and the home gets cleaned, which is a different
+    date than arrival whenever a home sits empty a night or more between
+    guests. (ForecastCentral's own amenity-box forecasting is intentionally
+    unaffected by this — it stays anchored to check-in date, since that's
+    forward-looking prep for who's arriving, not a record of a turnover.)"""
     date_str = (request.args.get('date') or today_central()).strip()
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     cur.execute("""SELECT DISTINCT unit_address FROM forecast_reservations
-                   WHERE TO_DATE(arrive,'MM/DD/YYYY') = %s::date""", (date_str,))
+                   WHERE TO_DATE(depart,'MM/DD/YYYY') = %s::date""", (date_str,))
     addrs = set(r['unit_address'].lower().strip() for r in cur.fetchall())
 
     cur.execute("SELECT * FROM pack_emergency_adds WHERE pack_date=%s ORDER BY id DESC", (date_str,))
