@@ -1695,7 +1695,6 @@ PACK_FORMULA_SEED = [
     {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
     {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
     {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '202 east royal fern way', 'property_name': '202 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
     {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8},
     {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8},
     {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8},
