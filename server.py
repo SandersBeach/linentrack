@@ -291,6 +291,10 @@ def init_db():
             towels INTEGER DEFAULT 0, hand INTEGER DEFAULT 0, wash INTEGER DEFAULT 0,
             mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0, updated_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS pack_supply_deductions (
+            address TEXT NOT NULL, pack_date TEXT NOT NULL, deducted_at TEXT NOT NULL,
+            PRIMARY KEY (address, pack_date)
+        );
         CREATE TABLE IF NOT EXISTS pack_list_status (
             id SERIAL PRIMARY KEY, address TEXT NOT NULL, pack_date TEXT NOT NULL,
             packed_by TEXT NOT NULL, packed_at TEXT NOT NULL, staged_bag_ids TEXT,
@@ -588,6 +592,12 @@ def make_loaner_qr(loaner_id):
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
 
 # ── Static routes ─────────────────────────────────────────────────────────────
+
+APP_BUILD = '2026-07-17-5'  # bump this string with each meaningful frontend deploy
+
+@app.route('/api/app-version', methods=['GET'])
+def app_version():
+    return jsonify({'build': APP_BUILD})
 
 def _no_cache_html(filename):
     """Serve an HTML page with headers that force the browser to always fetch
@@ -2847,6 +2857,51 @@ def decide_po_request(rid):
 def today_central():
     return now_central()[:10]
 
+@app.route('/api/pack-list/formula/all', methods=['GET'])
+def get_all_pack_formulas():
+    """Every property's packing formula, plus every home that doesn't have
+    one yet — independent of any specific day's pack list, so a formula can
+    be added/edited for a property regardless of whether it currently has
+    an upcoming reservation."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM pack_list_formula ORDER BY property_name")
+    formulas = cur.fetchall()
+    cur.execute("SELECT id, name FROM homes ORDER BY name")
+    homes = cur.fetchall()
+    cur.close(); conn.close()
+    formula_keys = {f['address'] for f in formulas}
+    homes_without = [h for h in homes if h['name'].lower().strip() not in formula_keys]
+    return jsonify({'formulas': formulas, 'homes_without_formula': homes_without})
+
+@app.route('/api/pack-list/formula', methods=['POST'])
+def upsert_single_pack_formula():
+    """Add or edit one property's packing formula directly — no need to
+    wait on a bulk re-seed/re-deploy for a single new/changed property."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    property_name = (data.get('property_name') or '').strip()
+    if not property_name:
+        return jsonify({'error': 'Property name is required'}), 400
+    address = property_name.lower().strip()
+    fields = {}
+    for k in ('king','queen','twin','towels','hand','wash','mats','pool'):
+        try: fields[k] = int(data.get(k, 0) or 0)
+        except (TypeError, ValueError): fields[k] = 0
+    conn = get_db(); cur = conn.cursor()
+    ts = now_central()
+    cur.execute("""
+        INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,updated_at)
+        VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(ts)s)
+        ON CONFLICT (address) DO UPDATE SET
+            property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
+            twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
+            mats=EXCLUDED.mats, pool=EXCLUDED.pool, updated_at=EXCLUDED.updated_at
+    """, {'address': address, 'property_name': property_name, 'ts': ts, **fields})
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Added/edited packing formula', property_name, resolve_performer(data))
+    return jsonify({'success': True})
+
 @app.route('/api/pack-list/formula-match-check', methods=['GET'])
 def pack_formula_match_check():
     """Two-way audit between pack_list_formula and homes: catches formula
@@ -3081,7 +3136,9 @@ def pack_property():
     """Mark a property packed: decrements real linen stock AND stages the
     specific bag tag(s) that were scanned for this turnover — never
     'whatever's available', since bag count varies and each tag needs to
-    be individually accounted for (that's how shortages at return get caught)."""
+    be individually accounted for (that's how shortages at return get caught).
+    Supply deduction only ever happens once per property+date, tracked in
+    pack_supply_deductions, so an undo-then-redo cycle can't double-count."""
     data = request.json or {}
     address = (data.get('address') or '').strip()
     pack_date = (data.get('pack_date') or '').strip()
@@ -3123,26 +3180,33 @@ def pack_property():
 
     ts = now_central()
     shortfalls = []
-    # Pull real HK Supply usage for this property from the same table ForecastCentral
-    # already uses (forecast_pack_list.supplies), and decrement the real hk_supply_items
-    # stock — this is the inventory that actually matters for forecasting.
-    cur.execute("SELECT supplies FROM forecast_pack_list WHERE address=%s", (addr_key,))
-    fpl = cur.fetchone()
-    if fpl and fpl['supplies']:
-        for item_name, qty_needed in fpl['supplies'].items():
-            if not qty_needed: continue
-            cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
-            item = cur.fetchone()
-            if not item: continue
-            new_qty = item['quantity'] - qty_needed
-            if new_qty < 0:
-                shortfalls.append({'item': item_name, 'needed': qty_needed, 'available': item['quantity']})
-                new_qty = 0
-            cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s", (new_qty, item['id']))
-            cur.execute(
-                "INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,'pack_deduct',%s,%s,%s,%s,%s)",
-                (item['id'], qty_needed, new_qty, packed_by, ts, f'Packed: {address}')
-            )
+    # Only deduct supplies once per property+date, ever — even across an undo/redo
+    # cycle. Undo corrects a bag/cleaner mistake; it doesn't mean the linens
+    # weren't actually used, so a redo must not decrement a second time.
+    cur.execute("SELECT 1 FROM pack_supply_deductions WHERE address=%s AND pack_date=%s", (addr_key, pack_date))
+    already_deducted = cur.fetchone() is not None
+    if not already_deducted:
+        cur.execute("SELECT supplies FROM forecast_pack_list WHERE address=%s", (addr_key,))
+        fpl = cur.fetchone()
+        if fpl and fpl['supplies']:
+            for item_name, qty_needed in fpl['supplies'].items():
+                if not qty_needed: continue
+                cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
+                item = cur.fetchone()
+                if not item: continue
+                new_qty = item['quantity'] - qty_needed
+                if new_qty < 0:
+                    shortfalls.append({'item': item_name, 'needed': qty_needed, 'available': item['quantity']})
+                    new_qty = 0
+                cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s", (new_qty, item['id']))
+                cur.execute(
+                    "INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,'pack_deduct',%s,%s,%s,%s,%s)",
+                    (item['id'], qty_needed, new_qty, packed_by, ts, f'Packed: {address}')
+                )
+        cur.execute(
+            "INSERT INTO pack_supply_deductions (address,pack_date,deducted_at) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+            (addr_key, pack_date, ts)
+        )
 
     for bag_id in bag_ids:
         cur.execute(
@@ -3166,8 +3230,10 @@ def pack_property():
 @app.route('/api/pack-list/unpack', methods=['POST'])
 def unpack_property():
     """Undo a pack — only allowed if the bag(s) haven't been picked up yet.
-    Does NOT auto-restore linen stock (avoids double-counting); restock
-    manually via the Linen Inventory tab if needed."""
+    Does NOT restore Housekeeping Supply stock (undo corrects a bag/cleaner
+    mistake, not the fact that linens were actually used) — and a later
+    redo of the same property+date won't decrement again either, since
+    pack_supply_deductions tracks that it already happened."""
     data = request.json or {}
     address = (data.get('address') or '').strip().lower()
     pack_date = (data.get('pack_date') or '').strip()
