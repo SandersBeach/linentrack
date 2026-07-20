@@ -593,7 +593,7 @@ def make_loaner_qr(loaner_id):
 
 # ── Static routes ─────────────────────────────────────────────────────────────
 
-APP_BUILD = '2026-07-17-7'  # bump this string with each meaningful frontend deploy
+APP_BUILD = '2026-07-17-9'  # bump this string with each meaningful frontend deploy
 
 @app.route('/api/app-version', methods=['GET'])
 def app_version():
