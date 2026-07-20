@@ -372,6 +372,27 @@
   </div>
 </div>
 
+<div id="modal-contents" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box">
+    <h3 id="contents-modal-title">Contents</h3>
+    <input type="hidden" id="contents-supply-id">
+    <div id="contents-view-mode" style="display:none">
+      <div id="contents-view-list" style="margin-top:10px"></div>
+      <div class="modal-actions" style="margin-top:1rem">
+        <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-contents').style.display='none'">Close</button>
+      </div>
+    </div>
+    <div id="contents-edit-mode" style="display:none">
+      <label>One item per line</label>
+      <textarea id="contents-textarea" rows="8" style="width:100%;font-family:inherit;font-size:14px;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm)" placeholder="e.g.&#10;2 Amavida coffee packets&#10;1 bar Molton Brown soap&#10;2 dishwasher pods"></textarea>
+      <div class="modal-actions" style="margin-top:1rem">
+        <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-contents').style.display='none'">Cancel</button>
+        <button class="btn btn-primary" style="flex:1" onclick="saveContents()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="modal-add-formula" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal-box">
     <h3 id="af-modal-title">Add packing formula</h3>
@@ -558,7 +579,7 @@ function logout() {
   ['modal-supply-item','modal-supply-tx','modal-supply-qr'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
-  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag','modal-add-formula'].forEach(id => {
+  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag','modal-add-formula','modal-contents'].forEach(id => {
     const el = document.getElementById(id); if (el) el.remove();
   });
   document.getElementById('login').style.display = 'flex';
@@ -1983,6 +2004,7 @@ function renderHKCards() {
       <div class="supply-actions">
         <button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
+        <button class="btn btn-ghost" onclick="showContentsModal(${item.id})">📦</button>
         ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
@@ -2055,6 +2077,38 @@ function showHKTxModal(supplyId, action) {
   disp.querySelector('strong').textContent = _currentStaffName || 'Unknown (please log out and back in)';
   document.getElementById('modal-supply-tx').dataset.target = 'hk';
   document.getElementById('modal-supply-tx').style.display = 'flex';
+}
+
+async function showContentsModal(supplyId) {
+  const item = _hkSupplies.find(i => i.id === supplyId);
+  const itemName = item ? item.name : 'Item';
+  document.getElementById('contents-supply-id').value = supplyId;
+  document.getElementById('contents-modal-title').textContent = `📦 ${itemName} — Contents`;
+  const items = await fetch(`/api/hk-supplies/${supplyId}/contents`).then(r => r.json()).catch(() => []);
+  const isAdmin = userRoles.includes('admin');
+  document.getElementById('contents-view-mode').style.display = isAdmin ? 'none' : 'block';
+  document.getElementById('contents-edit-mode').style.display = isAdmin ? 'block' : 'none';
+  if (isAdmin) {
+    document.getElementById('contents-textarea').value = items.join('\n');
+  } else {
+    const listEl = document.getElementById('contents-view-list');
+    listEl.innerHTML = items.length
+      ? items.map(i => `<div class="row-sub" style="padding:4px 0">• ${i}</div>`).join('')
+      : '<div class="empty">No contents listed yet.</div>';
+  }
+  document.getElementById('modal-contents').style.display = 'flex';
+}
+
+async function saveContents() {
+  const supplyId = document.getElementById('contents-supply-id').value;
+  const items = document.getElementById('contents-textarea').value.split('\n');
+  const res = await fetch(`/api/hk-supplies/${supplyId}/contents`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, pin: _currentPin })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error'); return; }
+  document.getElementById('modal-contents').style.display = 'none';
 }
 
 async function showHKQR(supplyId) {
