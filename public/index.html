@@ -372,6 +372,28 @@
   </div>
 </div>
 
+<div id="modal-add-formula" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-box">
+    <h3 id="af-modal-title">Add packing formula</h3>
+    <label>Property name</label>
+    <input id="af-property-name" placeholder="Must match a home name exactly">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+      <div><label>King sets</label><input type="number" id="af-king" value="0" min="0"></div>
+      <div><label>Queen sets</label><input type="number" id="af-queen" value="0" min="0"></div>
+      <div><label>Twin sets</label><input type="number" id="af-twin" value="0" min="0"></div>
+      <div><label>Bath towels</label><input type="number" id="af-towels" value="0" min="0"></div>
+      <div><label>Hand towels</label><input type="number" id="af-hand" value="0" min="0"></div>
+      <div><label>Wash cloths</label><input type="number" id="af-wash" value="0" min="0"></div>
+      <div><label>Bath mats</label><input type="number" id="af-mats" value="0" min="0"></div>
+      <div><label>Pool towels</label><input type="number" id="af-pool" value="0" min="0"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1rem">
+      <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-add-formula').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" onclick="submitAddFormula()">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal-pack-flag" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal-box">
     <h3>Flag a supply issue</h3>
@@ -394,6 +416,26 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
+const APP_BUILD = '2026-07-17-5'; // must match server.py's APP_BUILD — bump both together on deploy
+
+function startVersionCheck() {
+  setInterval(async () => {
+    try {
+      const res = await fetch('/api/app-version');
+      const data = await res.json();
+      if (data.build && data.build !== APP_BUILD && !document.getElementById('update-banner')) {
+        const banner = document.createElement('div');
+        banner.id = 'update-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--coral);color:#fff;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;z-index:99999;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2)';
+        banner.textContent = '🔄 A new version is ready — tap here to refresh';
+        banner.onclick = () => window.location.reload(true);
+        document.body.prepend(banner);
+      }
+    } catch (e) { /* silent — try again next interval */ }
+  }, 120000); // check every 2 minutes
+}
+startVersionCheck();
+
 let role = null;
 let pinVal = '';
 let _currentPin = '';
@@ -408,16 +450,16 @@ let _placeOrderItems = [];
 
 const TABS = {
   warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'log', 'amenities_inventory', 'orders'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'orders', 'store', 'po_request'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders', 'store', 'po_request'],
   inspector: ['amenities_inventory', 'cleaning_inventory', 'po_request'],
   coordinator: ['inventory_count', 'po_request'],
-  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'supply_status', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
+  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'po_request', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
   loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
-  supply_scan: '🧰 SupplyCentral', supply_status: 'Supply Inventory',
+  supply_scan: '🧰 SupplyCentral',
   inventory_count: '📋 InventoryCentral',
   po_request: '📝 POCentral',
   amenities_inventory: '🧴 Amenities Inventory',
@@ -487,7 +529,7 @@ function logout() {
   ['modal-supply-item','modal-supply-tx','modal-supply-qr'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
-  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag'].forEach(id => {
+  ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag','modal-add-formula'].forEach(id => {
     const el = document.getElementById(id); if (el) el.remove();
   });
   document.getElementById('login').style.display = 'flex';
@@ -515,7 +557,6 @@ const MODULE_NAMES = {
   loaner_status: 'LoanerCentral',
   loaner_log: 'LoanerCentral',
   supply_scan: 'SupplyCentral',
-  supply_status: 'SupplyCentral',
   inventory_count: 'InventoryCentral',
   po_request: 'POCentral',
   amenities_inventory: 'HousekeepingSupplyCentral',
@@ -542,7 +583,7 @@ function showTab(t) {
     scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes,
     log: renderLog, cleaners: renderCleaners, settings: renderSettings,
     loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog,
-    supply_scan: renderSupplyScan, supply_status: renderSupplyStatus,
+    supply_scan: renderSupplyScan,
     inventory_count: renderInventoryCount,
     po_request: renderPORequest,
     amenities_inventory: renderAmenitiesInventory,
@@ -1045,6 +1086,10 @@ async function renderSettings(gen) {
     <div id="seed-formula-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="checkPackFormulaMatches()">Check for unmatched addresses</button>
     <div id="pl-match-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div></div>
+    <div class="card"><div class="card-title">Manage packing formulas</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Add or edit any property's formula directly — doesn't depend on it having an upcoming reservation. Use this when a homeowner changes their bed layout, or to fill in a property that's never had a formula.</p>
+    <input id="mf-search" placeholder="Search properties..." oninput="renderManageFormulasList()" style="margin-bottom:10px">
+    <div id="manage-formulas-body"></div></div>
     <div class="card"><div class="card-title">Upload cleaner assignments</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Upload a Breezeway (or similar) task export. Pre-fills the assigned cleaner on the Pack List so Kim/April don't have to pick one manually — still overridable. Re-upload any time assignments change.</p>
     <div id="pl-assign-drop" ondragover="fcDragOver(event,'pl-assign-drop')" ondragleave="fcDragLeave('pl-assign-drop')" ondrop="fcDrop(event,'pl-assign-file','pl-assign-drop','pl-assign-name')"
@@ -1104,6 +1149,7 @@ async function renderSettings(gen) {
     </div>`;
   document.getElementById('main-content').innerHTML = html;
   loadCleanerAliases();
+  renderManageFormulas();
 }
 async function toggleInventoryReminder() {
   const btn = document.getElementById('inv-reminder-toggle-btn');
@@ -1444,12 +1490,6 @@ async function loadSupplyLog() {
     const isOut=r.action==='take';
     return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'📤 Took':'📥 Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
   }).join('') + '</div>';
-}
-
-async function renderSupplyStatus(gen) {
-  await loadSupplies();
-  if (_stale(gen)) return;
-  renderSupplyScan(gen);
 }
 
 function showAddSupplyModal() {
@@ -3277,7 +3317,7 @@ function renderPackListBody(unacked, invTask) {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-weight:600;font-size:14px">${p.property_name}</div>
-          ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}</div>` : '<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>'}
+          ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}${userRoles.includes('admin') ? ` · <a href="#" onclick="openEditFormulaModal('${p.address}');return false;" style="color:var(--teal)">✏️ edit</a>` : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property${userRoles.includes('admin') ? ` — <a href="#" onclick="openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`}
         </div>
         <div style="text-align:right">
           ${p.packed
@@ -3375,6 +3415,41 @@ async function undoPack(address) {
 async function ackEmergency(id) {
   await fetch(`/api/pack-list/emergency/${id}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name: _currentStaffName }) });
   showTab('pack_list');
+}
+
+let _allFormulas = [];
+
+function openAddFormulaModal(propertyName) {
+  document.getElementById('af-modal-title').textContent = 'Add packing formula';
+  document.getElementById('af-property-name').value = propertyName || '';
+  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => document.getElementById('af-'+f).value = 0);
+  document.getElementById('modal-add-formula').style.display = 'flex';
+}
+function openEditFormulaModal(address) {
+  const p = packListState.properties.find(x => x.address === address);
+  let formula = p ? p.formula : null;
+  let propertyName = p ? p.property_name : null;
+  if (!formula) {
+    const alt = _allFormulas.find(x => x.address === address);
+    if (alt) { formula = alt; propertyName = alt.property_name; }
+  }
+  if (!formula) { alert('Could not find that property\'s formula to edit.'); return; }
+  document.getElementById('af-modal-title').textContent = 'Edit packing formula';
+  document.getElementById('af-property-name').value = propertyName;
+  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => document.getElementById('af-'+f).value = formula[f] || 0);
+  document.getElementById('modal-add-formula').style.display = 'flex';
+}
+async function submitAddFormula() {
+  const property_name = document.getElementById('af-property-name').value.trim();
+  if (!property_name) { alert('Enter a property name'); return; }
+  const body = { property_name, pin: _currentPin };
+  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => body[f] = document.getElementById('af-'+f).value);
+  const res = await fetch('/api/pack-list/formula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error'); return; }
+  document.getElementById('modal-add-formula').style.display = 'none';
+  if (currentTab === 'settings') renderManageFormulas();
+  else showTab('pack_list');
 }
 
 function openFlagModal(address) {
@@ -3534,6 +3609,31 @@ async function checkPackFormulaMatches() {
   } catch (e) {
     msg.textContent = '✗ Check failed — please try again.'; msg.style.color = 'var(--coral-dark)';
   }
+}
+
+async function renderManageFormulas() {
+  const data = await fetch('/api/pack-list/formula/all').then(r => r.json());
+  _allFormulas = data.formulas;
+  _homesWithoutFormula = data.homes_without_formula;
+  renderManageFormulasList();
+}
+
+let _homesWithoutFormula = [];
+
+function renderManageFormulasList() {
+  const el = document.getElementById('manage-formulas-body');
+  if (!el) return;
+  const q = (document.getElementById('mf-search')?.value || '').toLowerCase().trim();
+  const formulas = q ? _allFormulas.filter(f => f.property_name.toLowerCase().includes(q)) : _allFormulas;
+  const missing = q ? _homesWithoutFormula.filter(h => h.name.toLowerCase().includes(q)) : _homesWithoutFormula;
+  let html = '';
+  if (missing.length) {
+    html += `<div style="font-size:12px;font-weight:600;color:var(--coral-dark);margin:10px 0 4px">No formula yet (${missing.length})</div>`;
+    html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
+  }
+  html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  el.innerHTML = html;
 }
 
 async function seedPackFormula() {
