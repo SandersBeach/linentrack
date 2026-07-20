@@ -416,7 +416,7 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
-const APP_BUILD = '2026-07-17-6'; // must match server.py's APP_BUILD — bump both together on deploy
+const APP_BUILD = '2026-07-17-7'; // must match server.py's APP_BUILD — bump both together on deploy
 
 function startVersionCheck() {
   setInterval(async () => {
@@ -1609,14 +1609,14 @@ function printSupplyQR() {
 // ── InventoryCount ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
-let _countSession = null;
+let _countSessions = { inventory_count: null, amenities_inventory: null };
 let _countScanBuffer = '';
 
 async function renderInventoryCount(gen) {
   const pastRes = await fetch('/api/inventory-counts');
   const pastCounts = await pastRes.json();
   if (_stale(gen)) return;
-  if (_countSession) { renderCountInProgress(); return; }
+  if (_countSessions.inventory_count) { renderCountInProgress(); return; }
   let pastHtml = '';
   if (pastCounts.length) {
     pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
@@ -1668,12 +1668,12 @@ async function startCount() {
     const supplies = await fetch('/api/supplies').then(r=>r.json());
     supplies.forEach(s => items.push({ id:'S-'+s.id, label:s.name, tag:'supply-'+s.id, type:'supply', expected:s.quantity, expectedLabel:`${s.quantity} ${s.unit}`, unit:s.unit, category:s.category, supplyId:s.id }));
   }
-  _countSession = { areas, items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
+  _countSessions.inventory_count = { areas, items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
 }
 
 function renderCountInProgress() {
-  const s = _countSession;
+  const s = _countSessions[_countReturnTarget];
   const total = s.items.length;
   const counted = Object.keys(s.counts).length;
   const pct = total ? Math.round(counted/total*100) : 0;
@@ -1711,8 +1711,8 @@ function renderCountInProgress() {
   document.getElementById('count-scan-input')?.focus();
 }
 
-function countLoaner(itemId, found) { _countSession.counts[itemId] = found; renderCountInProgress(); document.getElementById('count-scan-input')?.focus(); }
-function countSupply(itemId, val) { const qty = parseInt(val); if (!isNaN(qty) && qty >= 0) _countSession.counts[itemId] = qty; else delete _countSession.counts[itemId]; }
+function countLoaner(itemId, found) { _countSessions[_countReturnTarget].counts[itemId] = found; renderCountInProgress(); document.getElementById('count-scan-input')?.focus(); }
+function countSupply(itemId, val) { const qty = parseInt(val); if (!isNaN(qty) && qty >= 0) _countSessions[_countReturnTarget].counts[itemId] = qty; else delete _countSessions[_countReturnTarget].counts[itemId]; }
 
 function processCountScan() {
   const input = document.getElementById('count-scan-input');
@@ -1727,7 +1727,7 @@ function processCountScan() {
     const lid = 'L-'+loanerMatch[1].toUpperCase(); const el = document.getElementById('crow-'+lid);
     if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.style.background='var(--teal-light)'; setTimeout(()=>el.style.background='',1500); found=true; }
   } else if (raw) {
-    const item = _countSession.items.find(i=>i.tag.toUpperCase()===raw.toUpperCase());
+    const item = _countSessions[_countReturnTarget].items.find(i=>i.tag.toUpperCase()===raw.toUpperCase());
     if (item) { const el=document.getElementById('crow-'+item.id); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.background='var(--teal-light)';setTimeout(()=>el.style.background='',1500);found=true;if(item.type==='loaner')countLoaner(item.id,1);} }
   }
   if (!found && raw) {
@@ -1738,10 +1738,15 @@ function processCountScan() {
   setTimeout(()=>document.getElementById('count-scan-input')?.focus(), 100);
 }
 
-function cancelCount() { if (!confirm('Cancel this count? Progress will be lost.')) return; _countSession = null; renderInventoryCount(); }
+function cancelCount() {
+  if (!confirm('Cancel this count? Progress will be lost.')) return;
+  _countSessions[_countReturnTarget] = null;
+  if (_countReturnTarget === 'amenities_inventory') showTab('amenities_inventory');
+  else renderInventoryCount();
+}
 
 async function finalizeCount() {
-  const s = _countSession;
+  const s = _countSessions[_countReturnTarget];
   if (!s) return;
   const variances = []; let matchCount = 0;
   s.items.forEach(item => {
@@ -1759,7 +1764,7 @@ async function finalizeCount() {
   try {
     const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
-    _countSession = null;
+    _countSessions[_countReturnTarget] = null;
     renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
   } catch(e) { alert('Error saving count — please try again.'); console.error(e); }
 }
@@ -1891,7 +1896,7 @@ function hkSubtab(tab) {
 async function renderAmenitiesCountHome() {
   const el = document.getElementById('amenities-count-body');
   if (!el) return;
-  if (_countSession) { renderCountInProgress(); return; }
+  if (_countSessions.amenities_inventory) { renderCountInProgress(); return; }
   const pastCounts = await fetch('/api/inventory-counts').then(r=>r.json());
   const amenityCounts = pastCounts.filter(c => c.areas === 'amenities');
   let pastHtml = '';
@@ -1916,7 +1921,7 @@ async function startAmenitiesCount() {
     id: 'A-'+s.id, label: s.name, tag: s.category, type: 'supply',
     expected: s.quantity, expectedLabel: `${s.quantity} ${s.unit}`, unit: s.unit, category: s.category, supplyId: s.id
   }));
-  _countSession = { areas: ['amenities'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
+  _countSessions.amenities_inventory = { areas: ['amenities'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
 }
 
