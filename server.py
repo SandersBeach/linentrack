@@ -1,4 +1,4 @@
-import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets, hashlib
+import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets, hashlib, re
 from flask import Flask, request, jsonify, send_from_directory, Response
 from datetime import datetime, timedelta
 import psycopg2
@@ -2870,6 +2870,41 @@ def decide_po_request(rid):
 # Linen counts themselves are NOT tracked as inventory — just shown as a
 # checklist — per Kristin's call that it's not worth maintaining that stock.
 
+def _normalize_addr(s):
+    s = s.lower().strip()
+    s = re.sub(r'[.,#]', '', s)
+    return re.sub(r'\s+', ' ', s)
+
+def _addr_leading_num(s):
+    m = re.search(r'\d+', _normalize_addr(s))
+    return m.group(0) if m else None
+
+def fuzzy_match_address(raw_address, candidate_addresses):
+    """Resolves a possibly-imprecise address (e.g. missing a street suffix
+    like 'Way', a typo, extra/missing punctuation) against a list of
+    known-correct addresses — same leading-number + word-overlap approach
+    used to reconcile the original packing-list spreadsheet against homes.
+    Exact match always wins first; only falls back to fuzzy matching when
+    nothing matches exactly. Returns the matching candidate or None."""
+    key = _normalize_addr(raw_address)
+    if not candidate_addresses:
+        return None
+    if key in candidate_addresses:
+        return key
+    num = _addr_leading_num(raw_address)
+    if not num:
+        return None
+    same_num = [c for c in candidate_addresses if _addr_leading_num(c) == num]
+    if not same_num:
+        return None
+    fw = set(key.split())
+    scored = sorted(same_num, key=lambda c: len(fw & set(_normalize_addr(c).split())), reverse=True)
+    best = scored[0]
+    best_score = len(fw & set(_normalize_addr(best).split()))
+    if len(same_num) == 1 or best_score >= 1:
+        return best
+    return None
+
 def today_central():
     return now_central()[:10]
 
@@ -3141,6 +3176,10 @@ def get_pack_list():
     properties = []
     for addr in sorted(addrs):
         f = formulas.get(addr)
+        if not f:
+            fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
+            if fuzzy_addr:
+                f = formulas.get(fuzzy_addr)
         st = statuses.get(addr)
         asn = assignments.get(addr)
         properties.append({
@@ -3206,6 +3245,10 @@ def get_bundles_needed():
                 continue
             f = formulas.get(addr)
             if not f:
+                fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
+                if fuzzy_addr:
+                    f = formulas.get(fuzzy_addr)
+            if not f:
                 missing.append(addr); continue
             count += 1
             towel_bags += f['towels'] // 18
@@ -3221,6 +3264,10 @@ def get_bundles_needed():
         for addr in sorted(addrs):
             if (addr, d) in packed_pairs: continue
             f = formulas.get(addr)
+            if not f:
+                fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
+                if fuzzy_addr:
+                    f = formulas.get(fuzzy_addr)
             if not f: m_missing.append({'address': addr, 'pack_date': d}); continue
             m_count += 1
             m_towel += f['towels'] // 18
@@ -3295,6 +3342,10 @@ def get_pack_list_week():
 
     def build_property(addr, pack_date):
         f = formulas.get(addr)
+        if not f:
+            fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
+            if fuzzy_addr:
+                f = formulas.get(fuzzy_addr)
         st = statuses_by_date.get(pack_date, {}).get(addr)
         asn = assignments_by_date.get(pack_date, {}).get(addr)
         emerg = emerg_by_date.get(pack_date, {}).get(addr)
@@ -3364,6 +3415,12 @@ def pack_property():
 
     cur.execute("SELECT id,name FROM homes WHERE LOWER(TRIM(name))=%s", (addr_key,))
     home = cur.fetchone()
+    if not home:
+        cur.execute("SELECT id,name FROM homes")
+        all_homes = cur.fetchall()
+        fuzzy_name = fuzzy_match_address(addr_key, [h['name'].lower().strip() for h in all_homes])
+        if fuzzy_name:
+            home = next((h for h in all_homes if h['name'].lower().strip() == fuzzy_name), None)
     if not home:
         cur.close(); conn.close()
         return jsonify({'error': f'No home on file matching "{address}" — add it under Homes first'}), 404
