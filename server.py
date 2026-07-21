@@ -842,6 +842,7 @@ def checkin(bag_id):
 # short-lived session for that cleaner to check their own bags back in.
 # This exists specifically to prevent "false" check-ins claimed from off-site.
 
+WAREHOUSE_CHECKIN_PAUSED = True  # set to False to re-enable cleaner self-checkin via the warehouse QR screen
 WH_TOKEN_ROTATE_SECONDS = 900   # how often the displayed QR changes (15 min)
 WH_SESSION_MINUTES = 20        # how long a validated session stays usable, once started
 
@@ -879,6 +880,8 @@ def is_valid_warehouse_session(session_id, cleaner_id):
 def warehouse_current_token():
     """Called repeatedly by the warehouse display screen to get the current
     (or freshly rotated) QR code."""
+    if WAREHOUSE_CHECKIN_PAUSED:
+        return jsonify({'paused': True})
     token = get_or_rotate_warehouse_token()
     base_url = request.url_root.rstrip('/')
     url = f"{base_url}/cleaner-checkin?token={token}"
@@ -895,6 +898,8 @@ def warehouse_start_session():
     data = request.json or {}
     token = data.get('token', '')
     cleaner_pin = str(data.get('cleaner_pin', ''))
+    if WAREHOUSE_CHECKIN_PAUSED:
+        return jsonify({'error': 'Self check-in is temporarily paused — please have warehouse staff check your bags in.'}), 403
     if not is_valid_warehouse_token(token):
         return jsonify({'error': 'This code has expired. Please scan the screen in the warehouse again.'}), 401
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -925,6 +930,8 @@ def warehouse_cleaner_checkin_bag():
     data = request.json or {}
     session_id = data.get('session_id'); cleaner_id = data.get('cleaner_id')
     bag_id = (data.get('bag_id') or '').strip().upper()
+    if WAREHOUSE_CHECKIN_PAUSED:
+        return jsonify({'error': 'Self check-in is temporarily paused — please have warehouse staff check your bags in.'}), 403
     if not session_id or not cleaner_id or not bag_id:
         return jsonify({'error': 'Missing required info'}), 400
     if not is_valid_warehouse_session(session_id, cleaner_id):
