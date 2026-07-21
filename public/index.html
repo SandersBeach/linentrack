@@ -355,6 +355,7 @@
   <div class="modal-box">
     <h3 id="pack-modal-title-text">Mark packed</h3>
     <input type="hidden" id="pack-modal-address">
+    <input type="hidden" id="pack-modal-date">
     <label>Which cleaner is this for?</label>
     <select id="pack-modal-cleaner"><option value="">Select cleaner...</option></select>
     <label>Scan each bag tag being packed</label>
@@ -395,6 +396,7 @@
   <div class="modal-box">
     <h3>Flag a supply issue</h3>
     <input type="hidden" id="flag-modal-address">
+    <input type="hidden" id="flag-modal-date">
     <label>Item</label>
     <input id="flag-modal-item" placeholder="e.g. King Sheet Sets">
     <label>Issue type</label>
@@ -475,11 +477,11 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['pack_list', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
-  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders', 'store'],
+  warehouse: ['pack_list', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
+  maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders'],
   inspector: ['amenities_inventory', 'store'],
   coordinator: ['inventory_count', 'orders'],
-  admin: ['pack_list', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
+  admin: ['pack_list', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -494,6 +496,7 @@ const TAB_LABELS = {
   forecast: '🔮 Forecast',
   store: '🏪 Store',
   pack_list: '📋 Pack List',
+  bundles_needed: '🧺 Bundles Needed',
   pack_flags: '⚠️ Flag Issue',
   pack_emergency: '⚡ Last-Min Add',
   pack_productivity: '📊 Pack Productivity'
@@ -591,6 +594,7 @@ const MODULE_NAMES = {
   forecast: 'ForecastCentral',
   store: 'StoreCentral',
   pack_list: 'PackListCentral',
+  bundles_needed: 'PackListCentral',
   pack_flags: 'PackListCentral',
   pack_emergency: 'PackListCentral',
   pack_productivity: 'PackListCentral'
@@ -618,6 +622,7 @@ function showTab(t) {
     forecast: renderForecast,
     store: renderStore,
     pack_list: renderPackList,
+    bundles_needed: renderBundlesNeeded,
     pack_flags: renderPackFlags,
     pack_emergency: renderPackEmergency,
     pack_productivity: renderPackProductivity
@@ -1978,8 +1983,8 @@ function renderHKCards() {
       <div class="supply-unit">${item.unit}</div>
       <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions">
-        <button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
-        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>
+        ${_hkBucket !== 'Amenities' ? `<button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>` : ''}
         ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
       </div>
     </div>`;
@@ -1997,7 +2002,7 @@ function renderHKLowStockCards() {
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
-    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>
+    ${_hkBucket !== 'Amenities' ? `<div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>` : ''}
   </div>`).join('');
 }
 
@@ -3195,7 +3200,7 @@ async function uploadReservations() {
 // ── PackListCentral ───────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
-let packListState = { date: null, properties: [], cleaners: [] };
+let packListState = { week: null, properties: [], cleaners: [] };
 let packModalState = { address: '', scannedBags: [] };
 let celebratedDates = new Set();
 
@@ -3327,58 +3332,108 @@ async function getServerToday() {
 
 let _packListRefreshTimer = null;
 
+let _bundlesDays = 7;
+
+function bundlesDayRow(d, isMissed) {
+  if (d.properties_counted === 0 && d.missing_formula.length === 0) {
+    return `<div class="row"><div class="row-main"><div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div><div class="row-sub">Nothing needed</div></div></div>`;
+  }
+  return `<div class="row" style="${isMissed ? 'background:#FAECE7' : ''}">
+    <div class="row-main">
+      <div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div>
+      <div class="row-sub">${d.properties_counted} propert${d.properties_counted===1?'y':'ies'} · ${d.towel_bags_needed} towel bag${d.towel_bags_needed!==1?'s':''} · ${d.king_bundles_needed}K · ${d.queen_bundles_needed}Q · ${d.twin_bundles_needed}T
+      ${d.missing_formula.length ? `<br><span style="color:var(--coral-dark)">⚠️ ${d.missing_formula.length} not counted — no packing formula on file</span>` : ''}</div>
+    </div>
+  </div>`;
+}
+
+async function renderBundlesNeeded(gen) {
+  const data = await fetch(`/api/pack-list/bundles?days=${_bundlesDays}`).then(r => r.json());
+  if (_stale(gen)) return;
+  let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
+      <div style="font-weight:600;font-size:14px;margin-right:auto">🧺 Bundles Needed — by day, in pickup order</div>
+      <button class="btn ${_bundlesDays===3?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(3)">3 days</button>
+      <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">7 days</button>
+    </div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Each row shows what to make for that specific day — missed days always show first, since those need attention now.</p>
+    <div class="card">`;
+  if (data.missed.properties_counted > 0 || data.missed.missing_formula.length > 0) {
+    html += bundlesDayRow(data.missed, true);
+  }
+  html += data.days.map(d => bundlesDayRow(d, false)).join('');
+  html += `</div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+
+function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
+
 async function renderPackList(gen) {
-  if (!packListState.date) packListState.date = await getServerToday();
-  const [plRes, clRes, emRes, invRes] = await Promise.all([
-    fetch('/api/pack-list?date=' + packListState.date),
+  const [wkRes, clRes, invRes] = await Promise.all([
+    fetch('/api/pack-list/week'),
     fetch('/api/cleaners'),
-    fetch('/api/pack-list/emergency?date=' + packListState.date),
     fetch('/api/inventory-counts/weekly-task-status')
   ]);
-  const pl = await plRes.json();
+  const wk = await wkRes.json();
   packListState.cleaners = await clRes.json();
-  packListState.properties = pl.properties;
-  const emergAdds = await emRes.json();
+  packListState.week = wk;
   const invTask = await invRes.json();
   if (_stale(gen)) return;
-  const unacked = emergAdds.filter(e => !e.acked_by.includes(_currentStaffName));
-  renderPackListBody(unacked, invTask);
+  renderPackListBody(invTask);
 
   if (_packListRefreshTimer) clearInterval(_packListRefreshTimer);
   _packListRefreshTimer = setInterval(async () => {
     if (currentTab !== 'pack_list') { clearInterval(_packListRefreshTimer); _packListRefreshTimer = null; return; }
-    // Don't refresh out from under someone mid-scan or mid-flag
     const packModalOpen = document.getElementById('modal-pack-cleaner')?.style.display === 'flex';
     const flagModalOpen = document.getElementById('modal-pack-flag')?.style.display === 'flex';
     if (packModalOpen || flagModalOpen) return;
     try {
-      const [plR, emR, invR] = await Promise.all([
-        fetch('/api/pack-list?date=' + packListState.date),
-        fetch('/api/pack-list/emergency?date=' + packListState.date),
+      const [wkR, invR] = await Promise.all([
+        fetch('/api/pack-list/week'),
         fetch('/api/inventory-counts/weekly-task-status')
       ]);
-      const plData = await plR.json();
-      const emData = await emR.json();
-      const invData = await invR.json();
-      packListState.properties = plData.properties;
-      renderPackListBody(emData.filter(e => !e.acked_by.includes(_currentStaffName)), invData);
+      packListState.week = await wkR.json();
+      renderPackListBody(await invR.json());
     } catch (e) { /* silent — next tick will retry */ }
   }, 30000);
 }
 
-function renderPackListBody(unacked, invTask) {
-  const props = packListState.properties;
-  const packed = props.filter(p => p.packed).length;
-  const total = props.length;
-  const pct = total ? Math.round(packed / total * 100) : 0;
-  if (total > 0 && packed === total) {
-    if (!celebratedDates.has(packListState.date)) {
-      celebratedDates.add(packListState.date);
-      setTimeout(() => triggerPackCelebration(packListState.date), 300);
+function packCard(p) {
+  const f = p.formula;
+  return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
+    ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:600;font-size:14px">${p.property_name}</div>
+        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}${userRoles.includes('admin') ? ` · <a href="#" onclick="openEditFormulaModal('${p.address}');return false;" style="color:var(--teal)">✏️ edit</a>` : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property${userRoles.includes('admin') ? ` — <a href="#" onclick="openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`}
+      </div>
+      <div style="text-align:right">
+        ${p.packed
+          ? `<div class="badge badge-ok">✓ Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="undoPack('${p.address}','${p.pack_date}')">Undo</button>`
+          : `${p.assigned_cleaner_name ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : p.assigned_raw ? `<div class="row-sub" style="color:var(--coral-dark)">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>` : ''}
+             <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}','${p.pack_date}')">✓ Mark packed</button>
+             <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px">⚠ Flag</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderPackListBody(invTask) {
+  const wk = packListState.week;
+  packListState.properties = wk.missed.concat(...wk.days.map(d => d.properties));
+
+  const today = wk.days[0];
+  const todayPacked = today.properties.filter(p => p.packed).length;
+  if (today.properties.length > 0 && todayPacked === today.properties.length) {
+    if (!celebratedDates.has(today.date)) {
+      celebratedDates.add(today.date);
+      setTimeout(() => triggerPackCelebration(today.date), 300);
     }
   } else {
-    celebratedDates.delete(packListState.date);
+    celebratedDates.delete(today.date);
   }
+
+  const unacked = packListState.properties.filter(p => p.is_emergency && p.emergency_id && !p.emergency_acked_by.includes(_currentStaffName));
+
   let html = '';
   if (invTask && invTask.is_task_day && !invTask.completed_today) {
     html += `<div class="card" style="background:#E7F1F2;border-color:#89BBBE">
@@ -3391,50 +3446,52 @@ function renderPackListBody(unacked, invTask) {
       </div>
     </div>`;
   }
-  if (unacked && unacked.length) {
+  if (unacked.length) {
     html += `<div class="card" style="background:#FEF3C7;border-color:#FCD34D">
       <div class="card-title" style="color:#92400E">⚡ Last-minute additions</div>
-      ${unacked.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.address}</div><div class="row-sub">Added by ${e.added_by} · ${e.added_at}${e.notes?' · '+e.notes:''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${e.id})">Acknowledged</button></div>`).join('')}
+      ${unacked.map(p => `<div class="row"><div class="row-main"><div class="row-title">${p.property_name}</div><div class="row-sub">Added by ${p.emergency_added_by} · ${p.emergency_added_at}${p.emergency_notes ? ' · ' + p.emergency_notes : ''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${p.emergency_id})">Acknowledged</button></div>`).join('')}
     </div>`;
   }
-  html += `<div class="card" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <label style="margin:0">Date</label>
-    <input type="date" id="pl-date" value="${packListState.date}" onchange="changePackListDate(this.value)" style="width:auto">
-    <span class="badge badge-count">${packed}/${total} packed</span>
-    ${total ? `<div style="flex:1;min-width:120px;background:var(--gray-100);border-radius:6px;height:6px;overflow:hidden"><div style="height:100%;background:var(--teal);width:${pct}%"></div></div>` : ''}
-  </div>
-  <div id="pl-cards"></div>`;
+
+  if (wk.missed.length) {
+    const missedPacked = wk.missed.filter(p => p.packed).length;
+    html += `<div class="card" style="background:#FAECE7;border-color:#D85A30">
+      <div class="card-title" style="color:var(--coral-dark)">🚨 Missed — pack these first (${wk.missed.length - missedPacked} still needed)</div>
+      <div id="pl-missed-cards"></div>
+    </div>`;
+  }
+
+  html += `<div id="pl-week-cards"></div>`;
   document.getElementById('main-content').innerHTML = html;
-  const cardsEl = document.getElementById('pl-cards');
-  if (!props.length) { cardsEl.innerHTML = '<div class="empty">No checkouts scheduled for this date.</div>'; return; }
-  cardsEl.innerHTML = props.map(p => {
-    const f = p.formula;
-    return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
-      ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <div>
-          <div style="font-weight:600;font-size:14px">${p.property_name}</div>
-          ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}${userRoles.includes('admin') ? ` · <a href="#" onclick="openEditFormulaModal('${p.address}');return false;" style="color:var(--teal)">✏️ edit</a>` : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property${userRoles.includes('admin') ? ` — <a href="#" onclick="openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`}
-        </div>
-        <div style="text-align:right">
-          ${p.packed
-            ? `<div class="badge badge-ok">✓ Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="undoPack('${p.address}')">Undo</button>`
-            : `${p.assigned_cleaner_name ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : p.assigned_raw ? `<div class="row-sub" style="color:var(--coral-dark)">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>` : ''}
-               <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}')">✓ Mark packed</button>
-               <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}')" style="margin-left:6px">⚠ Flag</button>`}
-        </div>
+
+  if (wk.missed.length) {
+    document.getElementById('pl-missed-cards').innerHTML = wk.missed.map(packCard).join('');
+  }
+
+  const weekEl = document.getElementById('pl-week-cards');
+  weekEl.innerHTML = wk.days.map((d, i) => {
+    const packed = d.properties.filter(p => p.packed).length;
+    const total = d.properties.length;
+    const pct = total ? Math.round(packed / total * 100) : 0;
+    const dateObj = new Date(d.date + 'T00:00:00');
+    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    return `<div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:${total ? '10px' : '0'}">
+        <div style="font-weight:600;font-size:15px">${label} <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span></div>
+        ${total ? `<span class="badge badge-count">${packed}/${total} packed</span>` : '<span class="row-sub">No checkouts scheduled</span>'}
       </div>
+      ${total ? `<div style="background:var(--gray-100);border-radius:6px;height:6px;overflow:hidden;margin-bottom:10px"><div style="height:100%;background:var(--teal);width:${pct}%"></div></div>` : ''}
+      <div>${d.properties.map(packCard).join('')}</div>
     </div>`;
   }).join('');
 }
 
-function changePackListDate(v) { packListState.date = v; showTab('pack_list'); }
-
-function openPackModal(address) {
-  const p = packListState.properties.find(x => x.address === address);
+function openPackModal(address, packDate) {
+  const p = packListState.properties.find(x => x.address === address && x.pack_date === packDate);
   const opts = packListState.cleaners.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
   document.getElementById('pack-modal-address').value = address;
-  document.getElementById('pack-modal-title-text').textContent = 'Mark packed: ' + address;
+  document.getElementById('pack-modal-date').value = packDate;
+  document.getElementById('pack-modal-title-text').textContent = `Mark packed: ${address} (${packDate})`;
   document.getElementById('pack-modal-cleaner').innerHTML = '<option value="">Select cleaner...</option>' + opts;
   if (p && p.assigned_cleaner_id) document.getElementById('pack-modal-cleaner').value = p.assigned_cleaner_id;
   packModalState = { address, scannedBags: [] };
@@ -3482,12 +3539,13 @@ async function scanPackBag() {
 
 async function confirmPack() {
   const address = document.getElementById('pack-modal-address').value;
+  const packDate = document.getElementById('pack-modal-date').value;
   const cleanerId = document.getElementById('pack-modal-cleaner').value;
   if (!cleanerId) { alert('Select a cleaner'); return; }
   if (!packModalState.scannedBags.length) { alert('Scan at least one bag'); return; }
   const res = await fetch('/api/pack-list/pack', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, pack_date: packListState.date, packed_by: _currentStaffName, cleaner_id: cleanerId, bag_ids: packModalState.scannedBags })
+    body: JSON.stringify({ address, pack_date: packDate, packed_by: _currentStaffName, cleaner_id: cleanerId, bag_ids: packModalState.scannedBags })
   });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Error'); return; }
@@ -3498,11 +3556,11 @@ async function confirmPack() {
   showTab('pack_list');
 }
 
-async function undoPack(address) {
+async function undoPack(address, packDate) {
   if (!confirm('Undo packing for ' + address + '? Only works if the bag has not been picked up yet.')) return;
   const res = await fetch('/api/pack-list/unpack', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, pack_date: packListState.date, staff_name: _currentStaffName })
+    body: JSON.stringify({ address, pack_date: packDate, staff_name: _currentStaffName })
   });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Error'); return; }
@@ -3549,8 +3607,9 @@ async function submitAddFormula() {
   else showTab('pack_list');
 }
 
-function openFlagModal(address) {
+function openFlagModal(address, packDate) {
   document.getElementById('flag-modal-address').value = address || '';
+  document.getElementById('flag-modal-date').value = packDate || '';
   document.getElementById('flag-modal-item').value = '';
   document.getElementById('flag-modal-type').value = 'Out of stock';
   document.getElementById('flag-modal-notes').value = '';
@@ -3558,13 +3617,14 @@ function openFlagModal(address) {
 }
 async function submitPackFlag() {
   const address = document.getElementById('flag-modal-address').value;
+  const packDate = document.getElementById('flag-modal-date').value;
   const item_name = document.getElementById('flag-modal-item').value.trim();
   const issue_type = document.getElementById('flag-modal-type').value;
   const notes = document.getElementById('flag-modal-notes').value.trim();
   if (!item_name) { alert('Enter an item'); return; }
   const res = await fetch('/api/pack-list/flags', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, item_name, issue_type, notes, flagged_by: _currentStaffName, pack_date: packListState.date || await getServerToday() })
+    body: JSON.stringify({ address, item_name, issue_type, notes, flagged_by: _currentStaffName, pack_date: packDate || await getServerToday() })
   });
   document.getElementById('modal-pack-flag').style.display = 'none';
   if (res.ok) showTab(currentTab);
