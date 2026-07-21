@@ -3174,7 +3174,7 @@ def get_bundles_needed():
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
     window_end_dt = today_dt + timedelta(days=days_ahead - 1)
-    lookback_dt = today_dt - timedelta(days=30)
+    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())  # hard floor: nothing before this feature existed counts as "missed"
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
@@ -3250,7 +3250,7 @@ def get_pack_list_week():
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
     window_end_dt = today_dt + timedelta(days=6)
-    lookback_dt = today_dt - timedelta(days=30)  # safety bound on how far back "missed" looks
+    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())  # hard floor: nothing before this feature existed counts as "missed"
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
