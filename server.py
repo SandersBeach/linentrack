@@ -1678,6 +1678,7 @@ def cancel_order(oid):
 # ── Staff PIN Management ──────────────────────────────────────────────────────
 
 PACK_FORMULA_SEED = [
+    {'address': 'steve "bay house"', 'property_name': 'Steve "Bay House"', 'king': 4, 'queen': 0, 'twin': 6, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
     {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
     {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
     {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
