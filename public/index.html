@@ -735,13 +735,29 @@ async function lookupBag() { await processScan(); }
 // ── Overdue Tab ────────────────────────────────────────────────────────────────
 async function renderOverdue(gen) {
   document.getElementById('main-content').innerHTML = '<div class="card">Checking for overdue bags...</div>';
-  const inv = await fetch('/api/inventory').then(r => r.json());
+  const [inv, skipped] = await Promise.all([
+    fetch('/api/inventory').then(r => r.json()),
+    fetch('/api/bags/pickup-skipped').then(r => r.json())
+  ]);
   if (_stale(gen)) return;
   const now = new Date();
   const overdue = inv.filter(b => b.status==='out' && b.picked_up_at && (now - new Date(b.picked_up_at)) / 3600000 >= 24);
   const needsReview = inv.filter(b => b.status==='out' && !b.picked_up_at);
-  if (!overdue.length && !needsReview.length) { document.getElementById('main-content').innerHTML = `<div class="card" style="text-align:center;padding:2.5rem"><div style="font-size:32px;margin-bottom:8px">✓</div><div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div><div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div></div>`; return; }
+
   let html = '';
+  if (skipped.length) {
+    html += `<div class="card" style="background:var(--amber-light);border-color:var(--amber)">
+      <div class="card-title" style="color:var(--amber)">⚠️ Checked in without a pickup scan (${skipped.length})</div>
+      <div class="row-sub" style="margin-bottom:8px">These bags went straight from staged to returned — the cleaner never scanned pickup. Worth a quick reminder to them.</div>
+      ${skipped.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.home_name || '—'} <span class="tag">${s.bag_id}</span></div><div class="row-sub">${s.cleaner_name || 'Unknown cleaner'} · checked in ${s.timestamp}${s.staff_name ? ' · by ' + s.staff_name : ''}</div></div></div>`).join('')}
+    </div>`;
+  }
+
+  if (!overdue.length && !needsReview.length) {
+    html += `<div class="card" style="text-align:center;padding:2.5rem"><div style="font-size:32px;margin-bottom:8px">✓</div><div style="font-size:15px;font-weight:500;color:var(--teal)">All bags returned on time</div><div style="font-size:13px;color:var(--gray-400);margin-top:4px">Nothing overdue right now</div></div>`;
+    document.getElementById('main-content').innerHTML = html;
+    return;
+  }
   if (needsReview.length) {
     html += `<div style="background:var(--amber-light);border:0.5px solid var(--amber);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">⚠️</div><div><div style="font-size:15px;font-weight:500;color:var(--amber)">${needsReview.length} bag${needsReview.length!==1?'s':''} need review</div><div style="font-size:12px;color:var(--amber)">Marked "out" but no pickup time recorded — can't tell if overdue</div></div></div>`;
     html += `<div class="card"><div style="font-size:14px;font-weight:600;margin-bottom:8px">Needs review</div>`;
