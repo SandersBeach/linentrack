@@ -3414,19 +3414,23 @@ async function renderPackList(gen) {
   }, 30000);
 }
 
+function formatDueDate(packDate, packed) {
+  const dueDate = new Date(packDate + 'T00:00:00');
+  const dateLabel = dueDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  if (packed) return `<div class="row-sub">Due: ${dateLabel}</div>`;
+  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((todayMid - dueDate) / 86400000);
+  if (diffDays > 0) {
+    return `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Due: ${dateLabel} — ${diffDays} day${diffDays !== 1 ? 's' : ''} overdue</div>`;
+  }
+  return `<div class="row-sub">Due: ${dateLabel}</div>`;
+}
+
 function packCard(p, showDate) {
   const f = p.formula;
   let dateLine = '';
   if (showDate && p.pack_date) {
-    const dueDate = new Date(p.pack_date + 'T00:00:00');
-    const dateLabel = dueDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    if (!p.packed) {
-      const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
-      const diffDays = Math.round((todayMid - dueDate) / 86400000);
-      dateLine = `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Due: ${dateLabel} — ${diffDays} day${diffDays !== 1 ? 's' : ''} overdue</div>`;
-    } else {
-      dateLine = `<div class="row-sub">Due: ${dateLabel}</div>`;
-    }
+    dateLine = formatDueDate(p.pack_date, p.packed);
   }
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
     ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
@@ -3479,7 +3483,7 @@ function renderPackListBody(invTask) {
   if (unacked.length) {
     html += `<div class="card" style="background:#FEF3C7;border-color:#FCD34D">
       <div class="card-title" style="color:#92400E">⚡ Last-minute additions</div>
-      ${unacked.map(p => `<div class="row"><div class="row-main"><div class="row-title">${p.property_name}</div><div class="row-sub">Added by ${p.emergency_added_by} · ${p.emergency_added_at}${p.emergency_notes ? ' · ' + p.emergency_notes : ''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${p.emergency_id})">Acknowledged</button></div>`).join('')}
+      ${unacked.map(p => `<div class="row"><div class="row-main"><div class="row-title">${p.property_name}</div>${formatDueDate(p.pack_date, p.packed)}<div class="row-sub">Added by ${p.emergency_added_by} · ${p.emergency_added_at}${p.emergency_notes ? ' · ' + p.emergency_notes : ''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${p.emergency_id})">Acknowledged</button></div>`).join('')}
     </div>`;
   }
 
