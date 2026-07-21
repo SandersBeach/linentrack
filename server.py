@@ -3161,6 +3161,179 @@ def get_pack_list():
     cur.close(); conn.close()
     return jsonify({'date': date_str, 'properties': properties})
 
+@app.route('/api/pack-list/bundles', methods=['GET'])
+def get_bundles_needed():
+    """How many towel bags (pre-packed in sets of 18) and sheet-set bundles
+    (king/queen/twin, one bundle per set — no batching) the warehouse needs
+    to make — broken out day by day, in pickup order, so it's simple to see
+    what's needed for today vs. tomorrow vs. later rather than one lumped
+    total. Missed days (before today, still unpacked) are grouped into their
+    own bucket at the very top, since those need attention first regardless
+    of which specific past date they're from."""
+    days_ahead = int(request.args.get('days', 7))
+    today_str = today_central()
+    today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
+    window_end_dt = today_dt + timedelta(days=days_ahead - 1)
+    lookback_dt = today_dt - timedelta(days=30)
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
+                   FROM forecast_reservations
+                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    addr_dates = {}
+    for r in cur.fetchall():
+        addr_dates.setdefault(r['pack_date'], set()).add(r['unit_address'].lower().strip())
+
+    cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    for e in cur.fetchall():
+        addr_dates.setdefault(e['pack_date'], set()).add(e['address'].lower().strip())
+
+    cur.execute("SELECT address, pack_date FROM pack_list_status WHERE pack_date BETWEEN %s AND %s",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    packed_pairs = {(s['address'], s['pack_date']) for s in cur.fetchall()}
+
+    cur.execute("SELECT * FROM pack_list_formula")
+    formulas = {f['address']: f for f in cur.fetchall()}
+    cur.close(); conn.close()
+
+    def tally(addrs, pack_date):
+        towel_bags = king = queen = twin = count = 0
+        missing = []
+        for addr in sorted(addrs):
+            if (addr, pack_date) in packed_pairs:
+                continue
+            f = formulas.get(addr)
+            if not f:
+                missing.append(addr); continue
+            count += 1
+            towel_bags += f['towels'] // 18
+            king += f['king']; queen += f['queen']; twin += f['twin']
+        return {'towel_bags_needed': towel_bags, 'king_bundles_needed': king,
+                'queen_bundles_needed': queen, 'twin_bundles_needed': twin,
+                'properties_counted': count, 'missing_formula': missing}
+
+    m_towel = m_king = m_queen = m_twin = m_count = 0
+    m_missing = []
+    for d, addrs in addr_dates.items():
+        if d >= today_str: continue
+        for addr in sorted(addrs):
+            if (addr, d) in packed_pairs: continue
+            f = formulas.get(addr)
+            if not f: m_missing.append({'address': addr, 'pack_date': d}); continue
+            m_count += 1
+            m_towel += f['towels'] // 18
+            m_king += f['king']; m_queen += f['queen']; m_twin += f['twin']
+
+    missed_summary = {'label': 'Missed', 'date': None,
+                       'towel_bags_needed': m_towel, 'king_bundles_needed': m_king,
+                       'queen_bundles_needed': m_queen, 'twin_bundles_needed': m_twin,
+                       'properties_counted': m_count, 'missing_formula': m_missing}
+
+    days = []
+    for i in range(days_ahead):
+        d = (today_dt + timedelta(days=i)).isoformat()
+        t = tally(addr_dates.get(d, set()), d)
+        label = 'Today' if i == 0 else 'Tomorrow' if i == 1 else datetime.strptime(d, '%Y-%m-%d').strftime('%A, %b %-d')
+        days.append({'label': label, 'date': d, **t})
+
+    return jsonify({'today': today_str, 'days_ahead': days_ahead, 'missed': missed_summary, 'days': days})
+
+@app.route('/api/pack-list/week', methods=['GET'])
+def get_pack_list_week():
+    """Rolling view: any past date that still has an unpacked property (so
+    nothing missed ever silently disappears, no matter how many days go by),
+    plus a 7-day forward window (today through +6) so staff can work ahead.
+    Built in a handful of batched queries across the whole window rather than
+    one query per day."""
+    today_str = today_central()
+    today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
+    window_end_dt = today_dt + timedelta(days=6)
+    lookback_dt = today_dt - timedelta(days=30)  # safety bound on how far back "missed" looks
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
+                   FROM forecast_reservations
+                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    addr_dates = {}  # pack_date -> set(addresses)
+    for r in cur.fetchall():
+        addr_dates.setdefault(r['pack_date'], set()).add(r['unit_address'].lower().strip())
+
+    cur.execute("SELECT * FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    emerg_by_date = {}
+    emerg_ids = []
+    for e in cur.fetchall():
+        key = e['address'].lower().strip()
+        addr_dates.setdefault(e['pack_date'], set()).add(key)
+        emerg_by_date.setdefault(e['pack_date'], {})[key] = e
+        emerg_ids.append(e['id'])
+    acked_by_emerg_id = {}
+    if emerg_ids:
+        cur.execute("SELECT emergency_id, staff_name FROM pack_emergency_acks WHERE emergency_id = ANY(%s)", (emerg_ids,))
+        for a in cur.fetchall():
+            acked_by_emerg_id.setdefault(a['emergency_id'], []).append(a['staff_name'])
+
+    cur.execute("SELECT * FROM pack_list_formula")
+    formulas = {f['address']: f for f in cur.fetchall()}
+
+    cur.execute("SELECT * FROM pack_list_status WHERE pack_date BETWEEN %s AND %s",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    statuses_by_date = {}
+    for s in cur.fetchall():
+        statuses_by_date.setdefault(s['pack_date'], {})[s['address']] = s
+
+    cur.execute("SELECT * FROM pack_cleaner_assignments WHERE assignment_date BETWEEN %s AND %s",
+                (lookback_dt.isoformat(), window_end_dt.isoformat()))
+    assignments_by_date = {}
+    for a in cur.fetchall():
+        assignments_by_date.setdefault(a['assignment_date'], {})[a['address']] = a
+    cur.close(); conn.close()
+
+    def build_property(addr, pack_date):
+        f = formulas.get(addr)
+        st = statuses_by_date.get(pack_date, {}).get(addr)
+        asn = assignments_by_date.get(pack_date, {}).get(addr)
+        emerg = emerg_by_date.get(pack_date, {}).get(addr)
+        return {
+            'address': addr,
+            'property_name': f['property_name'] if f else (emerg['address'] if emerg else addr),
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool')} if f else None,
+            'is_emergency': emerg is not None,
+            'emergency_notes': emerg['notes'] if emerg else None,
+            'emergency_id': emerg['id'] if emerg else None,
+            'emergency_added_by': emerg['added_by'] if emerg else None,
+            'emergency_added_at': emerg['added_at'] if emerg else None,
+            'emergency_acked_by': acked_by_emerg_id.get(emerg['id'], []) if emerg else [],
+            'packed': bool(st),
+            'packed_by': st['packed_by'] if st else None,
+            'packed_at': st['packed_at'] if st else None,
+            'cleaner_name': st['cleaner_name'] if st else None,
+            'staged_bags': (st['staged_bag_ids'] or '').split(',') if st and st['staged_bag_ids'] else [],
+            'assigned_cleaner_id': asn['cleaner_id'] if asn else None,
+            'assigned_cleaner_name': asn['cleaner_name'] if asn else None,
+            'assigned_raw': asn['raw_assignee'] if asn and not asn['cleaner_id'] else None,
+            'pack_date': pack_date,
+        }
+
+    missed = []
+    for d in sorted(dt for dt in addr_dates if dt < today_str):
+        for addr in sorted(addr_dates[d]):
+            st = statuses_by_date.get(d, {}).get(addr)
+            if not st:  # only truly-unpacked ones count as "missed"
+                missed.append(build_property(addr, d))
+
+    days = []
+    for i in range(7):
+        d = (today_dt + timedelta(days=i)).isoformat()
+        props = [build_property(addr, d) for addr in sorted(addr_dates.get(d, set()))]
+        days.append({'date': d, 'properties': props})
+
+    return jsonify({'today': today_str, 'missed': missed, 'days': days})
+
 @app.route('/api/pack-list/pack', methods=['POST'])
 def pack_property():
     """Mark a property packed: decrements real linen stock AND stages the
