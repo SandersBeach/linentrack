@@ -1734,7 +1734,7 @@ function renderCountInProgress() {
     <div class="card">
       <div class="count-progress"><div class="count-progress-bar" style="width:${pct}%"></div></div>
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:1rem">${pct}% complete · Started ${s.startedAt}</div>
-      ${_countReturnTarget !== 'amenities_inventory' ? `<div style="background:var(--gray-50);border:0.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem">
+      ${(_countReturnTarget !== 'amenities_inventory' && _countReturnTarget !== 'store') ? `<div style="background:var(--gray-50);border:0.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem">
         <label style="margin-bottom:4px">Quick scan — scan a QR code to jump to that item</label>
         <input type="text" id="count-scan-input" placeholder="Scan QR code here..." autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter')processCountScan()" style="margin-bottom:0">
       </div>` : ''}`;
