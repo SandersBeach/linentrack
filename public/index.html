@@ -3414,13 +3414,26 @@ async function renderPackList(gen) {
   }, 30000);
 }
 
-function packCard(p) {
+function packCard(p, showDate) {
   const f = p.formula;
+  let dateLine = '';
+  if (showDate && p.pack_date) {
+    const dueDate = new Date(p.pack_date + 'T00:00:00');
+    const dateLabel = dueDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    if (!p.packed) {
+      const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((todayMid - dueDate) / 86400000);
+      dateLine = `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Due: ${dateLabel} — ${diffDays} day${diffDays !== 1 ? 's' : ''} overdue</div>`;
+    } else {
+      dateLine = `<div class="row-sub">Due: ${dateLabel}</div>`;
+    }
+  }
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
     ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
       <div>
         <div style="font-weight:600;font-size:14px">${p.property_name}</div>
+        ${dateLine}
         ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}${userRoles.includes('admin') ? ` · <a href="#" onclick="openEditFormulaModal('${p.address}');return false;" style="color:var(--teal)">✏️ edit</a>` : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property${userRoles.includes('admin') ? ` — <a href="#" onclick="openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`}
       </div>
       <div style="text-align:right">
@@ -3482,7 +3495,7 @@ function renderPackListBody(invTask) {
   document.getElementById('main-content').innerHTML = html;
 
   if (wk.missed.length) {
-    document.getElementById('pl-missed-cards').innerHTML = wk.missed.map(packCard).join('');
+    document.getElementById('pl-missed-cards').innerHTML = wk.missed.map(p => packCard(p, true)).join('');
   }
 
   const weekEl = document.getElementById('pl-week-cards');
@@ -3498,7 +3511,7 @@ function renderPackListBody(invTask) {
         ${total ? `<span class="badge badge-count">${packed}/${total} packed</span>` : '<span class="row-sub">No checkouts scheduled</span>'}
       </div>
       ${total ? `<div style="background:var(--gray-100);border-radius:6px;height:6px;overflow:hidden;margin-bottom:10px"><div style="height:100%;background:var(--teal);width:${pct}%"></div></div>` : ''}
-      <div>${d.properties.map(packCard).join('')}</div>
+      <div>${d.properties.map(p => packCard(p, false)).join('')}</div>
     </div>`;
   }).join('');
 }
