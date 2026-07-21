@@ -30,16 +30,23 @@
 </style>
 </head>
 <body>
-  <h1>📱 Scan to Check In Your Bags</h1>
-  <p class="sub">Open your phone camera and point it at this code</p>
-  <div class="qr-box"><img id="qr-img" src="" alt="QR code"></div>
-  <div class="footer"><span class="pulse"></span>This code refreshes automatically — always scan the current one</div>
+  <h1 id="wd-title">📱 Scan to Check In Your Bags</h1>
+  <p class="sub" id="wd-sub">Open your phone camera and point it at this code</p>
+  <div class="qr-box" id="wd-qr-box"><img id="qr-img" src="" alt="QR code"></div>
+  <div class="footer" id="wd-footer"><span class="pulse"></span>This code refreshes automatically — always scan the current one</div>
 
   <script>
     async function refreshCode() {
       try {
         const res = await fetch('/api/warehouse-checkin/current-token');
         const data = await res.json();
+        if (data.paused) {
+          document.getElementById('wd-title').textContent = '⏸️ Self Check-In Paused';
+          document.getElementById('wd-sub').textContent = 'Please check your bags in with warehouse staff.';
+          document.getElementById('wd-qr-box').style.display = 'none';
+          document.getElementById('wd-footer').innerHTML = '';
+          return;
+        }
         document.getElementById('qr-img').src = data.qr_code;
       } catch (e) {
         // Keep showing the last successfully loaded code on a transient network error
