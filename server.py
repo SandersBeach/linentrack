@@ -799,6 +799,22 @@ def pickup_bag(bag_id):
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True,'home':bag['home_name'],'cleaner':cleaner['name']})
 
+@app.route('/api/bags/pickup-skipped', methods=['GET'])
+def get_pickup_skipped():
+    """Recent instances where a bag was checked in without ever being
+    scanned as picked up first — the cleaner skipped that step. Surfaced
+    here so it's actually visible, not just something buried in the raw log."""
+    limit = int(request.args.get('limit', 20))
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT t.*, h.name AS home_name, c.name AS cleaner_name
+                   FROM transactions t
+                   LEFT JOIN homes h ON h.id=t.home_id
+                   LEFT JOIN cleaners c ON c.id=t.cleaner_id
+                   WHERE t.action='Returned (pickup scan skipped)'
+                   ORDER BY t.id DESC LIMIT %s""", (limit,))
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
 @app.route('/api/bag/<path:bag_id>/checkin', methods=['POST'])
 def checkin(bag_id):
     data=request.json or {}; notes=data.get('notes',''); staff_name=data.get('staff_name','').strip()
@@ -807,10 +823,17 @@ def checkin(bag_id):
     bag=cur.fetchone()
     if not bag: cur.close(); conn.close(); return jsonify({'error':'Bag not found'}),404
     if bag['status']=='in': cur.close(); conn.close(); return jsonify({'error':'Already checked in'}),400
+    # If a bag goes straight from 'staged' to being checked in, the cleaner
+    # never scanned it out — that pickup-confirmation step got skipped. Flag
+    # this distinctly rather than logging it identically to a normal return,
+    # so it's visible (not just theoretically detectable in the raw log).
+    pickup_skipped = bag['status'] == 'staged'
+    action = 'Returned (pickup scan skipped)' if pickup_skipped else 'Returned'
     ts=now_central()
-    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,'Returned',%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],ts,notes,staff_name or None))
+    cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,%s,%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],action,ts,notes,staff_name or None))
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
-    conn.commit(); cur.close(); conn.close(); return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—'})
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—','pickup_skipped':pickup_skipped})
 
 # ── Warehouse-presence-gated cleaner self check-in ────────────────────────────
 # A screen physically mounted in the warehouse displays a QR code that rotates
