@@ -3350,10 +3350,27 @@ function bundlesDayRow(d, isMissed) {
 async function renderBundlesNeeded(gen) {
   const data = await fetch(`/api/pack-list/bundles?days=${_bundlesDays}`).then(r => r.json());
   if (_stale(gen)) return;
+
+  const totalTowelBags = data.missed.towel_bags_needed + data.days.reduce((s, d) => s + d.towel_bags_needed, 0);
+  const totalKing = data.missed.king_bundles_needed + data.days.reduce((s, d) => s + d.king_bundles_needed, 0);
+  const totalQueen = data.missed.queen_bundles_needed + data.days.reduce((s, d) => s + d.queen_bundles_needed, 0);
+  const totalTwin = data.missed.twin_bundles_needed + data.days.reduce((s, d) => s + d.twin_bundles_needed, 0);
+  const totalProps = data.missed.properties_counted + data.days.reduce((s, d) => s + d.properties_counted, 0);
+
   let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
       <div style="font-weight:600;font-size:14px;margin-right:auto">🧺 Bundles Needed — by day, in pickup order</div>
       <button class="btn ${_bundlesDays===3?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(3)">3 days</button>
       <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">7 days</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Total for the next ${_bundlesDays} day${_bundlesDays!==1?'s':''} (includes anything missed)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700;color:var(--teal)">${totalTowelBags}</div><div class="row-sub">Towel bags</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalKing}</div><div class="row-sub">King bundles</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalQueen}</div><div class="row-sub">Queen bundles</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalTwin}</div><div class="row-sub">Twin bundles</div></div>
+      </div>
+      <div class="row-sub" style="margin-top:8px">Across ${totalProps} propert${totalProps!==1?'ies':'y'}.</div>
     </div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Each row shows what to make for that specific day — missed days always show first, since those need attention now.</p>
     <div class="card">`;
