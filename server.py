@@ -75,7 +75,7 @@ def staff_role_list(staff):
     if not staff or not staff.get('role'): return []
     return [r.strip() for r in staff['role'].split(',') if r.strip()]
 
-VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin'}
+VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager'}
 
 def validate_role_string(role_str):
     """Validate a comma-separated role string like 'warehouse,maintenance'.
@@ -290,6 +290,11 @@ def init_db():
             king INTEGER DEFAULT 0, queen INTEGER DEFAULT 0, twin INTEGER DEFAULT 0,
             towels INTEGER DEFAULT 0, hand INTEGER DEFAULT 0, wash INTEGER DEFAULT 0,
             mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS staff_days_off (
+            id SERIAL PRIMARY KEY, staff_name TEXT NOT NULL,
+            day_of_week INTEGER NOT NULL,  -- 0=Monday ... 6=Sunday (Python's date.weekday())
+            UNIQUE(staff_name, day_of_week)
         );
         CREATE TABLE IF NOT EXISTS pack_supply_deductions (
             address TEXT NOT NULL, pack_date TEXT NOT NULL, deducted_at TEXT NOT NULL,
@@ -1784,7 +1789,7 @@ PACK_FORMULA_SEED = [
     {'address': '99 pond cypress way', 'property_name': '99 Pond Cypress Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
 ]
 
-STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'inspector', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Kim', 'warehouse', '6460'], ['April', 'warehouse', '1544']]
+STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'manager', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Kim', 'warehouse', '6460'], ['April', 'warehouse', '1544']]
 
 def check_staff_pin(pin):
     """Check PIN against staff table. Returns dict with name, role or None."""
@@ -1808,9 +1813,16 @@ def staff_auth():
     staff = check_staff_pin(pin)
     if staff:
         roles = staff_role_list(staff)
-        return jsonify({'success': True, 'name': staff['name'], 'role': roles[0] if roles else '', 'roles': roles, 'id': staff['id'], 'email': staff.get('email') or ''})
+        # Inspector role is paused for now — reversible, nothing deleted, just
+        # filtered out of what a login can actually use.
+        active_roles = [r for r in roles if r != 'inspector']
+        if not active_roles:
+            return jsonify({'error': 'The Inspector role is currently paused. Please check with your admin.'}), 403
+        return jsonify({'success': True, 'name': staff['name'], 'role': active_roles[0], 'roles': active_roles, 'id': staff['id'], 'email': staff.get('email') or ''})
     legacy_role = check_pin(pin)
     if legacy_role:
+        if legacy_role == 'inspector':
+            return jsonify({'error': 'The Inspector role is currently paused. Please check with your admin.'}), 403
         return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'roles': [legacy_role], 'is_master': legacy_role == 'admin'})
     return jsonify({'error': 'Invalid PIN'}), 401
 
@@ -3230,6 +3242,164 @@ def get_pack_list():
         })
     cur.close(); conn.close()
     return jsonify({'date': date_str, 'properties': properties})
+
+def _build_warehouse_dashboard_data():
+    """Shared computation behind both Cassie's dashboard and Admin's expanded
+    version: who packed what today/this week, on-pace vs what's actually
+    needed, days-off awareness, and bags currently with each cleaner."""
+    today_str = today_central()
+    today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
+    week_start_dt = today_dt - timedelta(days=today_dt.weekday())  # Monday
+    week_end_dt = week_start_dt + timedelta(days=6)  # Sunday
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
+                   FROM forecast_reservations
+                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
+                (week_start_dt.isoformat(), week_end_dt.isoformat()))
+    needed_pairs = {(r['unit_address'].lower().strip(), r['pack_date']) for r in cur.fetchall()}
+    cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
+                (week_start_dt.isoformat(), week_end_dt.isoformat()))
+    needed_pairs |= {(r['address'].lower().strip(), r['pack_date']) for r in cur.fetchall()}
+    needed_today = len([p for p in needed_pairs if p[1] == today_str])
+    needed_week = len(needed_pairs)
+
+    cur.execute("SELECT packed_by, pack_date FROM pack_list_status WHERE pack_date BETWEEN %s AND %s",
+                (week_start_dt.isoformat(), week_end_dt.isoformat()))
+    packed_rows = cur.fetchall()
+    packed_today_total = len([r for r in packed_rows if r['pack_date'] == today_str])
+    packed_week_total = len(packed_rows)
+
+    by_emp_today, by_emp_week = {}, {}
+    for r in packed_rows:
+        name = r['packed_by'] or 'Unknown'
+        by_emp_week[name] = by_emp_week.get(name, 0) + 1
+        if r['pack_date'] == today_str:
+            by_emp_today[name] = by_emp_today.get(name, 0) + 1
+
+    cur.execute("SELECT staff_name, day_of_week FROM staff_days_off")
+    off_by_staff = {}
+    for r in cur.fetchall():
+        off_by_staff.setdefault(r['staff_name'], []).append(r['day_of_week'])
+
+    cur.execute("SELECT name FROM staff_members WHERE active=1 AND role LIKE '%%warehouse%%'")
+    warehouse_names = {r['name'] for r in cur.fetchall()}
+    all_names = warehouse_names | set(by_emp_week.keys())
+
+    today_weekday = today_dt.weekday()
+    employees = []
+    for name in sorted(all_names):
+        off_days = off_by_staff.get(name, [])
+        employees.append({
+            'name': name,
+            'packed_today': by_emp_today.get(name, 0),
+            'packed_week': by_emp_week.get(name, 0),
+            'off_today': today_weekday in off_days,
+            'off_days': off_days,
+        })
+
+    cur.execute("""SELECT c.name AS cleaner_name, COUNT(b.id) AS bag_count
+                   FROM bags b JOIN cleaners c ON c.id=b.cleaner_id
+                   WHERE b.status='out'
+                   GROUP BY c.name ORDER BY c.name""")
+    cleaner_bags = cur.fetchall()
+
+    cur.close(); conn.close()
+    return {
+        'today': today_str, 'week_start': week_start_dt.isoformat(), 'week_end': week_end_dt.isoformat(),
+        'needed_today': needed_today, 'packed_today': packed_today_total,
+        'needed_week': needed_week, 'packed_week': packed_week_total,
+        'employees': employees,
+        'cleaner_bags': cleaner_bags,
+    }
+
+@app.route('/api/warehouse-dashboard', methods=['GET'])
+def warehouse_dashboard():
+    return jsonify(_build_warehouse_dashboard_data())
+
+@app.route('/api/admin-dashboard', methods=['GET'])
+def admin_dashboard():
+    """Everything Cassie's dashboard shows, plus key at-a-glance items from
+    across the rest of the app — orders, low stock, overdue bags, unresolved
+    flags, and packing-formula gaps."""
+    data = _build_warehouse_dashboard_data()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Orders awaiting receipt, and any unresolved discrepancies
+    cur.execute("SELECT COUNT(*) AS c FROM supply_orders WHERE status != 'Received'")
+    data['orders_pending'] = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM supply_orders WHERE has_discrepancy=1 AND discrepancy_resolved=0")
+    data['orders_discrepancies'] = cur.fetchone()['c']
+
+    # Low stock, across both Amenities/Cleaning Supplies and SupplyCentral
+    cur.execute("SELECT COUNT(*) AS c FROM hk_supply_items WHERE quantity <= low_stock_threshold")
+    hk_low = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM supply_items WHERE quantity <= low_stock_threshold")
+    supply_low = cur.fetchone()['c']
+    data['low_stock_count'] = hk_low + supply_low
+
+    # Bags out more than 24 hours
+    cur.execute("SELECT picked_up_at FROM bags WHERE status='out' AND picked_up_at IS NOT NULL")
+    now_dt = datetime.strptime(now_central(), '%Y-%m-%d %H:%M:%S')
+    overdue_count = 0
+    for r in cur.fetchall():
+        try:
+            picked = datetime.strptime(r['picked_up_at'], '%Y-%m-%d %H:%M:%S')
+            if (now_dt - picked).total_seconds() / 3600 >= 24:
+                overdue_count += 1
+        except Exception:
+            pass
+    data['bags_overdue'] = overdue_count
+
+    # Bags checked in recently without a pickup scan
+    cur.execute("SELECT COUNT(*) AS c FROM transactions WHERE action='Returned (pickup scan skipped)'")
+    data['pickup_skipped_count'] = cur.fetchone()['c']
+
+    # Unresolved supply flags
+    cur.execute("SELECT COUNT(*) AS c FROM pack_flags WHERE resolved=0")
+    data['unresolved_flags'] = cur.fetchone()['c']
+
+    # Properties with no packing formula, among this week's actual needed properties
+    cur.execute("SELECT address FROM pack_list_formula")
+    formula_addrs = {r['address'] for r in cur.fetchall()}
+    cur.execute("""SELECT DISTINCT unit_address FROM forecast_reservations
+                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
+                (data['week_start'], data['week_end']))
+    week_addrs = {r['unit_address'].lower().strip() for r in cur.fetchall()}
+    data['missing_formula_count'] = len(week_addrs - formula_addrs)
+
+    cur.close(); conn.close()
+    return jsonify(data)
+
+@app.route('/api/staff-days-off', methods=['GET'])
+def get_staff_days_off():
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM staff_days_off ORDER BY staff_name, day_of_week")
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/staff-days-off', methods=['POST'])
+def add_staff_day_off():
+    data = request.json or {}
+    staff_name = (data.get('staff_name') or '').strip()
+    day_of_week = data.get('day_of_week')
+    if not staff_name or day_of_week is None:
+        return jsonify({'error': 'Staff name and day of week are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO staff_days_off (staff_name,day_of_week) VALUES (%s,%s) ON CONFLICT (staff_name,day_of_week) DO NOTHING",
+        (staff_name, int(day_of_week))
+    )
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/staff-days-off/<int:off_id>', methods=['DELETE'])
+def delete_staff_day_off(off_id):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM staff_days_off WHERE id=%s", (off_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
 
 @app.route('/api/pack-list/bundles', methods=['GET'])
 def get_bundles_needed():
