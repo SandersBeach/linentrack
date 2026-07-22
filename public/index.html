@@ -506,7 +506,7 @@ const TABS = {
   inspector: ['amenities_inventory'],
   manager: ['warehouse_dashboard', 'pack_productivity'],
   coordinator: ['inventory_count', 'orders'],
-  admin: ['pack_list', 'admin_dashboard', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -595,8 +595,16 @@ function logout() {
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function buildTabs() {
+  // Which role's tabs come first shouldn't depend on checkbox display order —
+  // always prioritize Admin (broadest view) then Manager (dashboard-first
+  // role) ahead of any operational role someone might also have checked.
+  const ROLE_PRIORITY = ['admin', 'manager', 'warehouse', 'maintenance', 'coordinator', 'inspector'];
+  const orderedRoles = [...userRoles].sort((a, b) => {
+    const ai = ROLE_PRIORITY.indexOf(a); const bi = ROLE_PRIORITY.indexOf(b);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
   const seen = new Set(); const tabs = [];
-  userRoles.forEach(r => (TABS[r] || []).forEach(t => { if (!seen.has(t)) { seen.add(t); tabs.push(t); } }));
+  orderedRoles.forEach(r => (TABS[r] || []).forEach(t => { if (!seen.has(t)) { seen.add(t); tabs.push(t); } }));
   _availableTabs = tabs;
   document.getElementById('tab-bar').innerHTML = tabs.map(t =>
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
@@ -1929,6 +1937,7 @@ async function loadHKSupplies() {
 
 let _hkBucket = null; // 'Amenities' | 'Cleaning Supplies' — set by whichever tab is active
 let _hkAutoOpenCount = false; // set by the Wednesday dashboard task to jump straight to the Count subtab
+let _hkAutoOpenLowStock = false; // set by dashboard links to jump straight to the Low Stock subtab
 
 async function renderAmenitiesInventory(gen) { _hkBucket = 'Amenities'; await renderHKSupplyShared(gen, '🧴 Amenities Inventory'); }
 async function renderCleaningInventory(gen) { _hkBucket = 'Cleaning Supplies'; await renderHKSupplyShared(gen, '🧽 Cleaning Supplies Inventory'); }
@@ -1969,6 +1978,7 @@ async function renderHKSupplyShared(gen, title) {
     ${showCountSubtab ? `<div id="hkv-count" style="display:none"><div id="amenities-count-body"></div></div>` : ''}`;
   renderHKCards();
   if (_hkAutoOpenCount && showCountSubtab) { _hkAutoOpenCount = false; hkSubtab('count'); }
+  if (_hkAutoOpenLowStock) { _hkAutoOpenLowStock = false; hkSubtab('lowstock'); }
 }
 
 function hkSubtab(tab) {
@@ -3518,10 +3528,11 @@ async function renderBundlesNeeded(gen) {
 
 function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
 
-function paceCard(label, packed, needed, pct) {
+function paceCard(label, packed, needed, pct, onclickAction) {
   const color = pct >= 90 ? 'var(--teal)' : pct >= 60 ? '#E2B04A' : 'var(--coral-dark)';
-  return `<div class="card">
-    <div class="card-title">${label}</div>
+  const clickAttrs = onclickAction ? `style="cursor:pointer" onclick="${onclickAction}"` : '';
+  return `<div class="card" ${clickAttrs}>
+    <div class="card-title">${label}${onclickAction ? ' <span style="font-size:11px;color:var(--gray-400);font-weight:400">tap for details</span>' : ''}</div>
     <div style="display:flex;align-items:baseline;gap:8px;margin:4px 0">
       <div style="font-size:32px;font-weight:700;color:${color}">${packed}</div>
       <div style="font-size:16px;color:var(--gray-400)">/ ${needed} needed</div>
@@ -3533,10 +3544,11 @@ function paceCard(label, packed, needed, pct) {
   </div>`;
 }
 
-function metricCard(label, value, isWarning) {
-  return `<div class="card" style="text-align:center;padding:14px">
+function metricCard(label, value, isWarning, onclickAction) {
+  const clickAttrs = onclickAction ? `style="text-align:center;padding:14px;cursor:pointer" onclick="${onclickAction}"` : 'style="text-align:center;padding:14px"';
+  return `<div class="card" ${clickAttrs}>
     <div style="font-size:28px;font-weight:700;${isWarning && value > 0 ? 'color:var(--coral-dark)' : ''}">${value}</div>
-    <div class="row-sub">${label}</div>
+    <div class="row-sub">${label}${onclickAction ? ' →' : ''}</div>
   </div>`;
 }
 
@@ -3545,8 +3557,8 @@ function renderDashboardSharedHtml(data) {
   const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
 
   let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
-    ${paceCard('Today', data.packed_today, data.needed_today, pctToday)}
-    ${paceCard(`This Week (${data.week_start} – ${data.week_end})`, data.packed_week, data.needed_week, pctWeek)}
+    ${paceCard('Today', data.packed_today, data.needed_today, pctToday, "showTab('pack_list')")}
+    ${paceCard(`This Week (${data.week_start} – ${data.week_end})`, data.packed_week, data.needed_week, pctWeek, "showTab('pack_list')")}
   </div>
 
   <div class="card">
@@ -3605,13 +3617,13 @@ async function renderAdminDashboard(gen) {
   let html = `<div class="card" style="margin-bottom:1rem">
     <div class="card-title">Key Items — Across the App</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:8px">
-      ${metricCard('Orders pending', data.orders_pending, false)}
-      ${metricCard('Order discrepancies', data.orders_discrepancies, true)}
-      ${metricCard('Low stock items', data.low_stock_count, true)}
-      ${metricCard('Bags overdue (24h+)', data.bags_overdue, true)}
-      ${metricCard('Pickup scans skipped', data.pickup_skipped_count, true)}
-      ${metricCard('Unresolved flags', data.unresolved_flags, true)}
-      ${metricCard('Missing formulas (this week)', data.missing_formula_count, true)}
+      ${metricCard('Orders pending', data.orders_pending, false, "_ordersViewMode='pending';showTab('orders')")}
+      ${metricCard('Order discrepancies', data.orders_discrepancies, true, "_ordersViewMode='discrepancies';showTab('orders')")}
+      ${metricCard('Low stock items', data.low_stock_count, true, "_hkAutoOpenLowStock=true;showTab('amenities_inventory')")}
+      ${metricCard('Bags overdue (24h+)', data.bags_overdue, true, "showTab('overdue')")}
+      ${metricCard('Pickup scans skipped', data.pickup_skipped_count, true, "showTab('overdue')")}
+      ${metricCard('Unresolved flags', data.unresolved_flags, true, "showTab('pack_flags')")}
+      ${metricCard('Missing formulas (this week)', data.missing_formula_count, true, "showTab('settings')")}
     </div>
   </div>`;
   html += renderDashboardSharedHtml(data);
@@ -4391,9 +4403,9 @@ async function loadStaffList() {
 
 function roleCheckboxes(selectedRoles) {
   const roles = [
+    {v:'admin', l:'Admin'}, {v:'manager', l:'Manager (productivity dashboard)'},
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
-    {v:'coordinator', l:'Coordinator'}, {v:'admin', l:'Admin'},
-    {v:'manager', l:'Manager (productivity dashboard)'}
+    {v:'coordinator', l:'Coordinator'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
