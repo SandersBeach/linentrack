@@ -359,13 +359,37 @@
     <label>Which cleaner is this for?</label>
     <select id="pack-modal-cleaner"><option value="">Select cleaner...</option></select>
     <label>Scan each bag tag being packed</label>
-    <input id="pack-modal-scan" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="off"
-      onkeydown="if(event.key==='Enter'){event.preventDefault();scanPackBag();}">
+    <div style="display:flex;gap:8px;align-items:flex-start">
+      <input id="pack-modal-scan" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="off"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();scanPackBag();}" style="flex:1">
+      <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('pack-modal-scan','scanPackBag')">📷 Camera</button>
+    </div>
     <div id="pack-modal-scan-err" style="font-size:12px;color:var(--coral-dark);min-height:16px;margin-top:4px"></div>
     <div id="pack-modal-bag-list" style="margin-top:6px"></div>
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-ghost" style="flex:1" onclick="closePackModal()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" onclick="confirmPack()">✓ Pack &amp; stage</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-property-detail" class="modal-overlay" style="display:none" onclick="if(event.target===this)closePropertyDetail()">
+  <div class="modal-box" style="max-width:480px">
+    <div id="property-detail-body"></div>
+    <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="closePropertyDetail()">Close</button>
+  </div>
+</div>
+
+<div id="modal-camera-scan" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:420px">
+    <h3>📷 Scan with Camera</h3>
+    <div style="position:relative;border-radius:var(--radius-sm);overflow:hidden;background:#000;margin-top:10px">
+      <video id="camera-scan-video" autoplay playsinline muted style="width:100%;display:block"></video>
+    </div>
+    <canvas id="camera-scan-canvas" style="display:none"></canvas>
+    <div id="camera-scan-error" style="color:var(--coral-dark);font-size:13px;margin-top:8px"></div>
+    <div class="modal-actions" style="margin-top:1rem">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeCameraScan()">Cancel</button>
     </div>
   </div>
 </div>
@@ -477,11 +501,12 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['pack_list', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
+  warehouse: ['pack_list', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders', 'store'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders'],
-  inspector: ['amenities_inventory', 'store'],
+  inspector: ['amenities_inventory'],
+  manager: ['warehouse_dashboard', 'pack_productivity'],
   coordinator: ['inventory_count', 'orders'],
-  admin: ['pack_list', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
+  admin: ['pack_list', 'admin_dashboard', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -496,6 +521,8 @@ const TAB_LABELS = {
   forecast: '🔮 Forecast',
   store: '🏪 Store',
   pack_list: '📋 Pack List',
+  warehouse_dashboard: '📊 Dashboard',
+  admin_dashboard: '📊 Dashboard',
   bundles_needed: '🧺 Bundles Needed',
   pack_flags: '⚠️ Flag Issue',
   pack_emergency: '⚡ Last-Min Add',
@@ -534,7 +561,7 @@ async function submitPin() {
     _currentStaffEmail = data.email || '';
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse' };
+    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse', manager:'📊 Manager' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
     const defaultView = sessionStorage.getItem('defaultView');
@@ -555,6 +582,7 @@ function logout() {
   updateDots();
   // Close any modal window the previous person left open — otherwise it stays
   // on screen (and interactive) even after someone else logs in.
+  closeCameraScan(); // stop any active camera stream, not just hide the modal
   ['modal-supply-item','modal-supply-tx','modal-supply-qr'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
@@ -594,6 +622,8 @@ const MODULE_NAMES = {
   forecast: 'ForecastCentral',
   store: 'StoreCentral',
   pack_list: 'PackListCentral',
+  warehouse_dashboard: 'PackListCentral',
+  admin_dashboard: 'PackListCentral',
   bundles_needed: 'PackListCentral',
   pack_flags: 'PackListCentral',
   pack_emergency: 'PackListCentral',
@@ -601,6 +631,7 @@ const MODULE_NAMES = {
 };
 function showTab(t) {
   currentTab = t;
+  closeCameraScan(); // stop any active camera stream — navigating away should never leave it running
   const myGen = ++_tabGeneration;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + t);
@@ -622,6 +653,8 @@ function showTab(t) {
     forecast: renderForecast,
     store: renderStore,
     pack_list: renderPackList,
+    warehouse_dashboard: renderWarehouseDashboard,
+    admin_dashboard: renderAdminDashboard,
     bundles_needed: renderBundlesNeeded,
     pack_flags: renderPackFlags,
     pack_emergency: renderPackEmergency,
@@ -1400,8 +1433,11 @@ async function renderLoanerScan(gen) {
         <select id="loaner-home-sel" style="margin-bottom:12px"><option value="">Select home...</option>${homeOpts}</select>
       </div>
       <label>Scan loaner item tag</label>
-      <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" />
-      <div style="font-size:12px;color:var(--gray-400);margin-top:-6px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing</div>
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" style="flex:1" />
+        <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('loaner-scan-input','processLoanerScan')">📷 Camera</button>
+      </div>
+      <div style="font-size:12px;color:var(--gray-400);margin-top:4px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing · or tap Camera to use your phone</div>
     </div>
     <div id="loaner-session-log"></div>`;
   document.getElementById('loaner-scan-input')?.focus();
@@ -3325,6 +3361,74 @@ async function renderPackProductivity(gen) {
     </div>`;
 }
 
+// ── Reusable phone-camera scanner ────────────────────────────────────────────
+// Wired to any "Scan or type..." field via a camera button next to it. Opens
+// a live camera view, decodes QR codes with jsQR, and feeds the result into
+// the target input the exact same way a Bluetooth scanner or manual typing
+// would — same downstream processing either way.
+let _cameraScanStream = null;
+let _cameraScanTargetId = null;
+let _cameraScanCallback = null;
+let _cameraScanRAF = null;
+
+async function openCameraScan(targetInputId, callbackFnName) {
+  _cameraScanTargetId = targetInputId;
+  _cameraScanCallback = callbackFnName;
+  const errEl = document.getElementById('camera-scan-error');
+  if (errEl) errEl.textContent = '';
+  document.getElementById('modal-camera-scan').style.display = 'flex';
+  if (typeof jsQR === 'undefined') {
+    if (errEl) errEl.textContent = 'Camera scanning failed to load — check your connection and try again, or type the ID manually.';
+    return;
+  }
+  try {
+    _cameraScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video = document.getElementById('camera-scan-video');
+    video.srcObject = _cameraScanStream;
+    await video.play();
+    _cameraScanLoop();
+  } catch (e) {
+    if (errEl) errEl.textContent = 'Could not access the camera — check that this browser/device has camera permission, or type the ID manually.';
+  }
+}
+
+function _cameraScanLoop() {
+  if (!_cameraScanStream) return; // scan was cancelled
+  const video = document.getElementById('camera-scan-video');
+  const canvas = document.getElementById('camera-scan-canvas');
+  if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
+    _cameraScanRAF = requestAnimationFrame(_cameraScanLoop);
+    return;
+  }
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(imageData.data, imageData.width, imageData.height);
+  if (code && code.data) {
+    onCameraScanSuccess(code.data);
+    return;
+  }
+  _cameraScanRAF = requestAnimationFrame(_cameraScanLoop);
+}
+
+function onCameraScanSuccess(text) {
+  closeCameraScan();
+  const input = document.getElementById(_cameraScanTargetId);
+  if (!input) return;
+  input.value = text;
+  if (_cameraScanCallback && typeof window[_cameraScanCallback] === 'function') {
+    window[_cameraScanCallback]();
+  }
+}
+
+function closeCameraScan() {
+  if (_cameraScanRAF) { cancelAnimationFrame(_cameraScanRAF); _cameraScanRAF = null; }
+  if (_cameraScanStream) { _cameraScanStream.getTracks().forEach(t => t.stop()); _cameraScanStream = null; }
+  const modal = document.getElementById('modal-camera-scan');
+  if (modal) modal.style.display = 'none';
+}
+
 function todayISO() {
   const d = new Date();
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -3363,10 +3467,9 @@ function bundlesDayRow(d, isMissed) {
   </div>`;
 }
 
-async function renderBundlesNeeded(gen) {
-  const data = await fetch(`/api/pack-list/bundles?days=${_bundlesDays}`).then(r => r.json());
-  if (_stale(gen)) return;
+let _bundlesRefreshTimer = null;
 
+function renderBundlesBody(data) {
   const totalTowelBags = data.missed.towel_bags_needed + data.days.reduce((s, d) => s + d.towel_bags_needed, 0);
   const totalKing = data.missed.king_bundles_needed + data.days.reduce((s, d) => s + d.king_bundles_needed, 0);
   const totalQueen = data.missed.queen_bundles_needed + data.days.reduce((s, d) => s + d.queen_bundles_needed, 0);
@@ -3398,7 +3501,145 @@ async function renderBundlesNeeded(gen) {
   document.getElementById('main-content').innerHTML = html;
 }
 
+async function renderBundlesNeeded(gen) {
+  const data = await fetch(`/api/pack-list/bundles?days=${_bundlesDays}`).then(r => r.json());
+  if (_stale(gen)) return;
+  renderBundlesBody(data);
+
+  if (_bundlesRefreshTimer) clearInterval(_bundlesRefreshTimer);
+  _bundlesRefreshTimer = setInterval(async () => {
+    if (currentTab !== 'bundles_needed') { clearInterval(_bundlesRefreshTimer); _bundlesRefreshTimer = null; return; }
+    try {
+      const freshData = await fetch(`/api/pack-list/bundles?days=${_bundlesDays}`).then(r => r.json());
+      renderBundlesBody(freshData);
+    } catch (e) { /* silent — next tick will retry */ }
+  }, 30000);
+}
+
 function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
+
+function paceCard(label, packed, needed, pct) {
+  const color = pct >= 90 ? 'var(--teal)' : pct >= 60 ? '#E2B04A' : 'var(--coral-dark)';
+  return `<div class="card">
+    <div class="card-title">${label}</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin:4px 0">
+      <div style="font-size:32px;font-weight:700;color:${color}">${packed}</div>
+      <div style="font-size:16px;color:var(--gray-400)">/ ${needed} needed</div>
+    </div>
+    <div style="background:var(--gray-100);border-radius:6px;height:8px;overflow:hidden">
+      <div style="height:100%;background:${color};width:${Math.min(pct,100)}%"></div>
+    </div>
+    <div class="row-sub" style="margin-top:6px">${pct}% done</div>
+  </div>`;
+}
+
+function metricCard(label, value, isWarning) {
+  return `<div class="card" style="text-align:center;padding:14px">
+    <div style="font-size:28px;font-weight:700;${isWarning && value > 0 ? 'color:var(--coral-dark)' : ''}">${value}</div>
+    <div class="row-sub">${label}</div>
+  </div>`;
+}
+
+function renderDashboardSharedHtml(data) {
+  const pctToday = data.needed_today ? Math.round(data.packed_today / data.needed_today * 100) : 100;
+  const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
+    ${paceCard('Today', data.packed_today, data.needed_today, pctToday)}
+    ${paceCard(`This Week (${data.week_start} – ${data.week_end})`, data.packed_week, data.needed_week, pctWeek)}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Warehouse Team</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Packed counts for today and this week, per person. Anyone scheduled off today is marked, so it doesn't read as them not working.</p>`;
+
+  data.employees.forEach(e => {
+    html += `<div class="row">
+      <div class="row-main">
+        <div class="row-title">${e.name} ${e.off_today ? '<span class="badge" style="background:var(--gray-100);color:var(--gray-400)">Off today</span>' : ''}</div>
+        <div class="row-sub">Today: ${e.off_today ? '—' : e.packed_today} · This week: ${e.packed_week}</div>
+      </div>
+    </div>`;
+  });
+  if (!data.employees.length) html += `<div class="empty">No warehouse staff on file yet.</div>`;
+  html += `</div>`;
+
+  html += `<div class="card" style="margin-top:1rem">
+    <div class="card-title">Bags Currently Out — by Cleaner</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">How many bags each cleaner has picked up and not yet returned, right now.</p>`;
+  if (data.cleaner_bags.length) {
+    data.cleaner_bags.forEach(c => {
+      html += `<div class="row"><div class="row-main"><div class="row-title">${c.cleaner_name}</div></div><span class="badge badge-out">${c.bag_count} bag${c.bag_count!==1?'s':''}</span></div>`;
+    });
+  } else {
+    html += `<div class="empty">No cleaners currently have any bags out.</div>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="card" style="margin-top:1rem">
+    <div class="card-title">Manage recurring days off</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Set which day(s) of the week each person is regularly off, so their dashboard numbers make sense at a glance.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <select id="wd-off-name" style="flex:1;min-width:140px">${data.employees.map(e => `<option value="${e.name}">${e.name}</option>`).join('')}</select>
+      <select id="wd-off-day" style="flex:1;min-width:120px">
+        <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+        <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="addStaffDayOff()">+ Add</button>
+    </div>
+    <div id="wd-off-list"></div>
+  </div>`;
+  return html;
+}
+
+async function renderWarehouseDashboard(gen) {
+  const data = await fetch('/api/warehouse-dashboard').then(r => r.json());
+  if (_stale(gen)) return;
+  document.getElementById('main-content').innerHTML = renderDashboardSharedHtml(data);
+  loadStaffDaysOffList();
+}
+
+async function renderAdminDashboard(gen) {
+  const data = await fetch('/api/admin-dashboard').then(r => r.json());
+  if (_stale(gen)) return;
+  let html = `<div class="card" style="margin-bottom:1rem">
+    <div class="card-title">Key Items — Across the App</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:8px">
+      ${metricCard('Orders pending', data.orders_pending, false)}
+      ${metricCard('Order discrepancies', data.orders_discrepancies, true)}
+      ${metricCard('Low stock items', data.low_stock_count, true)}
+      ${metricCard('Bags overdue (24h+)', data.bags_overdue, true)}
+      ${metricCard('Pickup scans skipped', data.pickup_skipped_count, true)}
+      ${metricCard('Unresolved flags', data.unresolved_flags, true)}
+      ${metricCard('Missing formulas (this week)', data.missing_formula_count, true)}
+    </div>
+  </div>`;
+  html += renderDashboardSharedHtml(data);
+  document.getElementById('main-content').innerHTML = html;
+  loadStaffDaysOffList();
+}
+
+const DAY_NAMES = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+async function loadStaffDaysOffList() {
+  const rows = await fetch('/api/staff-days-off').then(r => r.json());
+  const el = document.getElementById('wd-off-list');
+  if (!el) return;
+  el.innerHTML = rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title">${r.staff_name}</div><div class="row-sub">Off every ${DAY_NAMES[r.day_of_week]}</div></div><button class="btn btn-ghost btn-sm" onclick="removeStaffDayOff(${r.id})">✕ Remove</button></div>`).join('') : '<div class="empty">No recurring days off set yet.</div>';
+}
+
+async function addStaffDayOff() {
+  const staff_name = document.getElementById('wd-off-name')?.value;
+  const day_of_week = document.getElementById('wd-off-day')?.value;
+  if (!staff_name) { alert('No staff selected'); return; }
+  await fetch('/api/staff-days-off', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name, day_of_week }) });
+  showTab(currentTab);
+}
+
+async function removeStaffDayOff(id) {
+  await fetch(`/api/staff-days-off/${id}`, { method: 'DELETE' });
+  loadStaffDaysOffList();
+}
 
 async function renderPackList(gen) {
   const [wkRes, clRes, invRes] = await Promise.all([
@@ -3442,6 +3683,49 @@ function formatDueDate(packDate, packed) {
   return `<div class="row-sub">Due: ${dateLabel}</div>`;
 }
 
+function showPropertyDetail(address, packDate) {
+  const p = packListState.properties.find(x => x.address === address && x.pack_date === packDate);
+  if (!p) return;
+  const f = p.formula;
+  let dateLine = p.pack_date ? formatDueDate(p.pack_date, p.packed) : '';
+  let body = `<div style="text-align:center;margin-bottom:1rem">
+    <div style="font-size:24px;font-weight:700">${p.property_name}</div>
+    ${dateLine}
+  </div>`;
+  if (f) {
+    body += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:18px;font-weight:600;margin-bottom:1.25rem">
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.king}</div><div class="row-sub">King sets</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.queen}</div><div class="row-sub">Queen sets</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.twin}</div><div class="row-sub">Twin sets</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.towels}</div><div class="row-sub">Bath towels</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.hand}</div><div class="row-sub">Hand towels</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.wash}</div><div class="row-sub">Wash cloths</div></div>
+      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.mats}</div><div class="row-sub">Bath mats</div></div>
+      ${f.pool ? `<div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.pool}</div><div class="row-sub">Pool towels</div></div>` : ''}
+    </div>`;
+    if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px">✏️ Edit formula</a></div>`;
+  } else {
+    body += `<div class="card" style="text-align:center;color:var(--coral-dark);font-size:16px;margin-bottom:1.25rem">No packing formula on file for this property${userRoles.includes('admin') ? `<br><a href="#" onclick="closePropertyDetail();openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`;
+  }
+  if (p.packed) {
+    body += `<div class="badge badge-ok" style="font-size:16px;padding:10px 16px;display:block;text-align:center;margin-bottom:8px">✓ Packed</div>
+      <div class="row-sub" style="text-align:center">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name}</div>
+      <div class="row-sub" style="text-align:center">Bags: ${p.staged_bags.join(', ')}</div>
+      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePropertyDetail();undoPack('${address}','${packDate}')">Undo</button>`;
+  } else {
+    if (p.assigned_cleaner_name) body += `<div class="row-sub" style="text-align:center;margin-bottom:10px">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>`;
+    else if (p.assigned_raw) body += `<div class="row-sub" style="text-align:center;color:var(--coral-dark);margin-bottom:10px">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>`;
+    body += `<button class="btn btn-primary btn-full" style="font-size:18px;padding:16px" onclick="closePropertyDetail();openPackModal('${address}','${packDate}')">✓ Mark Packed</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${address}','${packDate}')">⚠ Flag</button>`;
+  }
+  document.getElementById('property-detail-body').innerHTML = body;
+  document.getElementById('modal-property-detail').style.display = 'flex';
+}
+
+function closePropertyDetail() {
+  document.getElementById('modal-property-detail').style.display = 'none';
+}
+
 function packCard(p, showDate) {
   const f = p.formula;
   let dateLine = '';
@@ -3451,10 +3735,10 @@ function packCard(p, showDate) {
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
     ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <div>
-        <div style="font-weight:600;font-size:14px">${p.property_name}</div>
+      <div style="cursor:pointer" onclick="showPropertyDetail('${p.address}','${p.pack_date}')">
+        <div style="font-weight:600;font-size:14px">${p.property_name} <span style="font-size:11px;color:var(--gray-400);font-weight:400">tap to enlarge</span></div>
         ${dateLine}
-        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}${userRoles.includes('admin') ? ` · <a href="#" onclick="openEditFormulaModal('${p.address}');return false;" style="color:var(--teal)">✏️ edit</a>` : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property${userRoles.includes('admin') ? ` — <a href="#" onclick="openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`}
+        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
       </div>
       <div style="text-align:right">
         ${p.packed
@@ -3839,7 +4123,7 @@ function renderManageFormulasList() {
     html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
   }
   html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
-  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels${f.pool ? ' · ' + f.pool + ' pool' : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
   el.innerHTML = html;
 }
 
@@ -4049,6 +4333,7 @@ async function submitPOFromTab() {
 }
 
 </script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 </body>
 </html>
 <script>
@@ -4076,7 +4361,7 @@ async function loadStaffList() {
     staff = await fetch('/api/staff').then(r=>r.json());
   }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
-  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector' };
+  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager' };
   const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector'];
   const byRole = {};
   staff.forEach(s => {
@@ -4107,7 +4392,8 @@ async function loadStaffList() {
 function roleCheckboxes(selectedRoles) {
   const roles = [
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
-    {v:'inspector', l:'Inspector'}, {v:'coordinator', l:'Coordinator'}, {v:'admin', l:'Admin'}
+    {v:'coordinator', l:'Coordinator'}, {v:'admin', l:'Admin'},
+    {v:'manager', l:'Manager (productivity dashboard)'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
