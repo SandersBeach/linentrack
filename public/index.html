@@ -1267,10 +1267,60 @@ async function renderSettings(gen) {
     </div>
     <div id="wd-off-list"></div>
     </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Warehouse Daily Goals</h2></div>
+    <div class="card"><div class="card-title">Edit a day's focus & tasks</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">This is what shows on the warehouse dashboard as the day's guide — adjust anytime as priorities change.</p>
+    <label>Day</label>
+    <select id="wg-day-select" onchange="loadWarehouseGoalDay()">
+      <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+      <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+    </select>
+    <label>Primary focus</label>
+    <input id="wg-primary-focus" placeholder="e.g. Stock the warehouse for the upcoming week">
+    <label>Tasks (one per line)</label>
+    <textarea id="wg-tasks" rows="6" style="width:100%;font-family:inherit;font-size:14px;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm)"></textarea>
+    <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveWarehouseGoalDay()">Save this day</button>
+    </div>
+    <div class="card"><div class="card-title">Every-day standing notes</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Shown every day regardless of which day it is (daily standards, trash pickup schedule, etc.) — one per line.</p>
+    <textarea id="wg-standing-notes" rows="6" style="width:100%;font-family:inherit;font-size:14px;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm)"></textarea>
+    <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveWarehouseStandingNotes()">Save standing notes</button>
+    </div>`;
   document.getElementById('main-content').innerHTML = html;
   loadCleanerAliases();
   renderManageFormulas();
   loadDaysOffSettingsSection();
+  loadWarehouseGoalsSettings();
+}
+let _warehouseGoalsCache = null;
+async function loadWarehouseGoalsSettings() {
+  _warehouseGoalsCache = await fetch('/api/warehouse-goals').then(r => r.json());
+  document.getElementById('wg-standing-notes').value = _warehouseGoalsCache.standing_notes.map(n => n.note_text).join('\n');
+  loadWarehouseGoalDay();
+}
+function loadWarehouseGoalDay() {
+  const dow = parseInt(document.getElementById('wg-day-select').value);
+  const day = _warehouseGoalsCache?.all_days.find(d => d.day_of_week === dow);
+  document.getElementById('wg-primary-focus').value = day ? day.primary_focus : '';
+  document.getElementById('wg-tasks').value = day ? day.tasks : '';
+}
+async function saveWarehouseGoalDay() {
+  const dow = document.getElementById('wg-day-select').value;
+  const primary_focus = document.getElementById('wg-primary-focus').value.trim();
+  const tasks = document.getElementById('wg-tasks').value.trim();
+  await fetch(`/api/warehouse-goals/${dow}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ primary_focus, tasks, pin: _currentPin })
+  });
+  loadWarehouseGoalsSettings();
+}
+async function saveWarehouseStandingNotes() {
+  const notes = document.getElementById('wg-standing-notes').value.split('\n');
+  await fetch('/api/warehouse-standing-notes', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes, pin: _currentPin })
+  });
+  loadWarehouseGoalsSettings();
 }
 async function loadDaysOffSettingsSection() {
   const data = await fetch('/api/warehouse-dashboard').then(r => r.json());
@@ -3195,15 +3245,14 @@ function fcFileSelected(inputId, nameId) {
 
 let _boxPackingRange = 'week';
 
-function _boxPackingDates() {
-  const today = new Date();
-  const toISO = d => d.toISOString().slice(0,10);
-  const start = toISO(today);
-  let end = new Date(today);
-  if (_boxPackingRange === 'week') end.setDate(end.getDate() + 6);
-  else if (_boxPackingRange === '2weeks') end.setDate(end.getDate() + 13);
-  else if (_boxPackingRange === 'month') end.setDate(end.getDate() + 29);
-  return { from: start, to: toISO(end) };
+async function _boxPackingDates() {
+  const start = await getServerToday();
+  const startDate = new Date(start + 'T00:00:00Z');
+  let end = new Date(startDate);
+  if (_boxPackingRange === 'week') end.setUTCDate(end.getUTCDate() + 6);
+  else if (_boxPackingRange === '2weeks') end.setUTCDate(end.getUTCDate() + 13);
+  else if (_boxPackingRange === 'month') end.setUTCDate(end.getUTCDate() + 29);
+  return { from: start, to: end.toISOString().slice(0,10) };
 }
 
 function setBoxPackingRange(range) {
@@ -3215,7 +3264,7 @@ async function renderBoxPacking() {
   const body = document.getElementById('forecast-body');
   body.innerHTML = '<div class="card">Calculating box packing capacity...</div>';
   try {
-    const { from, to } = _boxPackingDates();
+    const { from, to } = await _boxPackingDates();
     const data = await fetch(`/api/forecast/box-packing?from=${from}&to=${to}`).then(r=>r.json());
 
     const shortfall = data.shortfall;
@@ -3577,9 +3626,8 @@ function renderBundlesBody(data) {
   const rangeLabel = _bundlesDays === 7 ? 'Week' : _bundlesDays === 14 ? '2 Weeks' : _bundlesDays === 30 ? 'Month' : `${_bundlesDays} days`;
   let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
       <div style="font-weight:600;font-size:14px;margin-right:auto">🧺 Bundles Needed — by day, in pickup order</div>
-      <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">Week</button>
-      <button class="btn ${_bundlesDays===14?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(14)">2 Weeks</button>
-      <button class="btn ${_bundlesDays===30?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(30)">Month</button>
+      <button class="btn ${_bundlesDays===5?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(5)">5 days</button>
+      <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">7 days</button>
     </div>
     <div class="card">
       <div class="card-title">Total for the next ${rangeLabel} (includes anything missed)</div>
@@ -3650,6 +3698,35 @@ function renderDashboardSharedHtml(data) {
   const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
 
   let html = '';
+  if (data.goals && data.goals.missed_yesterday && data.goals.missed_yesterday.length) {
+    html += `<div class="card" style="margin-bottom:1rem;background:#FAECE7;border-color:#D85A30">
+      <div class="card-title" style="color:var(--coral-dark)">⚠️ Missed from yesterday (${data.goals.missed_yesterday.length})</div>
+      <div class="row-sub" style="margin-bottom:6px">These never got checked off — tap once done, or if it's no longer relevant.</div>
+      ${data.goals.missed_yesterday.map(m => `<div onclick="toggleGoalTask('${m.task_key}','${m.log_date}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5"><span style="flex-shrink:0">⬜</span><span>${m.text}</span></div>`).join('')}
+    </div>`;
+  }
+  if (data.goals && data.goals.todays_goal) {
+    const g = data.goals.todays_goal;
+    const completions = data.goals.completions || {};
+    const taskList = g.tasks.split('\n').filter(t => t.trim());
+    const taskRow = (key, text) => {
+      const done = completions[key];
+      return `<div onclick="toggleGoalTask('${key}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5;${done ? 'color:var(--gray-400);text-decoration:line-through' : ''}">
+        <span style="flex-shrink:0">${done ? '✅' : '⬜'}</span><span>${text}${done ? ` <span style="font-size:11px;text-decoration:none">(${done})</span>` : ''}</span>
+      </div>`;
+    };
+    html += `<div class="card" style="margin-bottom:1rem;background:var(--teal-light);border-color:var(--teal-mid)">
+      <div class="card-title" style="color:var(--teal-dark)">🎯 ${DAY_NAMES[g.day_of_week]}'s Focus</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">${g.primary_focus}</div>
+      <div style="margin-bottom:10px">
+        ${taskList.map((t, i) => taskRow(`day-${g.day_of_week}-${i}`, t)).join('')}
+      </div>
+      ${data.goals.standing_notes.length ? `<div style="border-top:0.5px solid var(--teal-mid);padding-top:10px;margin-top:6px">
+        <div style="font-size:12px;font-weight:600;color:var(--teal-dark);margin-bottom:4px">Every day</div>
+        ${data.goals.standing_notes.map(n => taskRow(`standing-${n.id}`, n.note_text)).join('')}
+      </div>` : ''}
+    </div>`;
+  }
   if (data.pending_count_review) {
     const pc = data.pending_count_review;
     html += `<div style="background:#FEF3C7;border:0.5px solid #FCD34D;border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewPastCount(${pc.id},currentTab)">
@@ -3682,17 +3759,6 @@ function renderDashboardSharedHtml(data) {
   html += `</div>`;
 
   html += `<div class="card" style="margin-top:1rem">
-    <div class="card-title">Bags Currently Out — by Cleaner</div>
-    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">How many bags each cleaner has picked up and not yet returned, right now.</p>`;
-  if (data.cleaner_bags.length) {
-    data.cleaner_bags.forEach(c => {
-      html += `<div class="row"><div class="row-main"><div class="row-title">${c.cleaner_name}</div></div><span class="badge badge-out">${c.bag_count} bag${c.bag_count!==1?'s':''}</span></div>`;
-    });
-  } else {
-    html += `<div class="empty">No cleaners currently have any bags out.</div>`;
-  }
-  html += `</div>`;
-  html += `<div class="card" style="margin-top:1rem">
     <div class="card-title">📦 Laundry Bins & Amenity Boxes</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:8px">
       ${metricCard('Ready to go now', data.amenity_box_stock, false, "showTab('daily_tasks')")}
@@ -3714,18 +3780,35 @@ function renderDashboardSharedHtml(data) {
   return html;
 }
 
+async function toggleGoalTask(taskKey, logDate) {
+  await fetch('/api/warehouse-goals/toggle-task', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_key: taskKey, completed_by: _currentStaffName, log_date: logDate || '' })
+  });
+  showTab(currentTab);
+}
+
 async function renderWarehouseDashboard(gen) {
-  const data = await fetch('/api/warehouse-dashboard').then(r => r.json());
+  const [data, goals] = await Promise.all([
+    fetch('/api/warehouse-dashboard').then(r => r.json()),
+    fetch('/api/warehouse-goals').then(r => r.json())
+  ]);
   if (_stale(gen)) return;
+  data.goals = goals;
   document.getElementById('main-content').innerHTML = renderDashboardSharedHtml(data);
 }
 
 async function renderAdminDashboard(gen) {
-  const data = await fetch('/api/admin-dashboard').then(r => r.json());
+  const [data, goals] = await Promise.all([
+    fetch('/api/admin-dashboard').then(r => r.json()),
+    fetch('/api/warehouse-goals').then(r => r.json())
+  ]);
   if (_stale(gen)) return;
+  data.goals = goals;
   let html = `<div class="card" style="margin-bottom:1rem">
     <div class="card-title">Key Items — Across the App</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:8px">
+      ${metricCard('Bags currently out', data.bags_out_total, false, "showTab('status')")}
       ${metricCard('Orders pending', data.orders_pending, false, "_ordersViewMode='pending';showTab('orders')")}
       ${metricCard('Order discrepancies', data.orders_discrepancies, true, "_ordersViewMode='discrepancies';showTab('orders')")}
       ${metricCard('Low stock items', data.low_stock_count, true, "_hkAutoOpenLowStock=true;showTab('amenities_inventory')")}
@@ -3938,7 +4021,7 @@ function packCard(p, showDate) {
       <div style="cursor:pointer" onclick="showPropertyDetail('${p.address}','${p.pack_date}')">
         <div style="font-weight:600;font-size:14px">${p.property_name} <span style="font-size:11px;color:var(--gray-400);font-weight:400">tap to enlarge</span></div>
         ${dateLine}
-        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
+        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
       </div>
       <div style="text-align:right">
         ${p.packed
@@ -4343,7 +4426,7 @@ function renderManageFormulasList() {
     html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
   }
   html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
-  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
   el.innerHTML = html;
 }
 
