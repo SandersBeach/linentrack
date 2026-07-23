@@ -3693,21 +3693,19 @@ function metricCard(label, value, isWarning, onclickAction) {
   </div>`;
 }
 
-function renderDashboardSharedHtml(data) {
-  const pctToday = data.needed_today ? Math.round(data.packed_today / data.needed_today * 100) : 100;
-  const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
-
+function renderGoalsHtml(goals) {
   let html = '';
-  if (data.goals && data.goals.missed_yesterday && data.goals.missed_yesterday.length) {
+  if (!goals) return html;
+  if (goals.missed_yesterday && goals.missed_yesterday.length) {
     html += `<div class="card" style="margin-bottom:1rem;background:#FAECE7;border-color:#D85A30">
-      <div class="card-title" style="color:var(--coral-dark)">⚠️ Missed from yesterday (${data.goals.missed_yesterday.length})</div>
+      <div class="card-title" style="color:var(--coral-dark)">⚠️ Missed from yesterday (${goals.missed_yesterday.length})</div>
       <div class="row-sub" style="margin-bottom:6px">These never got checked off — tap once done, or if it's no longer relevant.</div>
-      ${data.goals.missed_yesterday.map(m => `<div onclick="toggleGoalTask('${m.task_key}','${m.log_date}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5"><span style="flex-shrink:0">⬜</span><span>${m.text}</span></div>`).join('')}
+      ${goals.missed_yesterday.map(m => `<div onclick="toggleGoalTask('${m.task_key}','${m.log_date}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5"><span style="flex-shrink:0">⬜</span><span>${m.text}</span></div>`).join('')}
     </div>`;
   }
-  if (data.goals && data.goals.todays_goal) {
-    const g = data.goals.todays_goal;
-    const completions = data.goals.completions || {};
+  if (goals.todays_goal) {
+    const g = goals.todays_goal;
+    const completions = goals.completions || {};
     const taskList = g.tasks.split('\n').filter(t => t.trim());
     const taskRow = (key, text) => {
       const done = completions[key];
@@ -3721,12 +3719,20 @@ function renderDashboardSharedHtml(data) {
       <div style="margin-bottom:10px">
         ${taskList.map((t, i) => taskRow(`day-${g.day_of_week}-${i}`, t)).join('')}
       </div>
-      ${data.goals.standing_notes.length ? `<div style="border-top:0.5px solid var(--teal-mid);padding-top:10px;margin-top:6px">
+      ${goals.standing_notes.length ? `<div style="border-top:0.5px solid var(--teal-mid);padding-top:10px;margin-top:6px">
         <div style="font-size:12px;font-weight:600;color:var(--teal-dark);margin-bottom:4px">Every day</div>
-        ${data.goals.standing_notes.map(n => taskRow(`standing-${n.id}`, n.note_text)).join('')}
+        ${goals.standing_notes.map(n => taskRow(`standing-${n.id}`, n.note_text)).join('')}
       </div>` : ''}
     </div>`;
   }
+  return html;
+}
+
+function renderDashboardSharedHtml(data) {
+  const pctToday = data.needed_today ? Math.round(data.packed_today / data.needed_today * 100) : 100;
+  const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
+
+  let html = renderGoalsHtml(data.goals);
   if (data.pending_count_review) {
     const pc = data.pending_count_review;
     html += `<div style="background:#FEF3C7;border:0.5px solid #FCD34D;border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewPastCount(${pc.id},currentTab)">
@@ -3846,10 +3852,14 @@ async function removeStaffDayOff(id) {
 
 async function renderDailyTasks(gen) {
   const today = await getServerToday();
-  const data = await fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json());
+  const [data, goals] = await Promise.all([
+    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json()),
+    fetch('/api/warehouse-goals').then(r => r.json())
+  ]);
   if (_stale(gen)) return;
   const t = data.totals;
-  let html = `
+  let html = renderGoalsHtml(goals);
+  html += `
     <div class="card" style="margin-bottom:1rem;text-align:center">
       <div class="card-title">📦 Amenity Boxes Ready to Go</div>
       <div style="font-size:40px;font-weight:700;color:var(--teal)">${data.amenity_box_stock}</div>
