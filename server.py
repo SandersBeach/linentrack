@@ -75,7 +75,7 @@ def staff_role_list(staff):
     if not staff or not staff.get('role'): return []
     return [r.strip() for r in staff['role'].split(',') if r.strip()]
 
-VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager'}
+VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager', 'store_manager'}
 
 def validate_role_string(role_str):
     """Validate a comma-separated role string like 'warehouse,maintenance'.
@@ -289,12 +289,34 @@ def init_db():
             address TEXT PRIMARY KEY, property_name TEXT,
             king INTEGER DEFAULT 0, queen INTEGER DEFAULT 0, twin INTEGER DEFAULT 0,
             towels INTEGER DEFAULT 0, hand INTEGER DEFAULT 0, wash INTEGER DEFAULT 0,
-            mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0, updated_at TEXT
+            mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0,
+            queen_sleeper INTEGER DEFAULT 0, twin_sleeper INTEGER DEFAULT 0,
+            amenity_boxes INTEGER DEFAULT 1, updated_at TEXT
         );
         CREATE TABLE IF NOT EXISTS staff_days_off (
             id SERIAL PRIMARY KEY, staff_name TEXT NOT NULL,
             day_of_week INTEGER NOT NULL,  -- 0=Monday ... 6=Sunday (Python's date.weekday())
             UNIQUE(staff_name, day_of_week)
+        );
+        CREATE TABLE IF NOT EXISTS pack_bag_shortages (
+            id SERIAL PRIMARY KEY, address TEXT NOT NULL, pack_date TEXT NOT NULL,
+            item_name TEXT NOT NULL, quantity_short INTEGER NOT NULL DEFAULT 0, notes TEXT,
+            reported_by TEXT NOT NULL, reported_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_shift_notes (
+            id SERIAL PRIMARY KEY, note_text TEXT NOT NULL, staff_name TEXT NOT NULL,
+            created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_daily_log (
+            id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, staff_name TEXT NOT NULL,
+            laundry_bins_received INTEGER NOT NULL DEFAULT 0,
+            laundry_bins_unpacked INTEGER NOT NULL DEFAULT 0,
+            amenity_boxes_assembled INTEGER NOT NULL DEFAULT 0,
+            logged_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS amenity_box_stock (
+            id INTEGER PRIMARY KEY DEFAULT 1, quantity INTEGER NOT NULL DEFAULT 0,
+            CONSTRAINT single_row CHECK (id = 1)
         );
         CREATE TABLE IF NOT EXISTS pack_supply_deductions (
             address TEXT NOT NULL, pack_date TEXT NOT NULL, deducted_at TEXT NOT NULL,
@@ -362,6 +384,10 @@ def init_db():
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_notes TEXT",
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
         "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS performed_by TEXT",
+        "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS reviewed INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS queen_sleeper INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS twin_sleeper INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS amenity_boxes INTEGER DEFAULT 1",
         "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
     ]:
         try: cur.execute(col_sql)
@@ -377,6 +403,38 @@ def init_db():
         conn.commit()
     except Exception as e:
         print(f'Alias seed note: {e}')
+        conn.rollback()
+    # Seed known recurring days off (idempotent — safe to insert repeatedly)
+    try:
+        for staff_name, day_of_week in [('Kim', 0), ('Kim', 1), ('April', 2), ('April', 3), ('Cassie Sloan', 1), ('Cassie Sloan', 2)]:
+            cur.execute(
+                "INSERT INTO staff_days_off (staff_name,day_of_week) VALUES (%s,%s) ON CONFLICT (staff_name,day_of_week) DO NOTHING",
+                (staff_name, day_of_week)
+            )
+        conn.commit()
+    except Exception as e:
+        print(f'Days off seed note: {e}')
+        conn.rollback()
+    try:
+        cur.execute("INSERT INTO amenity_box_stock (id,quantity) VALUES (1,0) ON CONFLICT (id) DO NOTHING")
+        conn.commit()
+    except Exception as e:
+        print(f'Amenity box stock seed note: {e}')
+        conn.rollback()
+    # Known recurring days off — safe to insert repeatedly, won't duplicate or overwrite manual changes.
+    try:
+        for staff_name, day_of_week in [
+            ('April', 2), ('April', 3),   # off Wed/Thu
+            ('Kim', 0), ('Kim', 1),        # off Mon/Tue
+            ('Cassie Sloan', 1), ('Cassie Sloan', 2),  # off Tue/Wed
+        ]:
+            cur.execute(
+                "INSERT INTO staff_days_off (staff_name,day_of_week) VALUES (%s,%s) ON CONFLICT (staff_name,day_of_week) DO NOTHING",
+                (staff_name, day_of_week)
+            )
+        conn.commit()
+    except Exception as e:
+        print(f'Days-off seed note: {e}')
         conn.rollback()
     # Backfill bucket for existing hk_supply_items rows based on category —
     # Amenities: Guest Amenities, Kitchen, Laundry, Trash & Liners.
@@ -1713,80 +1771,80 @@ def cancel_order(oid):
 # ── Staff PIN Management ──────────────────────────────────────────────────────
 
 PACK_FORMULA_SEED = [
-    {'address': 'steve "bay house"', 'property_name': 'Steve "Bay House"', 'king': 4, 'queen': 0, 'twin': 6, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '1217 western lake drive', 'property_name': '1217 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '124 sunset ridge lane', 'property_name': '124 Sunset Ridge Lane', 'king': 2, 'queen': 0, 'twin': 5, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '134 royal fern way', 'property_name': '134 Royal Fern Way', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '1352 western lake drive', 'property_name': '1352 Western Lake Drive', 'king': 2, 'queen': 0, 'twin': 6, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '138 east royal fern way', 'property_name': '138 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '142 mystic cobalt street', 'property_name': '142 Mystic Cobalt Street', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '157 sunflower street', 'property_name': '157 Sunflower Street', 'king': 4, 'queen': 2, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '1735 east co hwy 30a #203', 'property_name': '1735 East Co Hwy 30A #203', 'king': 1, 'queen': 2, 'twin': 0, 'towels': 12, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 0},
-    {'address': '176 red cedar way', 'property_name': '176 Red Cedar Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '179 pine needle way', 'property_name': '179 Pine Needle Way', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 8},
-    {'address': '184 east royal fern way', 'property_name': '184 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8},
-    {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8},
-    {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '22 flatwood street', 'property_name': '22 Flatwood Street', 'king': 4, 'queen': 0, 'twin': 9, 'towels': 30, 'hand': 16, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '25 lake district lane', 'property_name': '25 Lake District Lane', 'king': 1, 'queen': 4, 'twin': 1, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '25 rain lily lane', 'property_name': '25 Rain Lily Lane', 'king': 5, 'queen': 6, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '254 spartina circle', 'property_name': '254 Spartina Circle', 'king': 2, 'queen': 4, 'twin': 1, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '255 garfield street', 'property_name': '255 Garfield Street', 'king': 4, 'queen': 1, 'twin': 6, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '260 needlerush drive', 'property_name': '260 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '262 garfield street', 'property_name': '262 Garfield Street', 'king': 3, 'queen': 1, 'twin': 6, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '263 magnolia street', 'property_name': '263 Magnolia Street', 'king': 4, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '271 red cedar way', 'property_name': '271 Red Cedar Way', 'king': 5, 'queen': 0, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '2743 e co hwy 30a, unit 303', 'property_name': '2743 E Co Hwy 30A, Unit 303', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '29 royal fern way', 'property_name': '29 Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '2912 e. co hwy 30a', 'property_name': '2912 E. Co Hwy 30A', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 16, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 8},
-    {'address': '295 salt box lane', 'property_name': '295 Salt Box Lane', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '31 bluejack street', 'property_name': '31 Bluejack Street', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '349 needlerush drive', 'property_name': '349 Needlerush Drive', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '35 suzanne drive', 'property_name': '35 Suzanne Drive', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '369 spartina circle', 'property_name': '369 Spartina Circle', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '37 compass point ii, unit 106', 'property_name': '37 Compass Point II, Unit 106', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 8},
-    {'address': '37 red cedar way', 'property_name': '37 Red Cedar Way', 'king': 1, 'queen': 4, 'twin': 0, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '379 east royal fern way', 'property_name': '379 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '394 western lake drive', 'property_name': '394 Western Lake Drive', 'king': 1, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '397 needlerush drive', 'property_name': '397 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '406 red cedar way', 'property_name': '406 Red Cedar Way', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '410 pine needle way', 'property_name': '410 Pine Needle Way', 'king': 2, 'queen': 1, 'twin': 8, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '422 pine needle way', 'property_name': '422 Pine Needle Way', 'king': 2, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '428 red cedar way', 'property_name': '428 Red Cedar Way', 'king': 4, 'queen': 3, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '43 sand hill circle', 'property_name': '43 Sand Hill Circle', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 36, 'hand': 12, 'wash': 24, 'mats': 6, 'pool': 0},
-    {'address': '433 pine needle way', 'property_name': '433 Pine Needle Way', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '44 thicket circle', 'property_name': '44 Thicket Circle', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '442 east royal fern way', 'property_name': '442 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '446 western lake drive', 'property_name': '446 Western Lake Drive', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '46 pine needle way', 'property_name': '46 Pine Needle Way', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '49 bluejack street', 'property_name': '49 Bluejack Street', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '5 pond cypress way', 'property_name': '5 Pond Cypress Way', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '51 mistflower lane', 'property_name': '51 Mistflower Lane', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '53 muhly circle', 'property_name': '53 Muhly Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '65 pond cypress circle', 'property_name': '65 Pond Cypress Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8},
-    {'address': '672 western lake drive', 'property_name': '672 Western Lake Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '70 scrub oak circle', 'property_name': '70 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '70 sunset ridge lane', 'property_name': '70 Sunset Ridge Lane', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '72 needlerush drive', 'property_name': '72 Needlerush Drive', 'king': 2, 'queen': 1, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '728 western lake drive', 'property_name': '728 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '73 holly street', 'property_name': '73 Holly Street', 'king': 4, 'queen': 4, 'twin': 8, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 16},
-    {'address': '73 pond cypress circle', 'property_name': '73 Pond Cypress Circle', 'king': 5, 'queen': 2, 'twin': 3, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8},
-    {'address': '75 east summersweet lane', 'property_name': '75 East Summersweet Lane', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '80 scrub oak circle', 'property_name': '80 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0},
-    {'address': '86 sunset ridge lane', 'property_name': '86 Sunset Ridge Lane', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '9 running oak circle', 'property_name': '9 Running Oak Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '90 flatwood street', 'property_name': '90 Flatwood Street', 'king': 5, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
-    {'address': '91 bluejack street', 'property_name': '91 Bluejack Street', 'king': 3, 'queen': 0, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0},
-    {'address': '93 needlerush drive', 'property_name': '93 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '97 east summersweet lane', 'property_name': '97 East Summersweet Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0},
-    {'address': '99 pond cypress way', 'property_name': '99 Pond Cypress Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8},
+    {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '1217 western lake drive', 'property_name': '1217 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '124 sunset ridge lane', 'property_name': '124 Sunset Ridge Lane', 'king': 2, 'queen': 0, 'twin': 5, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '134 royal fern way', 'property_name': '134 Royal Fern Way', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '1352 western lake drive', 'property_name': '1352 Western Lake Drive', 'king': 2, 'queen': 0, 'twin': 6, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '138 east royal fern way', 'property_name': '138 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '142 mystic cobalt street', 'property_name': '142 Mystic Cobalt Street', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '157 sunflower street', 'property_name': '157 Sunflower Street', 'king': 4, 'queen': 2, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '1735 east co hwy 30a #203', 'property_name': '1735 East Co Hwy 30A #203', 'king': 1, 'queen': 2, 'twin': 0, 'towels': 12, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '176 red cedar way', 'property_name': '176 Red Cedar Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '179 pine needle way', 'property_name': '179 Pine Needle Way', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '184 east royal fern way', 'property_name': '184 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '22 flatwood street', 'property_name': '22 Flatwood Street', 'king': 4, 'queen': 0, 'twin': 9, 'towels': 30, 'hand': 16, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '25 lake district lane', 'property_name': '25 Lake District Lane', 'king': 1, 'queen': 4, 'twin': 1, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '25 rain lily lane', 'property_name': '25 Rain Lily Lane', 'king': 5, 'queen': 6, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '254 spartina circle', 'property_name': '254 Spartina Circle', 'king': 2, 'queen': 4, 'twin': 1, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '255 garfield street', 'property_name': '255 Garfield Street', 'king': 4, 'queen': 1, 'twin': 6, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1},
+    {'address': '260 needlerush drive', 'property_name': '260 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '262 garfield street', 'property_name': '262 Garfield Street', 'king': 3, 'queen': 1, 'twin': 6, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '263 magnolia street', 'property_name': '263 Magnolia Street', 'king': 4, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '271 red cedar way', 'property_name': '271 Red Cedar Way', 'king': 5, 'queen': 0, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '2743 e co hwy 30a, unit 303', 'property_name': '2743 E Co Hwy 30A, Unit 303', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '29 royal fern way', 'property_name': '29 Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '2912 e. co hwy 30a', 'property_name': '2912 E. Co Hwy 30A', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 16, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '295 salt box lane', 'property_name': '295 Salt Box Lane', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '31 bluejack street', 'property_name': '31 Bluejack Street', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '349 needlerush drive', 'property_name': '349 Needlerush Drive', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 4, 'amenity_boxes': 1},
+    {'address': '35 suzanne drive', 'property_name': '35 Suzanne Drive', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '369 spartina circle', 'property_name': '369 Spartina Circle', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '37 compass point ii, unit 106', 'property_name': '37 Compass Point II, Unit 106', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '37 red cedar way', 'property_name': '37 Red Cedar Way', 'king': 1, 'queen': 4, 'twin': 0, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '379 east royal fern way', 'property_name': '379 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '394 western lake drive', 'property_name': '394 Western Lake Drive', 'king': 1, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1},
+    {'address': '397 needlerush drive', 'property_name': '397 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '406 red cedar way', 'property_name': '406 Red Cedar Way', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '410 pine needle way', 'property_name': '410 Pine Needle Way', 'king': 2, 'queen': 1, 'twin': 8, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '422 pine needle way', 'property_name': '422 Pine Needle Way', 'king': 2, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '428 red cedar way', 'property_name': '428 Red Cedar Way', 'king': 4, 'queen': 3, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '43 sand hill circle', 'property_name': '43 Sand Hill Circle', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 36, 'hand': 12, 'wash': 24, 'mats': 6, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '433 pine needle way', 'property_name': '433 Pine Needle Way', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '44 thicket circle', 'property_name': '44 Thicket Circle', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '442 east royal fern way', 'property_name': '442 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '446 western lake drive', 'property_name': '446 Western Lake Drive', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '46 pine needle way', 'property_name': '46 Pine Needle Way', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '49 bluejack street', 'property_name': '49 Bluejack Street', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 2, 'amenity_boxes': 1},
+    {'address': '5 pond cypress way', 'property_name': '5 Pond Cypress Way', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '51 mistflower lane', 'property_name': '51 Mistflower Lane', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '53 muhly circle', 'property_name': '53 Muhly Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '65 pond cypress circle', 'property_name': '65 Pond Cypress Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '672 western lake drive', 'property_name': '672 Western Lake Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '70 scrub oak circle', 'property_name': '70 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '70 sunset ridge lane', 'property_name': '70 Sunset Ridge Lane', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '72 needlerush drive', 'property_name': '72 Needlerush Drive', 'king': 2, 'queen': 1, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '728 western lake drive', 'property_name': '728 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '73 holly street', 'property_name': '73 Holly Street', 'king': 4, 'queen': 4, 'twin': 8, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 16, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '73 pond cypress circle', 'property_name': '73 Pond Cypress Circle', 'king': 5, 'queen': 2, 'twin': 3, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '75 east summersweet lane', 'property_name': '75 East Summersweet Lane', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '80 scrub oak circle', 'property_name': '80 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '86 sunset ridge lane', 'property_name': '86 Sunset Ridge Lane', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': '9 running oak circle', 'property_name': '9 Running Oak Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '90 flatwood street', 'property_name': '90 Flatwood Street', 'king': 5, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '91 bluejack street', 'property_name': '91 Bluejack Street', 'king': 3, 'queen': 0, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '93 needlerush drive', 'property_name': '93 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '97 east summersweet lane', 'property_name': '97 East Summersweet Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '99 pond cypress way', 'property_name': '99 Pond Cypress Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
+    {'address': 'steve "bay house"', 'property_name': 'Steve "Bay House"', 'king': 4, 'queen': 0, 'twin': 6, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
 ]
 
 STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'manager', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Kim', 'warehouse', '6460'], ['April', 'warehouse', '1544']]
@@ -2797,6 +2855,9 @@ def save_inventory_count():
 def get_inventory_count(cid):
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT * FROM inventory_counts WHERE id=%s",(cid,)); row=cur.fetchone()
+    if row:
+        cur.execute("UPDATE inventory_counts SET reviewed=1 WHERE id=%s",(cid,))
+        conn.commit()
     cur.close(); conn.close()
     if not row: return jsonify({'error':'Not found'}),404
     return jsonify(row)
@@ -2979,18 +3040,19 @@ def upsert_single_pack_formula():
         return jsonify({'error': 'Property name is required'}), 400
     address = property_name.lower().strip()
     fields = {}
-    for k in ('king','queen','twin','towels','hand','wash','mats','pool'):
+    for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'):
         try: fields[k] = int(data.get(k, 0) or 0)
         except (TypeError, ValueError): fields[k] = 0
     conn = get_db(); cur = conn.cursor()
     ts = now_central()
     cur.execute("""
-        INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,updated_at)
-        VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(ts)s)
+        INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,updated_at)
+        VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,%(ts)s)
         ON CONFLICT (address) DO UPDATE SET
             property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
             twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
-            mats=EXCLUDED.mats, pool=EXCLUDED.pool, updated_at=EXCLUDED.updated_at
+            mats=EXCLUDED.mats, pool=EXCLUDED.pool, queen_sleeper=EXCLUDED.queen_sleeper,
+            twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes, updated_at=EXCLUDED.updated_at
     """, {'address': address, 'property_name': property_name, 'ts': ts, **fields})
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Added/edited packing formula', property_name, resolve_performer(data))
@@ -3243,14 +3305,16 @@ def get_pack_list():
     cur.close(); conn.close()
     return jsonify({'date': date_str, 'properties': properties})
 
-def _build_warehouse_dashboard_data():
+def _build_warehouse_dashboard_data(week_start_weekday=0):
     """Shared computation behind both Cassie's dashboard and Admin's expanded
     version: who packed what today/this week, on-pace vs what's actually
-    needed, days-off awareness, and bags currently with each cleaner."""
+    needed, days-off awareness, and bags currently with each cleaner.
+    week_start_weekday: 0=Monday (Admin's default), 3=Thursday (Cassie's)."""
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
-    week_start_dt = today_dt - timedelta(days=today_dt.weekday())  # Monday
-    week_end_dt = week_start_dt + timedelta(days=6)  # Sunday
+    days_since_start = (today_dt.weekday() - week_start_weekday) % 7
+    week_start_dt = today_dt - timedelta(days=days_since_start)
+    week_end_dt = week_start_dt + timedelta(days=6)
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -3283,9 +3347,11 @@ def _build_warehouse_dashboard_data():
     for r in cur.fetchall():
         off_by_staff.setdefault(r['staff_name'], []).append(r['day_of_week'])
 
-    cur.execute("SELECT name FROM staff_members WHERE active=1 AND role LIKE '%%warehouse%%'")
+    cur.execute("SELECT name FROM staff_members WHERE active=1 AND role LIKE '%%warehouse%%' AND role NOT LIKE '%%store_manager%%'")
     warehouse_names = {r['name'] for r in cur.fetchall()}
-    all_names = warehouse_names | set(by_emp_week.keys())
+    all_names = warehouse_names  # only actual Warehouse-role staff show as individual rows —
+    # admin/store_manager who occasionally help pack still count in the aggregate totals above,
+    # they just don't get a personal row, since that help isn't meant to be tracked per-person
 
     today_weekday = today_dt.weekday()
     employees = []
@@ -3305,6 +3371,29 @@ def _build_warehouse_dashboard_data():
                    GROUP BY c.name ORDER BY c.name""")
     cleaner_bags = cur.fetchall()
 
+    cur.execute("""SELECT id, started_at, item_count, variances, performed_by
+                   FROM inventory_counts WHERE areas='amenities' AND reviewed=0
+                   ORDER BY id DESC LIMIT 1""")
+    pending_count_review = cur.fetchone()
+
+    cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
+                          COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
+                   FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s""",
+                (week_start_dt.isoformat(), week_end_dt.isoformat()))
+    daily_task_week = cur.fetchone()
+    cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
+                          COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
+                   FROM warehouse_daily_log WHERE log_date = %s""", (today_str,))
+    daily_task_today = cur.fetchone()
+    cur.execute("SELECT quantity FROM amenity_box_stock WHERE id=1")
+    stock_row = cur.fetchone()
+    amenity_box_stock = stock_row['quantity'] if stock_row else 0
+
+    cur.execute("SELECT * FROM warehouse_shift_notes WHERE resolved=0 ORDER BY id DESC")
+    shift_notes = cur.fetchall()
+
     cur.close(); conn.close()
     return {
         'today': today_str, 'week_start': week_start_dt.isoformat(), 'week_end': week_end_dt.isoformat(),
@@ -3312,11 +3401,15 @@ def _build_warehouse_dashboard_data():
         'needed_week': needed_week, 'packed_week': packed_week_total,
         'employees': employees,
         'cleaner_bags': cleaner_bags,
+        'pending_count_review': pending_count_review,
+        'daily_task_today': daily_task_today, 'daily_task_week': daily_task_week,
+        'amenity_box_stock': amenity_box_stock,
+        'shift_notes': shift_notes,
     }
 
 @app.route('/api/warehouse-dashboard', methods=['GET'])
 def warehouse_dashboard():
-    return jsonify(_build_warehouse_dashboard_data())
+    return jsonify(_build_warehouse_dashboard_data(week_start_weekday=3))  # Thursday–Wednesday, per Cassie's request
 
 @app.route('/api/admin-dashboard', methods=['GET'])
 def admin_dashboard():
@@ -3401,6 +3494,108 @@ def delete_staff_day_off(off_id):
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success': True})
 
+@app.route('/api/warehouse-daily-log', methods=['POST'])
+def add_warehouse_daily_log():
+    """Log today's laundry bins received/unpacked and amenity boxes
+    assembled. Each submission adds to the running stock of ready-to-go
+    amenity boxes — this is the ONLY way that stock increases."""
+    data = request.json or {}
+    log_date = data.get('log_date') or today_central()
+    staff_name = (data.get('staff_name') or '').strip() or 'Unknown'
+    bins_received = int(data.get('laundry_bins_received', 0) or 0)
+    bins_unpacked = int(data.get('laundry_bins_unpacked', 0) or 0)
+    boxes_assembled = int(data.get('amenity_boxes_assembled', 0) or 0)
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO warehouse_daily_log
+                   (log_date,staff_name,laundry_bins_received,laundry_bins_unpacked,amenity_boxes_assembled,logged_at)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (log_date, staff_name, bins_received, bins_unpacked, boxes_assembled, now_central()))
+    if boxes_assembled:
+        cur.execute("UPDATE amenity_box_stock SET quantity = quantity + %s WHERE id=1", (boxes_assembled,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/warehouse-daily-log', methods=['GET'])
+def get_warehouse_daily_log():
+    """Aggregated totals for a date range (defaults to today only)."""
+    date_from = request.args.get('from') or today_central()
+    date_to = request.args.get('to') or date_from
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
+                          COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
+                   FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s""", (date_from, date_to))
+    totals = cur.fetchone()
+    cur.execute("""SELECT log_date, staff_name, laundry_bins_received, laundry_bins_unpacked, amenity_boxes_assembled, logged_at
+                   FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s ORDER BY id DESC LIMIT 30""", (date_from, date_to))
+    entries = cur.fetchall()
+    cur.execute("SELECT quantity FROM amenity_box_stock WHERE id=1")
+    stock_row = cur.fetchone()
+    cur.close(); conn.close()
+    return jsonify({'totals': totals, 'entries': entries, 'amenity_box_stock': stock_row['quantity'] if stock_row else 0})
+
+@app.route('/api/warehouse-notes', methods=['GET'])
+def get_warehouse_notes():
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM warehouse_shift_notes WHERE resolved=0 ORDER BY id DESC")
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/warehouse-notes', methods=['POST'])
+def add_warehouse_note():
+    data = request.json or {}
+    note_text = (data.get('note_text') or '').strip()
+    staff_name = (data.get('staff_name') or '').strip() or 'Unknown'
+    if not note_text:
+        return jsonify({'error': 'Note text is required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO warehouse_shift_notes (note_text,staff_name,created_at,resolved) VALUES (%s,%s,%s,0)",
+                (note_text, staff_name, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/warehouse-notes/<int:note_id>/resolve', methods=['POST'])
+def resolve_warehouse_note(note_id):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE warehouse_shift_notes SET resolved=1 WHERE id=%s", (note_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list/shortages', methods=['GET'])
+def get_pack_shortages():
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM pack_bag_shortages WHERE resolved=0 ORDER BY id DESC")
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/pack-list/shortages', methods=['POST'])
+def add_pack_shortage():
+    """A staff member flags that a bag went out short an item (e.g. 5 fewer
+    washcloths than the formula calls for) — surfaced at the top of Pack
+    List as 'Packed Bag Short' so it can be topped off when the bag returns."""
+    data = request.json or {}
+    address = (data.get('address') or '').strip()
+    pack_date = (data.get('pack_date') or '').strip()
+    item_name = (data.get('item_name') or '').strip()
+    quantity_short = int(data.get('quantity_short', 0) or 0)
+    notes = (data.get('notes') or '').strip()
+    reported_by = (data.get('reported_by') or '').strip() or 'Unknown'
+    if not address or not item_name:
+        return jsonify({'error': 'Address and item name are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO pack_bag_shortages (address,pack_date,item_name,quantity_short,notes,reported_by,reported_at,resolved)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,0)""",
+                (address, pack_date, item_name, quantity_short, notes, reported_by, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/pack-list/shortages/<int:sid>/resolve', methods=['POST'])
+def resolve_pack_shortage(sid):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE pack_bag_shortages SET resolved=1 WHERE id=%s", (sid,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
 @app.route('/api/pack-list/bundles', methods=['GET'])
 def get_bundles_needed():
     """How many towel bags (pre-packed in sets of 18) and sheet-set bundles
@@ -3440,6 +3635,7 @@ def get_bundles_needed():
 
     def tally(addrs, pack_date):
         towel_bags = king = queen = twin = count = 0
+        queen_sleeper = twin_sleeper = amenity_boxes = 0
         missing = []
         for addr in sorted(addrs):
             if (addr, pack_date) in packed_pairs:
@@ -3454,11 +3650,17 @@ def get_bundles_needed():
             count += 1
             towel_bags += f['towels'] // 18
             king += f['king']; queen += f['queen']; twin += f['twin']
+            queen_sleeper += f.get('queen_sleeper', 0) or 0
+            twin_sleeper += f.get('twin_sleeper', 0) or 0
+            amenity_boxes += f.get('amenity_boxes', 0) or 0
         return {'towel_bags_needed': towel_bags, 'king_bundles_needed': king,
                 'queen_bundles_needed': queen, 'twin_bundles_needed': twin,
+                'queen_sleeper_needed': queen_sleeper, 'twin_sleeper_needed': twin_sleeper,
+                'amenity_boxes_needed': amenity_boxes,
                 'properties_counted': count, 'missing_formula': missing}
 
     m_towel = m_king = m_queen = m_twin = m_count = 0
+    m_queen_sleeper = m_twin_sleeper = m_amenity_boxes = 0
     m_missing = []
     for d, addrs in addr_dates.items():
         if d >= today_str: continue
@@ -3473,10 +3675,15 @@ def get_bundles_needed():
             m_count += 1
             m_towel += f['towels'] // 18
             m_king += f['king']; m_queen += f['queen']; m_twin += f['twin']
+            m_queen_sleeper += f.get('queen_sleeper', 0) or 0
+            m_twin_sleeper += f.get('twin_sleeper', 0) or 0
+            m_amenity_boxes += f.get('amenity_boxes', 0) or 0
 
     missed_summary = {'label': 'Missed', 'date': None,
                        'towel_bags_needed': m_towel, 'king_bundles_needed': m_king,
                        'queen_bundles_needed': m_queen, 'twin_bundles_needed': m_twin,
+                       'queen_sleeper_needed': m_queen_sleeper, 'twin_sleeper_needed': m_twin_sleeper,
+                       'amenity_boxes_needed': m_amenity_boxes,
                        'properties_counted': m_count, 'missing_formula': m_missing}
 
     days = []
@@ -3668,6 +3875,12 @@ def pack_property():
             "INSERT INTO pack_supply_deductions (address,pack_date,deducted_at) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
             (addr_key, pack_date, ts)
         )
+        # Also draw down the ready-to-go amenity box stock, if this property needs any
+        cur.execute("SELECT amenity_boxes FROM pack_list_formula WHERE address=%s", (addr_key,))
+        formula_row = cur.fetchone()
+        boxes_needed = (formula_row['amenity_boxes'] if formula_row else 0) or 0
+        if boxes_needed:
+            cur.execute("UPDATE amenity_box_stock SET quantity = GREATEST(0, quantity - %s) WHERE id=1", (boxes_needed,))
 
     for bag_id in bag_ids:
         cur.execute(
