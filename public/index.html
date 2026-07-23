@@ -366,6 +366,18 @@
     </div>
     <div id="pack-modal-scan-err" style="font-size:12px;color:var(--coral-dark);min-height:16px;margin-top:4px"></div>
     <div id="pack-modal-bag-list" style="margin-top:6px"></div>
+    <div style="margin-top:12px;border-top:1px solid var(--gray-100);padding-top:10px">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('pack-modal-shortage-fields').style.display=document.getElementById('pack-modal-shortage-fields').style.display==='none'?'block':'none'">⚠️ Report a shortage (optional)</button>
+      <div id="pack-modal-shortage-fields" style="display:none;margin-top:10px">
+        <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Use this if you had to pack fewer of an item than the formula calls for — it'll show up at the top of Pack List as a "Packed Bag Short" so it can get topped off when the bag returns.</p>
+        <label>Item short</label>
+        <input id="pack-modal-shortage-item" placeholder="e.g. Wash cloths">
+        <label>How many short</label>
+        <input id="pack-modal-shortage-qty" type="number" min="1" value="1">
+        <label>Notes (optional)</label>
+        <input id="pack-modal-shortage-notes" placeholder="e.g. Ran low on stock, ordered more">
+      </div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-ghost" style="flex:1" onclick="closePackModal()">Cancel</button>
       <button class="btn btn-primary" style="flex:1" onclick="confirmPack()">✓ Pack &amp; stage</button>
@@ -408,6 +420,9 @@
       <div><label>Wash cloths</label><input type="number" id="af-wash" value="0" min="0"></div>
       <div><label>Bath mats</label><input type="number" id="af-mats" value="0" min="0"></div>
       <div><label>Pool towels</label><input type="number" id="af-pool" value="0" min="0"></div>
+      <div><label>Queen sleeper sets</label><input type="number" id="af-queen_sleeper" value="0" min="0"></div>
+      <div><label>Twin sleeper sets</label><input type="number" id="af-twin_sleeper" value="0" min="0"></div>
+      <div><label>Amenity boxes</label><input type="number" id="af-amenity_boxes" value="1" min="0"></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-add-formula').style.display='none'">Cancel</button>
@@ -501,12 +516,13 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['pack_list', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders', 'store'],
+  warehouse: ['pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders'],
   inspector: ['amenities_inventory'],
   manager: ['warehouse_dashboard', 'pack_productivity'],
+  store_manager: ['store'],
   coordinator: ['inventory_count', 'orders'],
-  admin: ['admin_dashboard', 'pack_list', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
@@ -521,6 +537,7 @@ const TAB_LABELS = {
   forecast: '🔮 Forecast',
   store: '🏪 Store',
   pack_list: '📋 Pack List',
+  daily_tasks: '📝 Daily Tasks',
   warehouse_dashboard: '📊 Dashboard',
   admin_dashboard: '📊 Dashboard',
   bundles_needed: '🧺 Bundles Needed',
@@ -561,7 +578,7 @@ async function submitPin() {
     _currentStaffEmail = data.email || '';
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse', manager:'📊 Manager' };
+    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse', manager:'📊 Manager', store_manager:'🏪 Store Manager' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
     const defaultView = sessionStorage.getItem('defaultView');
@@ -630,6 +647,7 @@ const MODULE_NAMES = {
   forecast: 'ForecastCentral',
   store: 'StoreCentral',
   pack_list: 'PackListCentral',
+  daily_tasks: 'PackListCentral',
   warehouse_dashboard: 'PackListCentral',
   admin_dashboard: 'PackListCentral',
   bundles_needed: 'PackListCentral',
@@ -661,6 +679,7 @@ function showTab(t) {
     forecast: renderForecast,
     store: renderStore,
     pack_list: renderPackList,
+    daily_tasks: renderDailyTasks,
     warehouse_dashboard: renderWarehouseDashboard,
     admin_dashboard: renderAdminDashboard,
     bundles_needed: renderBundlesNeeded,
@@ -1235,9 +1254,29 @@ async function renderSettings(gen) {
     <button class="btn btn-primary btn-sm" onclick="printLoanerQRCodes()">🖨️ Print All Loaner Item Labels</button>
     <div id="loaner-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
+  html += `<div class="section-header" style="margin-top:1rem"><h2>Warehouse Days Off</h2></div>
+    <div class="card"><div class="card-title">Manage recurring days off</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Set which day(s) of the week each warehouse person is regularly off, so their dashboard numbers make sense at a glance.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <select id="wd-off-name" style="flex:1;min-width:140px"></select>
+      <select id="wd-off-day" style="flex:1;min-width:120px">
+        <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+        <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="addStaffDayOff()">+ Add</button>
+    </div>
+    <div id="wd-off-list"></div>
+    </div>`;
   document.getElementById('main-content').innerHTML = html;
   loadCleanerAliases();
   renderManageFormulas();
+  loadDaysOffSettingsSection();
+}
+async function loadDaysOffSettingsSection() {
+  const data = await fetch('/api/warehouse-dashboard').then(r => r.json());
+  const sel = document.getElementById('wd-off-name');
+  if (sel) sel.innerHTML = data.employees.map(e => `<option value="${e.name}">${e.name}</option>`).join('');
+  loadStaffDaysOffList();
 }
 async function toggleInventoryReminder() {
   const btn = document.getElementById('inv-reminder-toggle-btn');
@@ -1860,8 +1899,24 @@ async function finalizeCount() {
     const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
     _countSessions[_countReturnTarget] = null;
-    renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
+    const isAmenities = _countReturnTarget === 'amenities_inventory';
+    const canSeeResults = userRoles.includes('admin') || userRoles.includes('manager');
+    if (isAmenities && !canSeeResults) {
+      renderCountSubmittedConfirmation();
+    } else {
+      renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
+    }
   } catch(e) { alert('Error saving count — please try again.'); console.error(e); }
+}
+
+function renderCountSubmittedConfirmation() {
+  document.getElementById('main-content').innerHTML = `
+    <div class="card" style="text-align:center;padding:2.5rem">
+      <div style="font-size:40px;margin-bottom:10px">✓</div>
+      <div style="font-size:17px;font-weight:600;color:var(--teal)">Count submitted!</div>
+      <div style="font-size:13px;color:var(--gray-400);margin-top:6px">Thanks for completing this week's count.</div>
+      <button class="btn btn-primary" style="margin-top:1.25rem" onclick="showTab('amenities_inventory')">Done</button>
+    </div>`;
 }
 
 function renderCountReport(data) {
@@ -1905,6 +1960,7 @@ function renderCountReport(data) {
   html += '</div>';
   const backAction = _countReturnTarget==='amenities_inventory' ? "showTab('amenities_inventory')"
     : _countReturnTarget==='store' ? `showTab('${currentTab==='store'?'store':'cleaning_inventory'}')`
+    : (_countReturnTarget==='admin_dashboard' || _countReturnTarget==='warehouse_dashboard') ? `showTab('${_countReturnTarget}')`
     : "renderInventoryCount()";
   html += `<div style="margin-top:1rem"><button class="btn btn-ghost" onclick="${backAction}">← Back to counts</button></div>`;
   document.getElementById('main-content').innerHTML = html;
@@ -1955,6 +2011,7 @@ async function renderHKSupplyShared(gen, title) {
       <div style="font-size:15px;font-weight:600">${title}</div>
       ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
     </div>
+    ${_hkBucket === 'Amenities' ? `<div class="card" style="background:#E7F1F2;border-color:#89BBBE;margin-bottom:1rem"><div style="font-size:13px;color:var(--green-dark)">📦 When counting, include both full, unopened boxes <strong>and</strong> opened/partial boxes in your total.</div></div>` : ''}
     <div class="subtab-bar">
       <button class="subtab active" id="hkt-inventory" onclick="hkSubtab('inventory')">Inventory</button>
       <button class="subtab" id="hkt-log" onclick="hkSubtab('log')">Activity Log</button>
@@ -1998,15 +2055,18 @@ async function renderAmenitiesCountHome() {
   const el = document.getElementById('amenities-count-body');
   if (!el) return;
   if (_countSessions.amenities_inventory) { renderCountInProgress(); return; }
-  const pastCounts = await fetch('/api/inventory-counts').then(r=>r.json());
-  const amenityCounts = pastCounts.filter(c => c.areas === 'amenities');
+  const canSeeResults = userRoles.includes('admin') || userRoles.includes('manager');
   let pastHtml = '';
-  if (amenityCounts.length) {
-    pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
-      amenityCounts.slice(0,10).map(c=>{
-        const variances = c.variances || 0;
-        return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color: var(--green-dark)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id},'amenities_inventory')">View</button></div>`;
-      }).join('') + '</div>';
+  if (canSeeResults) {
+    const pastCounts = await fetch('/api/inventory-counts').then(r=>r.json());
+    const amenityCounts = pastCounts.filter(c => c.areas === 'amenities');
+    if (amenityCounts.length) {
+      pastHtml = `<div class="card"><div class="card-title">Past counts</div>` +
+        amenityCounts.slice(0,10).map(c=>{
+          const variances = c.variances || 0;
+          return `<div class="row"><div class="row-main"><div class="row-title">${c.started_at}</div><div class="row-sub">${c.item_count} items · ${variances===0?'<span style="color: var(--green-dark)">No variances</span>':`<span style="color:var(--coral-dark)">${variances} variance${variances!==1?'s':''}</span>`}${c.performed_by?' · by <strong>'+c.performed_by+'</strong>':''}</div></div><button class="btn btn-ghost btn-sm" onclick="viewPastCount(${c.id},'amenities_inventory')">View</button></div>`;
+        }).join('') + '</div>';
+    }
   }
   el.innerHTML = `<div class="card">
     <div class="card-title">Start new count</div>
@@ -3133,16 +3193,41 @@ function fcFileSelected(inputId, nameId) {
 }
 
 
+let _boxPackingRange = 'week';
+
+function _boxPackingDates() {
+  const today = new Date();
+  const toISO = d => d.toISOString().slice(0,10);
+  const start = toISO(today);
+  let end = new Date(today);
+  if (_boxPackingRange === 'week') end.setDate(end.getDate() + 6);
+  else if (_boxPackingRange === '2weeks') end.setDate(end.getDate() + 13);
+  else if (_boxPackingRange === 'month') end.setDate(end.getDate() + 29);
+  return { from: start, to: toISO(end) };
+}
+
+function setBoxPackingRange(range) {
+  _boxPackingRange = range;
+  renderBoxPacking();
+}
+
 async function renderBoxPacking() {
   const body = document.getElementById('forecast-body');
   body.innerHTML = '<div class="card">Calculating box packing capacity...</div>';
   try {
-    const data = await fetch('/api/forecast/box-packing').then(r=>r.json());
+    const { from, to } = _boxPackingDates();
+    const data = await fetch(`/api/forecast/box-packing?from=${from}&to=${to}`).then(r=>r.json());
 
     const shortfall = data.shortfall;
     const pct = data.boxes_needed > 0 ? Math.min(100, Math.round(data.can_pack / data.boxes_needed * 100)) : 100;
 
     let html = `
+      <div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
+        <div style="font-weight:600;font-size:14px;margin-right:auto">Date range</div>
+        <button class="btn ${_boxPackingRange==='week'?'btn-primary':'btn-ghost'} btn-sm" onclick="setBoxPackingRange('week')">This week</button>
+        <button class="btn ${_boxPackingRange==='2weeks'?'btn-primary':'btn-ghost'} btn-sm" onclick="setBoxPackingRange('2weeks')">Next 2 weeks</button>
+        <button class="btn ${_boxPackingRange==='month'?'btn-primary':'btn-ghost'} btn-sm" onclick="setBoxPackingRange('month')">This month</button>
+      </div>
       <div class="card">
         <div class="card-title">Amenity Box Packing Summary</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:1rem">
@@ -3471,7 +3556,7 @@ function bundlesDayRow(d, isMissed) {
   return `<div class="row" style="${isMissed ? 'background:#FAECE7' : ''}">
     <div class="row-main">
       <div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div>
-      <div class="row-sub">${d.properties_counted} propert${d.properties_counted===1?'y':'ies'} · ${d.towel_bags_needed} towel bag${d.towel_bags_needed!==1?'s':''} · ${d.king_bundles_needed}K · ${d.queen_bundles_needed}Q · ${d.twin_bundles_needed}T
+      <div class="row-sub">${d.properties_counted} propert${d.properties_counted===1?'y':'ies'} · ${d.towel_bags_needed} towel bag${d.towel_bags_needed!==1?'s':''} · ${d.king_bundles_needed}K · ${d.queen_bundles_needed}Q · ${d.twin_bundles_needed}T · ${d.queen_sleeper_needed} Q-sleeper · ${d.twin_sleeper_needed} T-sleeper · ${d.amenity_boxes_needed} amenity box${d.amenity_boxes_needed!==1?'es':''}
       ${d.missing_formula.length ? `<br><span style="color:var(--coral-dark)">⚠️ ${d.missing_formula.length} not counted — no packing formula on file</span>` : ''}</div>
     </div>
   </div>`;
@@ -3484,20 +3569,28 @@ function renderBundlesBody(data) {
   const totalKing = data.missed.king_bundles_needed + data.days.reduce((s, d) => s + d.king_bundles_needed, 0);
   const totalQueen = data.missed.queen_bundles_needed + data.days.reduce((s, d) => s + d.queen_bundles_needed, 0);
   const totalTwin = data.missed.twin_bundles_needed + data.days.reduce((s, d) => s + d.twin_bundles_needed, 0);
+  const totalQueenSleeper = data.missed.queen_sleeper_needed + data.days.reduce((s, d) => s + d.queen_sleeper_needed, 0);
+  const totalTwinSleeper = data.missed.twin_sleeper_needed + data.days.reduce((s, d) => s + d.twin_sleeper_needed, 0);
+  const totalAmenityBoxes = data.missed.amenity_boxes_needed + data.days.reduce((s, d) => s + d.amenity_boxes_needed, 0);
   const totalProps = data.missed.properties_counted + data.days.reduce((s, d) => s + d.properties_counted, 0);
 
+  const rangeLabel = _bundlesDays === 7 ? 'Week' : _bundlesDays === 14 ? '2 Weeks' : _bundlesDays === 30 ? 'Month' : `${_bundlesDays} days`;
   let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
       <div style="font-weight:600;font-size:14px;margin-right:auto">🧺 Bundles Needed — by day, in pickup order</div>
-      <button class="btn ${_bundlesDays===5?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(5)">5 days</button>
-      <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">7 days</button>
+      <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">Week</button>
+      <button class="btn ${_bundlesDays===14?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(14)">2 Weeks</button>
+      <button class="btn ${_bundlesDays===30?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(30)">Month</button>
     </div>
     <div class="card">
-      <div class="card-title">Total for the next ${_bundlesDays} day${_bundlesDays!==1?'s':''} (includes anything missed)</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+      <div class="card-title">Total for the next ${rangeLabel} (includes anything missed)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
         <div style="text-align:center"><div style="font-size:32px;font-weight:700;color:var(--teal)">${totalTowelBags}</div><div class="row-sub">Towel bags</div></div>
         <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalKing}</div><div class="row-sub">King bundles</div></div>
         <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalQueen}</div><div class="row-sub">Queen bundles</div></div>
         <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalTwin}</div><div class="row-sub">Twin bundles</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalQueenSleeper}</div><div class="row-sub">Queen sleeper sets</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalTwinSleeper}</div><div class="row-sub">Twin sleeper sets</div></div>
+        <div style="text-align:center"><div style="font-size:32px;font-weight:700;color:var(--teal)">${totalAmenityBoxes}</div><div class="row-sub">Amenity boxes</div></div>
       </div>
       <div class="row-sub" style="margin-top:8px">Across ${totalProps} propert${totalProps!==1?'ies':'y'}.</div>
     </div>
@@ -3556,7 +3649,19 @@ function renderDashboardSharedHtml(data) {
   const pctToday = data.needed_today ? Math.round(data.packed_today / data.needed_today * 100) : 100;
   const pctWeek = data.needed_week ? Math.round(data.packed_week / data.needed_week * 100) : 100;
 
-  let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
+  let html = '';
+  if (data.pending_count_review) {
+    const pc = data.pending_count_review;
+    html += `<div style="background:#FEF3C7;border:0.5px solid #FCD34D;border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewPastCount(${pc.id},currentTab)">
+      <div style="font-size:28px">🔔</div>
+      <div>
+        <div style="font-size:15px;font-weight:500;color:#92400E">Amenities count ready to review</div>
+        <div style="font-size:12px;color:#92400E">Completed ${pc.started_at}${pc.performed_by ? ' by ' + pc.performed_by : ''} · ${pc.item_count} items · ${pc.variances} variance${pc.variances!==1?'s':''} — tap to view</div>
+      </div>
+    </div>`;
+  }
+
+  html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem">
     ${paceCard('Today', data.packed_today, data.needed_today, pctToday, "showTab('pack_list')")}
     ${paceCard(`This Week (${data.week_start} – ${data.week_end})`, data.packed_week, data.needed_week, pctWeek, "showTab('pack_list')")}
   </div>
@@ -3587,19 +3692,24 @@ function renderDashboardSharedHtml(data) {
     html += `<div class="empty">No cleaners currently have any bags out.</div>`;
   }
   html += `</div>`;
-
   html += `<div class="card" style="margin-top:1rem">
-    <div class="card-title">Manage recurring days off</div>
-    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Set which day(s) of the week each person is regularly off, so their dashboard numbers make sense at a glance.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <select id="wd-off-name" style="flex:1;min-width:140px">${data.employees.map(e => `<option value="${e.name}">${e.name}</option>`).join('')}</select>
-      <select id="wd-off-day" style="flex:1;min-width:120px">
-        <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
-        <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
-      </select>
-      <button class="btn btn-primary btn-sm" onclick="addStaffDayOff()">+ Add</button>
+    <div class="card-title">📦 Laundry Bins & Amenity Boxes</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:8px">
+      ${metricCard('Ready to go now', data.amenity_box_stock, false, "showTab('daily_tasks')")}
+      ${metricCard('Bins received today', data.daily_task_today.bins_received, false, "showTab('daily_tasks')")}
+      ${metricCard('Bins unpacked today', data.daily_task_today.bins_unpacked, false, "showTab('daily_tasks')")}
+      ${metricCard('Boxes assembled today', data.daily_task_today.boxes_assembled, false, "showTab('daily_tasks')")}
     </div>
-    <div id="wd-off-list"></div>
+    <div class="row-sub">This week: ${data.daily_task_week.bins_received} bins received · ${data.daily_task_week.bins_unpacked} unpacked · ${data.daily_task_week.boxes_assembled} boxes assembled</div>
+  </div>`;
+  html += `<div class="card" style="margin-top:1rem">
+    <div class="card-title">📝 Notes for Next Shift</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Leave something for whoever's on next — clears once someone marks it done.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input type="text" id="shift-note-input" placeholder="e.g. Running low on king sheet sets, ordered more" style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addShiftNote()">+ Add</button>
+    </div>
+    ${data.shift_notes.length ? data.shift_notes.map(n => `<div class="row"><div class="row-main"><div class="row-title">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">✓ Done</button></div>`).join('') : '<div class="empty">No notes right now.</div>'}
   </div>`;
   return html;
 }
@@ -3608,7 +3718,6 @@ async function renderWarehouseDashboard(gen) {
   const data = await fetch('/api/warehouse-dashboard').then(r => r.json());
   if (_stale(gen)) return;
   document.getElementById('main-content').innerHTML = renderDashboardSharedHtml(data);
-  loadStaffDaysOffList();
 }
 
 async function renderAdminDashboard(gen) {
@@ -3628,7 +3737,6 @@ async function renderAdminDashboard(gen) {
   </div>`;
   html += renderDashboardSharedHtml(data);
   document.getElementById('main-content').innerHTML = html;
-  loadStaffDaysOffList();
 }
 
 const DAY_NAMES = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -3653,18 +3761,85 @@ async function removeStaffDayOff(id) {
   loadStaffDaysOffList();
 }
 
+async function renderDailyTasks(gen) {
+  const today = await getServerToday();
+  const data = await fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json());
+  if (_stale(gen)) return;
+  const t = data.totals;
+  let html = `
+    <div class="card" style="margin-bottom:1rem;text-align:center">
+      <div class="card-title">📦 Amenity Boxes Ready to Go</div>
+      <div style="font-size:40px;font-weight:700;color:var(--teal)">${data.amenity_box_stock}</div>
+      <div class="row-sub">Goes up when you log boxes assembled below, goes down automatically as properties get packed</div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Log today's numbers</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Add whatever you personally did — everyone's entries add up to the day's total below.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div><label>Laundry bins received</label><input type="number" id="dt-bins-received" value="0" min="0"></div>
+        <div><label>Laundry bins unpacked</label><input type="number" id="dt-bins-unpacked" value="0" min="0"></div>
+        <div><label>Amenity boxes assembled</label><input type="number" id="dt-boxes-assembled" value="0" min="0"></div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="submitDailyLog()">Submit</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1rem">
+      ${metricCard('Bins received today', t.bins_received, false)}
+      ${metricCard('Bins unpacked today', t.bins_unpacked, false)}
+      ${metricCard('Boxes assembled today', t.boxes_assembled, false)}
+    </div>
+    <div class="card">
+      <div class="card-title">Today's log entries</div>
+      ${data.entries.length ? data.entries.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.staff_name}</div><div class="row-sub">${e.laundry_bins_received} received · ${e.laundry_bins_unpacked} unpacked · ${e.amenity_boxes_assembled} boxes assembled · ${e.logged_at}</div></div></div>`).join('') : '<div class="empty">No entries logged yet today.</div>'}
+    </div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
+
+async function submitDailyLog() {
+  const laundry_bins_received = document.getElementById('dt-bins-received').value;
+  const laundry_bins_unpacked = document.getElementById('dt-bins-unpacked').value;
+  const amenity_boxes_assembled = document.getElementById('dt-boxes-assembled').value;
+  await fetch('/api/warehouse-daily-log', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, amenity_boxes_assembled })
+  });
+  showTab('daily_tasks');
+}
+
+async function addShiftNote() {
+  const input = document.getElementById('shift-note-input');
+  const note_text = input.value.trim();
+  if (!note_text) return;
+  await fetch('/api/warehouse-notes', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note_text, staff_name: _currentStaffName })
+  });
+  showTab(currentTab);
+}
+
+async function resolveShiftNote(id) {
+  await fetch(`/api/warehouse-notes/${id}/resolve`, { method: 'POST' });
+  showTab(currentTab);
+}
+
+async function resolvePackShortage(id) {
+  await fetch(`/api/pack-list/shortages/${id}/resolve`, { method: 'POST' });
+  showTab('pack_list');
+}
+
 async function renderPackList(gen) {
-  const [wkRes, clRes, invRes] = await Promise.all([
+  const [wkRes, clRes, invRes, shortRes] = await Promise.all([
     fetch('/api/pack-list/week'),
     fetch('/api/cleaners'),
-    fetch('/api/inventory-counts/weekly-task-status')
+    fetch('/api/inventory-counts/weekly-task-status'),
+    fetch('/api/pack-list/shortages')
   ]);
   const wk = await wkRes.json();
   packListState.cleaners = await clRes.json();
   packListState.week = wk;
   const invTask = await invRes.json();
+  const shortages = await shortRes.json();
   if (_stale(gen)) return;
-  renderPackListBody(invTask);
+  renderPackListBody(invTask, shortages);
 
   if (_packListRefreshTimer) clearInterval(_packListRefreshTimer);
   _packListRefreshTimer = setInterval(async () => {
@@ -3673,12 +3848,13 @@ async function renderPackList(gen) {
     const flagModalOpen = document.getElementById('modal-pack-flag')?.style.display === 'flex';
     if (packModalOpen || flagModalOpen) return;
     try {
-      const [wkR, invR] = await Promise.all([
+      const [wkR, invR, shortR] = await Promise.all([
         fetch('/api/pack-list/week'),
-        fetch('/api/inventory-counts/weekly-task-status')
+        fetch('/api/inventory-counts/weekly-task-status'),
+        fetch('/api/pack-list/shortages')
       ]);
       packListState.week = await wkR.json();
-      renderPackListBody(await invR.json());
+      renderPackListBody(await invR.json(), await shortR.json());
     } catch (e) { /* silent — next tick will retry */ }
   }, 30000);
 }
@@ -3695,6 +3871,13 @@ function formatDueDate(packDate, packed) {
   return `<div class="row-sub">Due: ${dateLabel}</div>`;
 }
 
+function toggleDetailBox(el) {
+  const isPacked = el.dataset.packed === '1';
+  el.dataset.packed = isPacked ? '0' : '1';
+  if (isPacked) { el.style.background = ''; el.style.borderColor = ''; }
+  else { el.style.background = '#E7F1F2'; el.style.borderColor = '#89BBBE'; }
+}
+
 function showPropertyDetail(address, packDate) {
   const p = packListState.properties.find(x => x.address === address && x.pack_date === packDate);
   if (!p) return;
@@ -3705,15 +3888,20 @@ function showPropertyDetail(address, packDate) {
     ${dateLine}
   </div>`;
   if (f) {
+    const box = (val, label) => `<div class="card" style="text-align:center;padding:14px;cursor:pointer" onclick="toggleDetailBox(this)" data-packed="0"><div style="font-size:28px">${val}</div><div class="row-sub">${label}</div></div>`;
+    body += `<p style="text-align:center;font-size:12px;color:var(--gray-400);margin-bottom:8px">Tap each item as you pack it</p>`;
     body += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:18px;font-weight:600;margin-bottom:1.25rem">
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.king}</div><div class="row-sub">King sets</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.queen}</div><div class="row-sub">Queen sets</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.twin}</div><div class="row-sub">Twin sets</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.towels}</div><div class="row-sub">Bath towels</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.hand}</div><div class="row-sub">Hand towels</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.wash}</div><div class="row-sub">Wash cloths</div></div>
-      <div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.mats}</div><div class="row-sub">Bath mats</div></div>
-      ${f.pool ? `<div class="card" style="text-align:center;padding:14px"><div style="font-size:28px">${f.pool}</div><div class="row-sub">Pool towels</div></div>` : ''}
+      ${box(f.king, 'King sets')}
+      ${box(f.queen, 'Queen sets')}
+      ${box(f.twin, 'Twin sets')}
+      ${box(f.towels, 'Bath towels')}
+      ${box(f.hand, 'Hand towels')}
+      ${box(f.wash, 'Wash cloths')}
+      ${box(f.mats, 'Bath mats')}
+      ${f.pool ? box(f.pool, 'Pool towels') : ''}
+      ${f.queen_sleeper ? box(f.queen_sleeper, 'Queen sleeper sets') : ''}
+      ${f.twin_sleeper ? box(f.twin_sleeper, 'Twin sleeper sets') : ''}
+      ${f.amenity_boxes ? box(f.amenity_boxes, 'Amenity boxes') : ''}
     </div>`;
     if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px">✏️ Edit formula</a></div>`;
   } else {
@@ -3763,7 +3951,7 @@ function packCard(p, showDate) {
   </div>`;
 }
 
-function renderPackListBody(invTask) {
+function renderPackListBody(invTask, shortages) {
   const wk = packListState.week;
   packListState.properties = wk.missed.concat(...wk.days.map(d => d.properties));
 
@@ -3781,6 +3969,13 @@ function renderPackListBody(invTask) {
   const unacked = packListState.properties.filter(p => p.is_emergency && p.emergency_id && !p.emergency_acked_by.includes(_currentStaffName));
 
   let html = '';
+  if (shortages && shortages.length) {
+    html += `<div class="card" style="background:#FAECE7;border-color:#D85A30">
+      <div class="card-title" style="color:var(--coral-dark)">📦 Packed Bag Short (${shortages.length})</div>
+      <div class="row-sub" style="margin-bottom:8px">These bags went out missing something — top them off when the bag returns, then check it off.</div>
+      ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + s.pack_date : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})">✓ Topped Off</button></div>`).join('')}
+    </div>`;
+  }
   if (invTask && invTask.is_task_day && !invTask.completed_today) {
     html += `<div class="card" style="background:#E7F1F2;border-color:#89BBBE">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -3843,6 +4038,10 @@ function openPackModal(address, packDate) {
   packModalState = { address, scannedBags: [] };
   document.getElementById('pack-modal-scan').value = '';
   document.getElementById('pack-modal-scan-err').textContent = '';
+  document.getElementById('pack-modal-shortage-item').value = '';
+  document.getElementById('pack-modal-shortage-qty').value = '1';
+  document.getElementById('pack-modal-shortage-notes').value = '';
+  document.getElementById('pack-modal-shortage-fields').style.display = 'none';
   renderPackModalBagList();
   document.getElementById('modal-pack-cleaner').style.display = 'flex';
   setTimeout(() => document.getElementById('pack-modal-scan')?.focus(), 50);
@@ -3895,6 +4094,15 @@ async function confirmPack() {
   });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Error'); return; }
+  const shortageItem = document.getElementById('pack-modal-shortage-item').value.trim();
+  if (shortageItem) {
+    const shortageQty = document.getElementById('pack-modal-shortage-qty').value;
+    const shortageNotes = document.getElementById('pack-modal-shortage-notes').value.trim();
+    await fetch('/api/pack-list/shortages', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, pack_date: packDate, item_name: shortageItem, quantity_short: shortageQty, notes: shortageNotes, reported_by: _currentStaffName })
+    });
+  }
   closePackModal();
   if (data.shortfalls && data.shortfalls.length) {
     alert('Packed, but short on: ' + data.shortfalls.map(s => `${s.item} (needed ${s.needed}, had ${s.available})`).join(', '));
@@ -3923,7 +4131,7 @@ let _allFormulas = [];
 function openAddFormulaModal(propertyName) {
   document.getElementById('af-modal-title').textContent = 'Add packing formula';
   document.getElementById('af-property-name').value = propertyName || '';
-  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => document.getElementById('af-'+f).value = 0);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => document.getElementById('af-'+f).value = f === 'amenity_boxes' ? 1 : 0);
   document.getElementById('modal-add-formula').style.display = 'flex';
 }
 function openEditFormulaModal(address) {
@@ -3937,14 +4145,14 @@ function openEditFormulaModal(address) {
   if (!formula) { alert('Could not find that property\'s formula to edit.'); return; }
   document.getElementById('af-modal-title').textContent = 'Edit packing formula';
   document.getElementById('af-property-name').value = propertyName;
-  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => document.getElementById('af-'+f).value = formula[f] || 0);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => document.getElementById('af-'+f).value = formula[f] || 0);
   document.getElementById('modal-add-formula').style.display = 'flex';
 }
 async function submitAddFormula() {
   const property_name = document.getElementById('af-property-name').value.trim();
   if (!property_name) { alert('Enter a property name'); return; }
   const body = { property_name, pin: _currentPin };
-  ['king','queen','twin','towels','hand','wash','mats','pool'].forEach(f => body[f] = document.getElementById('af-'+f).value);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => body[f] = document.getElementById('af-'+f).value);
   const res = await fetch('/api/pack-list/formula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Error'); return; }
@@ -4373,7 +4581,7 @@ async function loadStaffList() {
     staff = await fetch('/api/staff').then(r=>r.json());
   }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
-  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager' };
+  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager', store_manager:'Store Manager' };
   const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector'];
   const byRole = {};
   staff.forEach(s => {
@@ -4405,7 +4613,7 @@ function roleCheckboxes(selectedRoles) {
   const roles = [
     {v:'admin', l:'Admin'}, {v:'manager', l:'Manager (productivity dashboard)'},
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
-    {v:'coordinator', l:'Coordinator'}
+    {v:'coordinator', l:'Coordinator'}, {v:'store_manager', l:'Store Manager'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
