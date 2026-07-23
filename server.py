@@ -303,6 +303,17 @@ def init_db():
             item_name TEXT NOT NULL, quantity_short INTEGER NOT NULL DEFAULT 0, notes TEXT,
             reported_by TEXT NOT NULL, reported_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS warehouse_task_completions (
+            id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, task_key TEXT NOT NULL,
+            completed_by TEXT NOT NULL, completed_at TEXT NOT NULL,
+            UNIQUE(log_date, task_key)
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_daily_goals (
+            day_of_week INTEGER PRIMARY KEY, primary_focus TEXT NOT NULL, tasks TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS warehouse_standing_notes (
+            id SERIAL PRIMARY KEY, note_text TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS warehouse_shift_notes (
             id SERIAL PRIMARY KEY, note_text TEXT NOT NULL, staff_name TEXT NOT NULL,
             created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
@@ -414,6 +425,47 @@ def init_db():
         conn.commit()
     except Exception as e:
         print(f'Days off seed note: {e}')
+        conn.rollback()
+    try:
+        daily_goals_seed = [
+            (0, 'Stock the warehouse for the upcoming week and weekend ahead.',
+             'Put away clean linen from bins\nMake pillowcase bundles\nMake sheet set bundles\nPut up any supplies that have come in & mark as received\nMake towel bags'),
+            (1, 'Continue stocking the warehouse and organizing all delivered supplies.',
+             'Put up any remaining linen from bins\nStock delivered items — Palmolive dish soap, amenity box supplies, toilet paper, paper towels, etc.\nStock bath items — shampoos, conditioners, body washes, and similar products\nPut all stocked items where they belong; break down and dispose of boxes\nContinue making sheet set bundles if needed\nTake out trash (Trash pickup 4AM tomorrow)'),
+            (2, 'Inventory. Make Kitchen Amenity Boxes & Pack Cleaner Bags — All bags ready for Thursday and Friday cleans.',
+             'Pack all cleaner bags needed for Thursday & Friday cleans\nEnsure bags are complete and staged for pickup\nPut away clean linen that has come in & make towel bags\nComplete supply & inventory (full counts including all boxed and unboxed items)\nMake kitchen amenity boxes needed for the week'),
+            (3, 'Roll additional sheet sets, put away linen, and pack bags for Saturday.',
+             "Roll any additional sheet sets needed\nPut away linen as it comes in\nPack cleaner bags for at least half of Saturday's cleans during peak season (all of Saturday for non-peak)\nPut away any stock delivered to the warehouse\nTake out trash (Friday 4AM pickup)"),
+            (4, 'Complete all remaining cleaner bags for Saturday and all of Sunday.',
+             "Pack any remaining cleaner bags for Saturday's cleans\nPack all cleaner bags for Sunday's cleans\nEnsure all bags are staged and ready\nMake remaining kitchen amenity boxes and re-stock amenity items"),
+            (5, 'Pack cleaner bags for early-week cleans (Monday, Tuesday, Wednesday).',
+             'Pack cleaner bags for Monday cleans\nPack cleaner bags for Tuesday cleans\nPack cleaner bags for Wednesday cleans\nPut away and clean linen'),
+            (6, 'Warehouse cleanup & Stocking.',
+             'Deep clean and organize the warehouse\nEnsure all items are in their proper place and clearly labeled\nNote any low-stock items for reorder (looking at the week ahead to ensure we have enough)\nPut away clean linen\nRoll any sheet sets that can be rolled\nTake out trash (Monday AM pickup)'),
+        ]
+        for dow, focus, tasks in daily_goals_seed:
+            cur.execute(
+                "INSERT INTO warehouse_daily_goals (day_of_week,primary_focus,tasks) VALUES (%s,%s,%s) ON CONFLICT (day_of_week) DO NOTHING",
+                (dow, focus, tasks)
+            )
+        cur.execute("SELECT COUNT(*) FROM warehouse_standing_notes")
+        if cur.fetchone()[0] == 0:
+            standing_notes_seed = [
+                'Check in bags returned from cleaners',
+                'Wash any bags that need laundering',
+                'Light cleaning of the warehouse — keep everything organized and in order',
+                'Daily Damage Log',
+                'Take out trash as needed throughout the day',
+                '🗑 Trash pickup — Regular season: Monday & Friday. Peak season (Memorial Day–Labor Day): Monday, Wednesday & Friday — pickup ~4:00 AM, trash must be out the night before!',
+            ]
+            for i, note in enumerate(standing_notes_seed):
+                cur.execute(
+                    "INSERT INTO warehouse_standing_notes (note_text,sort_order) VALUES (%s,%s)",
+                    (note, i)
+                )
+        conn.commit()
+    except Exception as e:
+        print(f'Warehouse daily goals seed note: {e}')
         conn.rollback()
     try:
         cur.execute("INSERT INTO amenity_box_stock (id,quantity) VALUES (1,0) ON CONFLICT (id) DO NOTHING")
@@ -2685,9 +2737,9 @@ def box_packing():
     """
     params = []
     if date_from:
-        q += " AND fr.arrive >= %s"; params.append(date_from)
+        q += " AND TO_DATE(fr.arrive,'MM/DD/YYYY') >= %s"; params.append(date_from)
     if date_to:
-        q += " AND fr.arrive <= %s"; params.append(date_to)
+        q += " AND TO_DATE(fr.arrive,'MM/DD/YYYY') <= %s"; params.append(date_to)
     q += " GROUP BY fp.address, fp.supplies"
     cur.execute(q, params)
     rows = cur.fetchall()
@@ -3290,7 +3342,7 @@ def get_pack_list():
         properties.append({
             'address': addr,
             'property_name': f['property_name'] if f else emerg_map.get(addr, {}).get('address', addr),
-            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool')} if f else None,
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')} if f else None,
             'is_emergency': addr in emerg_map,
             'emergency_notes': emerg_map[addr]['notes'] if addr in emerg_map else None,
             'packed': bool(st),
@@ -3365,11 +3417,8 @@ def _build_warehouse_dashboard_data(week_start_weekday=0):
             'off_days': off_days,
         })
 
-    cur.execute("""SELECT c.name AS cleaner_name, COUNT(b.id) AS bag_count
-                   FROM bags b JOIN cleaners c ON c.id=b.cleaner_id
-                   WHERE b.status='out'
-                   GROUP BY c.name ORDER BY c.name""")
-    cleaner_bags = cur.fetchall()
+    cur.execute("SELECT COUNT(*) AS c FROM bags WHERE status='out'")
+    bags_out_total = cur.fetchone()['c']
 
     cur.execute("""SELECT id, started_at, item_count, variances, performed_by
                    FROM inventory_counts WHERE areas='amenities' AND reviewed=0
@@ -3400,7 +3449,7 @@ def _build_warehouse_dashboard_data(week_start_weekday=0):
         'needed_today': needed_today, 'packed_today': packed_today_total,
         'needed_week': needed_week, 'packed_week': packed_week_total,
         'employees': employees,
-        'cleaner_bags': cleaner_bags,
+        'bags_out_total': bags_out_total,
         'pending_count_review': pending_count_review,
         'daily_task_today': daily_task_today, 'daily_task_week': daily_task_week,
         'amenity_box_stock': amenity_box_stock,
@@ -3596,6 +3645,105 @@ def resolve_pack_shortage(sid):
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success': True})
 
+@app.route('/api/warehouse-goals', methods=['GET'])
+def get_warehouse_goals():
+    """Today's primary focus + task list, plus the always-shown standing
+    notes (daily standards, trash schedule) — and the full week's goals for
+    the Settings editor. Also returns which of today's tasks are checked
+    off — shared across the whole team, resets automatically each new day
+    since completions are tracked per calendar date."""
+    today_str = today_central()
+    today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM warehouse_daily_goals ORDER BY day_of_week")
+    all_days = cur.fetchall()
+    cur.execute("SELECT * FROM warehouse_standing_notes ORDER BY sort_order")
+    standing_notes = cur.fetchall()
+    cur.execute("SELECT task_key, completed_by FROM warehouse_task_completions WHERE log_date=%s", (today_str,))
+    completions = {r['task_key']: r['completed_by'] for r in cur.fetchall()}
+
+    # Anything from yesterday that never got checked off — still actionable,
+    # not just an FYI, since it may just be running late rather than skipped.
+    yesterday_dt = today_dt - timedelta(days=1)
+    yesterday_str = yesterday_dt.isoformat()
+    yesterday_goal = next((d for d in all_days if d['day_of_week'] == yesterday_dt.weekday()), None)
+    missed_yesterday = []
+    if yesterday_goal:
+        cur.execute("SELECT task_key FROM warehouse_task_completions WHERE log_date=%s", (yesterday_str,))
+        yesterday_done = {r['task_key'] for r in cur.fetchall()}
+        for i, t in enumerate(yesterday_goal['tasks'].split('\n')):
+            if not t.strip(): continue
+            key = f"day-{yesterday_goal['day_of_week']}-{i}"
+            if key not in yesterday_done:
+                missed_yesterday.append({'task_key': key, 'text': t.strip(), 'log_date': yesterday_str})
+        for n in standing_notes:
+            key = f"standing-{n['id']}"
+            if key not in yesterday_done:
+                missed_yesterday.append({'task_key': key, 'text': n['note_text'], 'log_date': yesterday_str})
+
+    cur.close(); conn.close()
+    today_goal = next((d for d in all_days if d['day_of_week'] == today_dt.weekday()), None)
+    return jsonify({
+        'today_day_of_week': today_dt.weekday(),
+        'todays_goal': today_goal,
+        'all_days': all_days,
+        'missed_yesterday': missed_yesterday,
+        'standing_notes': standing_notes,
+        'completions': completions,
+    })
+
+@app.route('/api/warehouse-goals/toggle-task', methods=['POST'])
+def toggle_warehouse_task():
+    """Check/uncheck a task — shared across the team. Defaults to today,
+    but accepts an explicit log_date so a missed-yesterday item can be
+    checked off against the day it actually belonged to."""
+    data = request.json or {}
+    task_key = (data.get('task_key') or '').strip()
+    completed_by = (data.get('completed_by') or '').strip() or 'Unknown'
+    log_date = (data.get('log_date') or '').strip() or today_central()
+    if not task_key:
+        return jsonify({'error': 'task_key is required'}), 400
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id FROM warehouse_task_completions WHERE log_date=%s AND task_key=%s", (log_date, task_key))
+    existing = cur.fetchone()
+    if existing:
+        cur.execute("DELETE FROM warehouse_task_completions WHERE id=%s", (existing['id'],))
+        completed = False
+    else:
+        cur.execute("INSERT INTO warehouse_task_completions (log_date,task_key,completed_by,completed_at) VALUES (%s,%s,%s,%s)",
+                    (log_date, task_key, completed_by, now_central()))
+        completed = True
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'completed': completed})
+
+@app.route('/api/warehouse-goals/<int:day_of_week>', methods=['POST'])
+def update_warehouse_goal(day_of_week):
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    primary_focus = (data.get('primary_focus') or '').strip()
+    tasks = (data.get('tasks') or '').strip()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO warehouse_daily_goals (day_of_week,primary_focus,tasks) VALUES (%s,%s,%s)
+                   ON CONFLICT (day_of_week) DO UPDATE SET primary_focus=EXCLUDED.primary_focus, tasks=EXCLUDED.tasks""",
+                (day_of_week, primary_focus, tasks))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/warehouse-standing-notes', methods=['POST'])
+def update_warehouse_standing_notes():
+    """Bulk replace — the whole list is edited as one text block in Settings."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    notes = [n.strip() for n in (data.get('notes') or []) if n.strip()]
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM warehouse_standing_notes")
+    for i, note in enumerate(notes):
+        cur.execute("INSERT INTO warehouse_standing_notes (note_text,sort_order) VALUES (%s,%s)", (note, i))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
 @app.route('/api/pack-list/bundles', methods=['GET'])
 def get_bundles_needed():
     """How many towel bags (pre-packed in sets of 18) and sheet-set bundles
@@ -3760,7 +3908,7 @@ def get_pack_list_week():
         return {
             'address': addr,
             'property_name': f['property_name'] if f else (emerg['address'] if emerg else addr),
-            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool')} if f else None,
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')} if f else None,
             'is_emergency': emerg is not None,
             'emergency_notes': emerg['notes'] if emerg else None,
             'emergency_id': emerg['id'] if emerg else None,
