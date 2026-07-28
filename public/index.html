@@ -749,46 +749,45 @@ async function renderWarehouseHome(gen) {
   let checklistDone = 0;
   taskList.forEach((t, i) => { if (completions[`day-${goals.todays_goal.day_of_week}-${i}`]) checklistDone++; });
   standingList.forEach(n => { if (completions[`standing-${n.id}`]) checklistDone++; });
-  const checklistTotal = taskList.length + standingList.length;
+  const checklistTotal = taskList.length + standingList.length + (goals.onetime_tasks || []).length;
   const checklistRemaining = checklistTotal - checklistDone;
 
   const tile = (icon, label, value, sub, colorVar, onclick) => `
-    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:20px;cursor:pointer;transition:transform 0.1s" onclick="${onclick}" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
-      <div style="font-size:32px;margin-bottom:6px">${icon}</div>
-      <div style="font-size:38px;font-weight:700;color:${colorVar};line-height:1">${value}</div>
-      <div style="font-size:15px;font-weight:600;margin-top:6px">${label}</div>
-      ${sub ? `<div style="font-size:12px;color:var(--gray-400);margin-top:2px">${sub}</div>` : ''}
+    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:14px 16px;cursor:pointer;transition:transform 0.1s" onclick="${onclick}" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
+      <div style="font-size:24px;margin-bottom:4px">${icon}</div>
+      <div style="font-size:28px;font-weight:700;color:${colorVar};line-height:1.1">${value}</div>
+      <div style="font-size:13px;font-weight:600;margin-top:4px">${label}</div>
+      ${sub ? `<div style="font-size:11px;color:var(--gray-400);margin-top:1px">${sub}</div>` : ''}
     </div>`;
 
   const quickLink = (icon, label, tabId) => `
-    <div style="background:var(--gray-50);border-radius:10px;padding:14px 10px;text-align:center;cursor:pointer" onclick="showTab('${tabId}')">
-      <div style="font-size:24px;margin-bottom:4px">${icon}</div>
-      <div style="font-size:12px;font-weight:600;color:var(--gray-700)">${label}</div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:10px 8px;text-align:center;cursor:pointer" onclick="showTab('${tabId}')">
+      <div style="font-size:20px;margin-bottom:2px">${icon}</div>
+      <div style="font-size:11px;font-weight:600;color:var(--gray-700)">${label}</div>
     </div>`;
 
   const html = `
-    <div style="margin-bottom:1.25rem">
-      <div style="font-size:20px;font-weight:700">Today's Priorities</div>
-      <div style="font-size:13px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
+    <div style="margin-bottom:0.85rem">
+      <div style="font-size:18px;font-weight:700">Today's Priorities</div>
+      <div style="font-size:12px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
     </div>
-    <div class="card" style="margin-bottom:1.25rem">
-      <div class="card-title">📝 Notes for Next Shift</div>
-      <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Leave something for whoever's on next — clears once someone marks it done.</p>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input type="text" id="shift-note-input" placeholder="e.g. Running low on king sheet sets, ordered more" style="flex:1">
-        <button class="btn btn-primary btn-sm" onclick="addShiftNote()">+ Add</button>
-      </div>
-      ${shiftNotes.length ? shiftNotes.map(n => `<div class="row"><div class="row-main"><div class="row-title">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">✓ Done</button></div>`).join('') : '<div class="empty">No notes right now.</div>'}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:1.5rem">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:0.85rem">
       ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('🧺', 'Bundles Needed (5 day)', `${bTowelBags} towel bags`, `${bKing} King · ${bQueen} Queen · ${bTwin} Twin sheet sets`, 'var(--teal)', "showTab('bundles_needed')")}
       ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📝', 'Daily Checklist', checklistRemaining, checklistTotal ? `${checklistDone}/${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
     </div>
-    <div style="font-size:13px;font-weight:600;color:var(--gray-400);margin-bottom:10px">MORE TABS</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
+    <div class="card" style="margin-bottom:0.85rem;padding:14px 16px">
+      <div class="card-title" style="margin-bottom:6px">📝 Notes for Next Shift</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input type="text" id="shift-note-input" placeholder="Leave something for whoever's on next..." style="flex:1">
+        <button class="btn btn-primary btn-sm" onclick="addShiftNote()">+ Add</button>
+      </div>
+      ${shiftNotes.length ? shiftNotes.map(n => `<div class="row" style="padding:4px 0"><div class="row-main"><div class="row-title" style="font-size:13px">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">✓ Done</button></div>`).join('') : '<div class="empty" style="padding:4px 0">No notes right now.</div>'}
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--gray-400);margin-bottom:8px">MORE TABS</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:8px">
       ${quickLink('⚠️', 'Flag Issue', 'pack_flags')}
       ${quickLink('📷', 'Scan Bag', 'scan')}
       ${quickLink('🚨', 'Overdue', 'overdue')}
@@ -3852,6 +3851,22 @@ function renderGoalsHtml(goals) {
       </div>` : ''}
     </div>`;
   }
+  const canAddOnetime = userRoles.includes('admin') || userRoles.includes('manager');
+  const onetimeTasks = goals.onetime_tasks || [];
+  if (onetimeTasks.length || canAddOnetime) {
+    html += `<div class="card" style="margin-bottom:1rem">
+      <div class="card-title">📌 One-Time Tasks</div>
+      ${onetimeTasks.length ? `<div style="margin-bottom:${canAddOnetime ? '10px' : '0'}">
+        ${onetimeTasks.map(t => `<div onclick="resolveOnetimeTask(${t.id})" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5">
+          <span style="flex-shrink:0">⬜</span><span>${t.task_text} <span style="font-size:11px;color:var(--gray-400)">— added by ${t.added_by}</span></span>
+        </div>`).join('')}
+      </div>` : (canAddOnetime ? '' : '<div class="empty">Nothing right now.</div>')}
+      ${canAddOnetime ? `<div style="display:flex;gap:8px;${onetimeTasks.length ? 'border-top:0.5px solid var(--gray-200);padding-top:10px' : ''}">
+        <input type="text" id="onetime-task-input" placeholder="e.g. Move pallets from bay 2 to bay 4" style="flex:1">
+        <button class="btn btn-primary btn-sm" onclick="addOnetimeTask()">+ Add</button>
+      </div>` : ''}
+    </div>`;
+  }
   return html;
 }
 
@@ -3917,6 +3932,27 @@ async function toggleGoalTask(taskKey, logDate) {
   await fetch('/api/warehouse-goals/toggle-task', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task_key: taskKey, completed_by: _currentStaffName, log_date: logDate || '' })
+  });
+  showTab(currentTab);
+}
+
+async function addOnetimeTask() {
+  const input = document.getElementById('onetime-task-input');
+  const task_text = input.value.trim();
+  if (!task_text) return;
+  const res = await fetch('/api/warehouse-onetime-tasks', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_text, added_by: _currentStaffName, pin: _currentPin })
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'Error adding task'); return; }
+  showTab(currentTab);
+}
+
+async function resolveOnetimeTask(id) {
+  await fetch(`/api/warehouse-onetime-tasks/${id}/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resolved_by: _currentStaffName })
   });
   showTab(currentTab);
 }
