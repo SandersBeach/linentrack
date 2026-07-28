@@ -720,19 +720,36 @@ function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 // screen and miss something else that needed doing.
 async function renderWarehouseHome(gen) {
   const today = await getServerToday();
-  const [week, shortages, bundles, dailyLog] = await Promise.all([
+  const [week, shortages, bundles, goals] = await Promise.all([
     fetch('/api/pack-list/week').then(r => r.json()),
     fetch('/api/pack-list/shortages').then(r => r.json()),
-    fetch('/api/pack-list/bundles?days=1').then(r => r.json()),
-    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json())
+    fetch('/api/pack-list/bundles?days=5').then(r => r.json()),
+    fetch('/api/warehouse-goals').then(r => r.json())
   ]);
   if (_stale(gen)) return;
 
   const todayDay = week.days.find(d => d.date === today) || { properties: [] };
   const bagsToPackToday = todayDay.properties.filter(p => !p.packed).length;
   const missedCount = week.missed.length;
-  const b = bundles.days[0] || {};
-  const dt = dailyLog.totals || {};
+  // 5-day bundle total, including anything missed — matches the same total
+  // shown at the top of the Bundles Needed tab itself, so the numbers here
+  // are never out of sync with what staff see when they tap through.
+  const bTowelBags = bundles.missed.towel_bags_needed + bundles.days.reduce((s,d)=>s+d.towel_bags_needed,0);
+  const bKing = bundles.missed.king_bundles_needed + bundles.days.reduce((s,d)=>s+d.king_bundles_needed,0);
+  const bQueen = bundles.missed.queen_bundles_needed + bundles.days.reduce((s,d)=>s+d.queen_bundles_needed,0);
+  const bTwin = bundles.missed.twin_bundles_needed + bundles.days.reduce((s,d)=>s+d.twin_bundles_needed,0);
+  // How many checklist items (today's focus tasks + every-day standing
+  // notes) are still unchecked — not the raw bins/boxes numbers, which read
+  // confusingly large and look like a task count when they're really just
+  // a running tally.
+  const taskList = goals.todays_goal ? goals.todays_goal.tasks.split('\n').filter(t => t.trim()) : [];
+  const standingList = goals.standing_notes || [];
+  const completions = goals.completions || {};
+  let checklistDone = 0;
+  taskList.forEach((t, i) => { if (completions[`day-${goals.todays_goal.day_of_week}-${i}`]) checklistDone++; });
+  standingList.forEach(n => { if (completions[`standing-${n.id}`]) checklistDone++; });
+  const checklistTotal = taskList.length + standingList.length;
+  const checklistRemaining = checklistTotal - checklistDone;
 
   const tile = (icon, label, value, sub, colorVar, onclick) => `
     <div style="background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:20px;cursor:pointer;transition:transform 0.1s" onclick="${onclick}" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
@@ -753,12 +770,13 @@ async function renderWarehouseHome(gen) {
       <div style="font-size:20px;font-weight:700">Today's Priorities</div>
       <div style="font-size:13px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
     </div>
+    ${renderGoalsHtml(goals)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:1.5rem">
       ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
-      ${tile('🧺', 'Bundles Needed Today', `${b.towel_bags_needed||0} bags`, `${b.king_bundles_needed||0}K · ${b.queen_bundles_needed||0}Q · ${b.twin_bundles_needed||0}T`, 'var(--teal)', "showTab('bundles_needed')")}
-      ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--amber)' : 'var(--teal)', "showTab('pack_list')")}
-      ${tile('📝', 'Daily Task Progress', `${dt.boxes_assembled||0}`, `boxes assembled · ${dt.bins_received||0} bins in · ${dt.bins_unpacked||0} unpacked`, 'var(--teal)', "showTab('daily_tasks')")}
+      ${tile('🧺', 'Bundles Needed (5 day)', `${bTowelBags} towel bags`, `${bKing} King · ${bQueen} Queen · ${bTwin} Twin sheet sets`, 'var(--teal)', "showTab('bundles_needed')")}
+      ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
+      ${tile('📝', 'Daily Checklist', checklistRemaining, checklistTotal ? `${checklistDone}/${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
     </div>
     <div style="font-size:13px;font-weight:600;color:var(--gray-400);margin-bottom:10px">MORE TABS</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
@@ -882,8 +900,8 @@ async function renderOverdue(gen) {
 
   let html = '';
   if (skipped.length) {
-    html += `<div class="card" style="background:var(--amber-light);border-color:var(--amber)">
-      <div class="card-title" style="color:var(--amber)">⚠️ Checked in without a pickup scan (${skipped.length})</div>
+    html += `<div class="card" style="background:#FAECE7;border-color:var(--coral-dark)">
+      <div class="card-title" style="color:var(--coral-dark)">⚠️ Checked in without a pickup scan (${skipped.length})</div>
       <div class="row-sub" style="margin-bottom:8px">These bags went straight from staged to returned — the cleaner never scanned pickup. Worth a quick reminder to them.</div>
       ${skipped.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.home_name || '—'} <span class="tag">${s.bag_id}</span></div><div class="row-sub">${s.cleaner_name || 'Unknown cleaner'} · checked in ${s.timestamp}${s.staff_name ? ' · by ' + s.staff_name : ''}</div></div></div>`).join('')}
     </div>`;
@@ -895,9 +913,9 @@ async function renderOverdue(gen) {
     return;
   }
   if (needsReview.length) {
-    html += `<div style="background:var(--amber-light);border:0.5px solid var(--amber);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">⚠️</div><div><div style="font-size:15px;font-weight:500;color:var(--amber)">${needsReview.length} bag${needsReview.length!==1?'s':''} need review</div><div style="font-size:12px;color:var(--amber)">Marked "out" but no pickup time recorded — can't tell if overdue</div></div></div>`;
+    html += `<div style="background:#FAECE7;border:0.5px solid var(--coral-dark);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">⚠️</div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${needsReview.length} bag${needsReview.length!==1?'s':''} need review</div><div style="font-size:12px;color:var(--coral-dark)">Marked "out" but no pickup time recorded — can't tell if overdue</div></div></div>`;
     html += `<div class="card"><div style="font-size:14px;font-weight:600;margin-bottom:8px">Needs review</div>`;
-    needsReview.forEach(b => { html += `<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">With ${b.cleaner_name||'unknown cleaner'} · no pickup time on file</div></div><span class="badge badge-warn">Check manually</span></div>`; });
+    needsReview.forEach(b => { html += `<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">With ${b.cleaner_name||'unknown cleaner'} · no pickup time on file</div></div><span class="badge badge-out">Check manually</span></div>`; });
     html += `</div>`;
   }
   if (!overdue.length) { document.getElementById('main-content').innerHTML = html; return; }
@@ -3696,7 +3714,7 @@ async function getServerToday() {
 
 let _packListRefreshTimer = null;
 
-let _bundlesDays = 7;
+let _bundlesDays = 5;
 
 function bundlesDayRow(d, isMissed) {
   if (d.properties_counted === 0 && d.missing_formula.length === 0) {
