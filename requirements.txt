@@ -3,3 +3,4 @@ pytz
 psycopg2-binary
 qrcode[pil]
 Pillow
+gunicorn
