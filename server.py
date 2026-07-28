@@ -318,6 +318,11 @@ def init_db():
             id SERIAL PRIMARY KEY, note_text TEXT NOT NULL, staff_name TEXT NOT NULL,
             created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS warehouse_onetime_tasks (
+            id SERIAL PRIMARY KEY, task_text TEXT NOT NULL, added_by TEXT NOT NULL,
+            created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0,
+            resolved_by TEXT, resolved_at TEXT
+        );
         CREATE TABLE IF NOT EXISTS warehouse_daily_log (
             id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, staff_name TEXT NOT NULL,
             laundry_bins_received INTEGER NOT NULL DEFAULT 0,
@@ -3711,6 +3716,8 @@ def get_warehouse_goals():
     standing_notes = cur.fetchall()
     cur.execute("SELECT task_key, completed_by FROM warehouse_task_completions WHERE log_date=%s", (today_str,))
     completions = {r['task_key']: r['completed_by'] for r in cur.fetchall()}
+    cur.execute("SELECT * FROM warehouse_onetime_tasks WHERE resolved=0 ORDER BY id ASC")
+    onetime_tasks = cur.fetchall()
 
     # Anything from yesterday that never got checked off — still actionable,
     # not just an FYI, since it may just be running late rather than skipped.
@@ -3740,6 +3747,7 @@ def get_warehouse_goals():
         'missed_yesterday': missed_yesterday,
         'standing_notes': standing_notes,
         'completions': completions,
+        'onetime_tasks': onetime_tasks,
     })
 
 @app.route('/api/warehouse-goals/toggle-task', methods=['POST'])
@@ -3765,6 +3773,39 @@ def toggle_warehouse_task():
         completed = True
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success': True, 'completed': completed})
+
+@app.route('/api/warehouse-onetime-tasks', methods=['POST'])
+def add_onetime_task():
+    """A one-off task Cassie or an admin needs on the checklist just once —
+    not a recurring day-of-week task, not an every-day standing note. Shows
+    up in the checklist until someone checks it off, then it's gone for
+    good rather than reappearing tomorrow."""
+    data = request.json or {}
+    roles = resolve_roles(str(data.get('pin', '')))
+    if not any(r in ('admin', 'manager') for r in roles):
+        return jsonify({'error': 'Admin or Manager access required'}), 403
+    task_text = (data.get('task_text') or '').strip()
+    added_by = (data.get('added_by') or '').strip() or 'Unknown'
+    if not task_text:
+        return jsonify({'error': 'Task text is required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO warehouse_onetime_tasks (task_text,added_by,created_at,resolved) VALUES (%s,%s,%s,0)",
+                (task_text, added_by, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/warehouse-onetime-tasks/<int:task_id>/resolve', methods=['POST'])
+def resolve_onetime_task(task_id):
+    """Anyone on the team can check a one-time task off, same as the
+    recurring checklist items — it's a shared list, not admin-only to
+    complete, only admin/manager-only to add."""
+    data = request.json or {}
+    resolved_by = (data.get('resolved_by') or '').strip() or 'Unknown'
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE warehouse_onetime_tasks SET resolved=1, resolved_by=%s, resolved_at=%s WHERE id=%s",
+                (resolved_by, now_central(), task_id))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
 
 @app.route('/api/warehouse-goals/<int:day_of_week>', methods=['POST'])
 def update_warehouse_goal(day_of_week):
