@@ -475,8 +475,9 @@
 // ── Auto-update detection ────────────────────────────────────────────────────
 // No hardcoded version string to keep in sync — this just remembers whatever
 // version it loaded with, and watches for the server reporting something
-// different. When it changes, it reloads on its own (safely — never mid-scan
-// or mid-form), so nobody has to notice a banner or remember to refresh.
+// different. When a new version is live, it shows a banner so staff can
+// refresh whenever it's convenient — it never reloads on its own, so nobody
+// ever gets bumped out mid-scan or loses progress on a bag they're packing.
 let _myAppBuild = null;
 let _reloadPending = false;
 
@@ -485,39 +486,30 @@ function startVersionCheck() {
   setInterval(checkForNewVersion, 120000); // check every 2 minutes
 }
 
-async function checkForNewVersion() {
-  if (_reloadPending) return;
-  try {
-    const res = await fetch('/api/app-version');
-    const data = await res.json();
+function checkForNewVersion() {
+  if (_reloadPending) return; // banner already showing, no need to check again
+  fetch('/api/app-version').then(r => r.json()).then(data => {
     if (!_myAppBuild) { _myAppBuild = data.build; return; } // establish baseline if the first fetch failed
     if (data.build && data.build !== _myAppBuild) {
       _reloadPending = true;
-      attemptSafeReload();
+      showUpdateBanner();
     }
-  } catch (e) { /* silent — try again next interval */ }
+  }).catch(() => { /* silent — try again next interval */ });
 }
 
-function attemptSafeReload(secondsLeft) {
-  if (secondsLeft === undefined) secondsLeft = 10;
+function showUpdateBanner() {
   let banner = document.getElementById('update-banner');
-  if (!banner) {
-    banner = document.createElement('div');
-    banner.id = 'update-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--coral);color:#fff;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 2px 8px rgba(0,0,0,0.2)';
-    document.body.prepend(banner);
-  }
-  const modalOpen = Array.from(document.querySelectorAll('.modal-overlay')).some(m => m.style.display === 'flex');
-  const activeTag = document.activeElement ? document.activeElement.tagName : '';
-  const midInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
-  if (modalOpen || midInput) {
-    banner.textContent = '🔄 An update is ready — finishing your current step first...';
-    setTimeout(() => attemptSafeReload(10), 3000);
-    return;
-  }
-  if (secondsLeft <= 0) { window.location.reload(true); return; }
-  banner.textContent = `🔄 Updating in ${secondsLeft}...`;
-  setTimeout(() => attemptSafeReload(secondsLeft - 1), 1000);
+  if (banner) return;
+  banner = document.createElement('div');
+  banner.id = 'update-banner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--coral);color:#fff;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;gap:12px';
+  banner.innerHTML = `<span>🔄 An update is available.</span>
+    <button onclick="window.location.reload(true)" style="background:#fff;color:var(--coral-dark);border:none;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:13px">Refresh now</button>
+    <button onclick="document.getElementById('update-banner').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.6);border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:13px">Later</button>`;
+  document.body.prepend(banner);
+  // "Later" just hides today's banner — if they're mid-task, they can keep
+  // working and refresh whenever it's convenient (end of their pack, end of
+  // shift, etc). Nothing ever force-reloads and nobody loses progress.
 }
 startVersionCheck();
 
