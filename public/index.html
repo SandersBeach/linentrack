@@ -720,11 +720,12 @@ function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 // screen and miss something else that needed doing.
 async function renderWarehouseHome(gen) {
   const today = await getServerToday();
-  const [week, shortages, bundles, goals] = await Promise.all([
+  const [week, shortages, bundles, goals, shiftNotes] = await Promise.all([
     fetch('/api/pack-list/week').then(r => r.json()),
     fetch('/api/pack-list/shortages').then(r => r.json()),
     fetch('/api/pack-list/bundles?days=5').then(r => r.json()),
-    fetch('/api/warehouse-goals').then(r => r.json())
+    fetch('/api/warehouse-goals').then(r => r.json()),
+    fetch('/api/warehouse-notes').then(r => r.json())
   ]);
   if (_stale(gen)) return;
 
@@ -770,7 +771,15 @@ async function renderWarehouseHome(gen) {
       <div style="font-size:20px;font-weight:700">Today's Priorities</div>
       <div style="font-size:13px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
     </div>
-    ${renderGoalsHtml(goals)}
+    <div class="card" style="margin-bottom:1.25rem">
+      <div class="card-title">📝 Notes for Next Shift</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Leave something for whoever's on next — clears once someone marks it done.</p>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" id="shift-note-input" placeholder="e.g. Running low on king sheet sets, ordered more" style="flex:1">
+        <button class="btn btn-primary btn-sm" onclick="addShiftNote()">+ Add</button>
+      </div>
+      ${shiftNotes.length ? shiftNotes.map(n => `<div class="row"><div class="row-main"><div class="row-title">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">✓ Done</button></div>`).join('') : '<div class="empty">No notes right now.</div>'}
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:1.5rem">
       ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
