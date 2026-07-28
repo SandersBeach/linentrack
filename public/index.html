@@ -3889,10 +3889,10 @@ async function renderDailyTasks(gen) {
       ${metricCard('Bins unpacked today', t.bins_unpacked, false)}
       ${metricCard('Boxes assembled today', t.boxes_assembled, false)}
     </div>
-    <div class="card">
+    ${userRoles.includes('admin') ? `<div class="card">
       <div class="card-title">Today's log entries</div>
       ${data.entries.length ? data.entries.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.staff_name}</div><div class="row-sub">${e.laundry_bins_received} received · ${e.laundry_bins_unpacked} unpacked · ${e.amenity_boxes_assembled} boxes assembled · ${e.logged_at}</div></div></div>`).join('') : '<div class="empty">No entries logged yet today.</div>'}
-    </div>`;
+    </div>` : ''}`;
   document.getElementById('main-content').innerHTML = html;
 }
 
