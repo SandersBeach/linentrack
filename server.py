@@ -110,20 +110,9 @@ def resolve_roles(pin):
     legacy = check_pin(pin)
     return [legacy] if legacy else []
 
-_DB_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_PUBLIC_URL')
-if not _DB_URL:
-    # Fail loudly and immediately at startup rather than silently falling
-    # back to a hardcoded credential — a real database password should
-    # never live in source code, especially in a public GitHub repo where
-    # it's visible to anyone. If this fires, DATABASE_URL isn't set on the
-    # Railway service — go set it (ideally as a reference to the Postgres
-    # service's own DATABASE_URL, not a copy-pasted value) rather than
-    # putting a real connection string back in this file.
-    raise RuntimeError(
-        'DATABASE_URL is not set. Set it on this service in Railway — '
-        'ideally as a reference to the Postgres service\'s DATABASE_URL '
-        '(so it always stays in sync), not a hardcoded value here in code.'
-    )
+_DB_URL = (os.environ.get('DATABASE_URL') or
+           os.environ.get('DATABASE_PUBLIC_URL') or
+           'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
 if _DB_URL.startswith('postgres://'):
     _DB_URL = _DB_URL.replace('postgres://', 'postgresql://', 1)
 
@@ -132,45 +121,16 @@ class PooledConnection(psycopg2.extensions.connection):
     the pool instead of actually closing it. Every existing call site in
     this file already calls conn.close() when it's done — this makes that
     call reuse the connection instead of tearing it down and reconnecting
-    from scratch, without changing a single one of those call sites.
-
-    CRITICAL: many routes only ever run read-only SELECTs and call
-    cur.close(); conn.close() without an explicit conn.commit() — which is
-    completely normal, ordinary Flask code. But psycopg2 always opens an
-    implicit transaction on the first query, and pooling means the physical
-    connection doesn't actually go away on close() anymore — so without this
-    rollback, every one of those un-committed read-only routes would leave
-    the connection sitting in the pool "idle in transaction" forever, ready
-    to be handed to some future unrelated request still carrying that old,
-    never-finished transaction. Rolling back here (a harmless no-op if the
-    transaction was already committed or nothing was pending) guarantees a
-    connection always goes back into the pool clean, regardless of whether
-    the code that used it remembered to commit."""
+    from scratch, without changing a single one of those call sites."""
     def close(self):
-        try:
-            self.rollback()
-        except Exception:
-            pass
         try:
             _DB_POOL.putconn(self)
         except Exception:
-            try:
-                super().close()
-            except Exception:
-                pass
+            super().close()
 
 _DB_POOL = ThreadedConnectionPool(
     minconn=2, maxconn=15,
-    dsn=_DB_URL, sslmode='prefer', connection_factory=PooledConnection,
-    connect_timeout=10,  # psycopg2.connect() has NO timeout by default — a
-    # stalled TCP handshake when the pool opens a brand-new connection can
-    # otherwise hang a request forever, completely invisibly (it never even
-    # registers as a session in Postgres, so it's untraceable from the DB
-    # side). This makes a stuck connection attempt fail loudly in 10 seconds
-    # instead of hanging silently forever.
-    options='-c statement_timeout=20000'  # belt-and-suspenders: also cap any
-    # individual query at 20s once a connection IS established, so a runaway
-    # query can't hang a request forever either.
+    dsn=_DB_URL, sslmode='require', connection_factory=PooledConnection
 )
 
 def get_db():
@@ -181,21 +141,19 @@ def get_db():
     would otherwise cause a confusing mid-scan error instead of just quietly
     getting replaced."""
     for _ in range(2):
-        conn = None
+        conn = _DB_POOL.getconn()
         try:
-            conn = _DB_POOL.getconn()
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')
             return conn
         except psycopg2.OperationalError:
-            if conn is not None:
-                try:
-                    _DB_POOL.putconn(conn, close=True)
-                except Exception:
-                    pass
+            try:
+                _DB_POOL.putconn(conn, close=True)
+            except Exception:
+                pass
     # Last resort if the pool itself is having trouble — a plain direct
     # connection, so a request still succeeds instead of hard-failing.
-    return psycopg2.connect(_DB_URL, sslmode='prefer', connection_factory=PooledConnection, connect_timeout=10)
+    return psycopg2.connect(_DB_URL, sslmode='require', connection_factory=PooledConnection)
 
 def generate_cleaner_pin(conn):
     """Generate a unique random 5-digit PIN for a cleaner."""
@@ -4350,26 +4308,8 @@ def background_overdue_loop():
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
-_startup_done = False
-
-def start_background_jobs():
-    """Runs once at process start, regardless of whether this is launched
-    directly (`python server.py`, for local testing) or by gunicorn in
-    production (which imports this file rather than executing it as
-    __main__). Guarded so it can't accidentally fire twice and start two
-    copies of the overdue-check loop, which would double-send alert emails."""
-    global _startup_done
-    if _startup_done:
-        return
-    _startup_done = True
+if __name__ == '__main__':
     init_db()
     threading.Thread(target=background_overdue_loop, daemon=True).start()
-
-# Runs when gunicorn imports this module in production.
-start_background_jobs()
-
-if __name__ == '__main__':
-    # Local/manual run only — gunicorn (used in production, see Procfile)
-    # never executes this block, since it imports the module instead.
     port=int(os.environ.get('PORT',3000))
     app.run(host='0.0.0.0', port=port, debug=False)
