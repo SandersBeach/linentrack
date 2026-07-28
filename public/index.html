@@ -4076,7 +4076,7 @@ function renderPackListBody(invTask, shortages) {
     html += `<div class="card" style="background:#FAECE7;border-color:#D85A30">
       <div class="card-title" style="color:var(--coral-dark)">📦 Packed Bag Short (${shortages.length})</div>
       <div class="row-sub" style="margin-bottom:8px">These bags went out missing something — top them off when the bag returns, then check it off.</div>
-      ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + s.pack_date : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})">✓ Topped Off</button></div>`).join('')}
+      ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + s.pack_date : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})">✓ Now Complete</button></div>`).join('')}
     </div>`;
   }
   if (invTask && invTask.is_task_day && !invTask.completed_today) {
