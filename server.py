@@ -121,12 +121,32 @@ class PooledConnection(psycopg2.extensions.connection):
     the pool instead of actually closing it. Every existing call site in
     this file already calls conn.close() when it's done — this makes that
     call reuse the connection instead of tearing it down and reconnecting
-    from scratch, without changing a single one of those call sites."""
+    from scratch, without changing a single one of those call sites.
+
+    CRITICAL: many routes only ever run read-only SELECTs and call
+    cur.close(); conn.close() without an explicit conn.commit() — which is
+    completely normal, ordinary Flask code. But psycopg2 always opens an
+    implicit transaction on the first query, and pooling means the physical
+    connection doesn't actually go away on close() anymore — so without this
+    rollback, every one of those un-committed read-only routes would leave
+    the connection sitting in the pool "idle in transaction" forever, ready
+    to be handed to some future unrelated request still carrying that old,
+    never-finished transaction. Rolling back here (a harmless no-op if the
+    transaction was already committed or nothing was pending) guarantees a
+    connection always goes back into the pool clean, regardless of whether
+    the code that used it remembered to commit."""
     def close(self):
+        try:
+            self.rollback()
+        except Exception:
+            pass
         try:
             _DB_POOL.putconn(self)
         except Exception:
-            super().close()
+            try:
+                super().close()
+            except Exception:
+                pass
 
 _DB_POOL = ThreadedConnectionPool(
     minconn=2, maxconn=15,
