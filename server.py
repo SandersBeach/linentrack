@@ -3,7 +3,6 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
-from psycopg2.pool import ThreadedConnectionPool
 import pytz
 
 app = Flask(__name__, static_folder='public', static_url_path='')
@@ -113,47 +112,12 @@ def resolve_roles(pin):
 _DB_URL = (os.environ.get('DATABASE_URL') or
            os.environ.get('DATABASE_PUBLIC_URL') or
            'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
-if _DB_URL.startswith('postgres://'):
-    _DB_URL = _DB_URL.replace('postgres://', 'postgresql://', 1)
-
-class PooledConnection(psycopg2.extensions.connection):
-    """Same as a normal psycopg2 connection, except .close() returns it to
-    the pool instead of actually closing it. Every existing call site in
-    this file already calls conn.close() when it's done — this makes that
-    call reuse the connection instead of tearing it down and reconnecting
-    from scratch, without changing a single one of those call sites."""
-    def close(self):
-        try:
-            _DB_POOL.putconn(self)
-        except Exception:
-            super().close()
-
-_DB_POOL = ThreadedConnectionPool(
-    minconn=2, maxconn=15,
-    dsn=_DB_URL, sslmode='require', connection_factory=PooledConnection
-)
 
 def get_db():
-    """Pulls a connection from the pool instead of opening a new one each
-    time — cuts out the repeated TCP/TLS/auth handshake that was adding
-    latency to every tab switch. Pings the connection first, since Railway's
-    proxy can silently drop idle ones; a dead connection handed back out
-    would otherwise cause a confusing mid-scan error instead of just quietly
-    getting replaced."""
-    for _ in range(2):
-        conn = _DB_POOL.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute('SELECT 1')
-            return conn
-        except psycopg2.OperationalError:
-            try:
-                _DB_POOL.putconn(conn, close=True)
-            except Exception:
-                pass
-    # Last resort if the pool itself is having trouble — a plain direct
-    # connection, so a request still succeeds instead of hard-failing.
-    return psycopg2.connect(_DB_URL, sslmode='require', connection_factory=PooledConnection)
+    db_url = _DB_URL
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    return psycopg2.connect(db_url, sslmode='require')
 
 def generate_cleaner_pin(conn):
     """Generate a unique random 5-digit PIN for a cleaner."""
@@ -4120,48 +4084,6 @@ def unpack_property():
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Undid pack', address, staff_name, '')
     return jsonify({'success': True})
-
-@app.route('/api/pack-list/backfill-missed', methods=['POST'])
-def backfill_missed_pack_list():
-    """Admin-only testing utility: marks every past-dated (before today)
-    'missed' PackListCentral property as packed with a placeholder record,
-    WITHOUT touching bags, cleaners, or supply inventory. Use this to clear
-    backlog missed items from before real day-to-day packing tracking
-    started, instead of manually cycling bags out/in."""
-    data = request.json or {}
-    if not is_admin_pin(str(data.get('admin_pin',''))):
-        return jsonify({'error': 'Admin PIN required'}), 403
-    performed_by = (data.get('performed_by') or 'Backfill (testing)').strip()
-
-    today_str = today_central()
-    lookback_dt = max(datetime.strptime(today_str,'%Y-%m-%d').date() - timedelta(days=30), datetime(2026,7,20).date())
-
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
-                   FROM forecast_reservations
-                   WHERE TO_DATE(depart,'MM/DD/YYYY') >= %s::date AND TO_DATE(depart,'MM/DD/YYYY') < %s::date""",
-                (lookback_dt.isoformat(), today_str))
-    addr_dates = {(r['unit_address'].lower().strip(), r['pack_date']) for r in cur.fetchall()}
-
-    cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE pack_date >= %s AND pack_date < %s",
-                (lookback_dt.isoformat(), today_str))
-    for e in cur.fetchall():
-        addr_dates.add((e['address'].lower().strip(), e['pack_date']))
-
-    cur.execute("SELECT address, pack_date FROM pack_list_status WHERE pack_date < %s", (today_str,))
-    already_packed = {(r['address'], r['pack_date']) for r in cur.fetchall()}
-
-    to_insert = addr_dates - already_packed
-    ts = now_central()
-    for addr, pdate in to_insert:
-        cur.execute("""INSERT INTO pack_list_status (address,pack_date,packed_by,packed_at,staged_bag_ids,cleaner_id,cleaner_name,created_at)
-                       VALUES (%s,%s,%s,%s,NULL,NULL,NULL,%s)
-                       ON CONFLICT (address,pack_date) DO NOTHING""",
-                    (addr, pdate, performed_by, ts, ts))
-    conn.commit(); cur.close(); conn.close()
-    log_audit('PackListCentral', 'Backfilled missed pack list (testing)', f'{len(to_insert)} entries', performed_by)
-    return jsonify({'success': True, 'backfilled': len(to_insert)})
 
 @app.route('/api/pack-list/flags', methods=['GET'])
 def get_pack_flags():
