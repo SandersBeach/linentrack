@@ -370,6 +370,7 @@
       <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('pack-modal-shortage-fields').style.display=document.getElementById('pack-modal-shortage-fields').style.display==='none'?'block':'none'">⚠️ Report a shortage (optional)</button>
       <div id="pack-modal-shortage-fields" style="display:none;margin-top:10px">
         <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Use this if you had to pack fewer of an item than the formula calls for — it'll show up at the top of Pack List as a "Packed Bag Short" so it can get topped off when the bag returns.</p>
+        <div id="pack-modal-shortage-list" style="margin-bottom:8px"></div>
         <label>Item short</label>
         <input type="hidden" id="pack-modal-shortage-item">
         <select id="pack-modal-shortage-item-select" onchange="const v=this.value; const other=document.getElementById('pack-modal-shortage-item-other'); if(v==='__other__'){other.style.display='block'; other.focus(); document.getElementById('pack-modal-shortage-item').value='';} else {other.style.display='none'; document.getElementById('pack-modal-shortage-item').value=v;}">
@@ -392,6 +393,7 @@
         <input id="pack-modal-shortage-qty" type="number" min="1" value="1">
         <label>Notes (optional)</label>
         <input id="pack-modal-shortage-notes" placeholder="e.g. Ran low on stock, ordered more">
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addShortageToList()">+ Add another item</button>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:1rem">
@@ -3413,7 +3415,7 @@ async function uploadReservations() {
 // ══════════════════════════════════════════════════════════════
 
 let packListState = { week: null, properties: [], cleaners: [] };
-let packModalState = { address: '', scannedBags: [] };
+let packModalState = { address: '', scannedBags: [], shortages: [] };
 let celebratedDates = new Set();
 
 function triggerPackCelebration(dateLabel) {
@@ -4144,7 +4146,7 @@ function openPackModal(address, packDate) {
   document.getElementById('pack-modal-title-text').textContent = `Mark packed: ${address} (${packDate})`;
   document.getElementById('pack-modal-cleaner').innerHTML = '<option value="">Select cleaner...</option>' + opts;
   if (p && p.assigned_cleaner_id) document.getElementById('pack-modal-cleaner').value = p.assigned_cleaner_id;
-  packModalState = { address, scannedBags: [] };
+  packModalState = { address, scannedBags: [], shortages: [] };
   document.getElementById('pack-modal-scan').value = '';
   document.getElementById('pack-modal-scan-err').textContent = '';
   document.getElementById('pack-modal-shortage-item').value = '';
@@ -4154,6 +4156,8 @@ function openPackModal(address, packDate) {
   document.getElementById('pack-modal-shortage-qty').value = '1';
   document.getElementById('pack-modal-shortage-notes').value = '';
   document.getElementById('pack-modal-shortage-fields').style.display = 'none';
+  packModalState.shortages = [];
+  renderShortageList();
   renderPackModalBagList();
   document.getElementById('modal-pack-cleaner').style.display = 'flex';
   setTimeout(() => document.getElementById('pack-modal-scan')?.focus(), 50);
@@ -4194,6 +4198,37 @@ async function scanPackBag() {
   } catch (e) { errEl.textContent = 'Connection error.'; }
 }
 
+function addShortageToList() {
+  const item = document.getElementById('pack-modal-shortage-item').value.trim();
+  if (!item) { alert('Select an item first'); return; }
+  const qty = document.getElementById('pack-modal-shortage-qty').value;
+  const notes = document.getElementById('pack-modal-shortage-notes').value.trim();
+  packModalState.shortages.push({ item, qty, notes });
+  document.getElementById('pack-modal-shortage-item').value = '';
+  document.getElementById('pack-modal-shortage-item-select').value = '';
+  document.getElementById('pack-modal-shortage-item-other').value = '';
+  document.getElementById('pack-modal-shortage-item-other').style.display = 'none';
+  document.getElementById('pack-modal-shortage-qty').value = '1';
+  document.getElementById('pack-modal-shortage-notes').value = '';
+  renderShortageList();
+}
+
+function removeShortageFromList(idx) {
+  packModalState.shortages.splice(idx, 1);
+  renderShortageList();
+}
+
+function renderShortageList() {
+  const el = document.getElementById('pack-modal-shortage-list');
+  if (!el) return;
+  if (!packModalState.shortages.length) { el.innerHTML = ''; return; }
+  el.innerHTML = packModalState.shortages.map((s, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--gray-50);border-radius:6px;padding:6px 10px;margin-bottom:4px;font-size:13px">
+      <span>${s.item} — short ${s.qty}${s.notes ? ' — ' + s.notes : ''}</span>
+      <button type="button" onclick="removeShortageFromList(${i})" style="background:none;border:none;color:var(--coral-dark);cursor:pointer;font-size:16px;line-height:1">×</button>
+    </div>`).join('');
+}
+
 async function confirmPack() {
   const address = document.getElementById('pack-modal-address').value;
   const packDate = document.getElementById('pack-modal-date').value;
@@ -4206,13 +4241,22 @@ async function confirmPack() {
   });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'Error'); return; }
-  const shortageItem = document.getElementById('pack-modal-shortage-item').value.trim();
-  if (shortageItem) {
-    const shortageQty = document.getElementById('pack-modal-shortage-qty').value;
-    const shortageNotes = document.getElementById('pack-modal-shortage-notes').value.trim();
+  // Include whatever's still sitting in the item fields (in case they filled
+  // it in but forgot to click "Add another item") plus everything already
+  // added to the list, then report each one separately.
+  const currentItem = document.getElementById('pack-modal-shortage-item').value.trim();
+  const allShortages = [...packModalState.shortages];
+  if (currentItem) {
+    allShortages.push({
+      item: currentItem,
+      qty: document.getElementById('pack-modal-shortage-qty').value,
+      notes: document.getElementById('pack-modal-shortage-notes').value.trim()
+    });
+  }
+  for (const s of allShortages) {
     await fetch('/api/pack-list/shortages', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, pack_date: packDate, item_name: shortageItem, quantity_short: shortageQty, notes: shortageNotes, reported_by: _currentStaffName })
+      body: JSON.stringify({ address, pack_date: packDate, item_name: s.item, quantity_short: s.qty, notes: s.notes, reported_by: _currentStaffName })
     });
   }
   closePackModal();
