@@ -1856,7 +1856,7 @@ async function startCount() {
   }
   if (areas.includes('supplies')) {
     const supplies = await fetch('/api/supplies').then(r=>r.json());
-    supplies.forEach(s => items.push({ id:'S-'+s.id, label:s.name, tag:'supply-'+s.id, type:'supply', expected:s.quantity, expectedLabel:`${s.quantity} ${s.unit}`, unit:s.unit, category:s.category, supplyId:s.id }));
+    supplies.forEach(s => items.push({ id:'S-'+s.id, label:s.name, tag:'supply-'+s.id, type:'supply', expected:s.quantity, expectedLabel:`${s.quantity} ${s.unit}`, unit:s.unit, category:s.category, supplyId:s.id, source:'supply_items' }));
   }
   _countSessions.inventory_count = { areas, items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
@@ -1958,6 +1958,30 @@ async function finalizeCount() {
   try {
     const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
+    // Make every physical count the new source of truth — set each counted
+    // supply item's on-hand quantity to exactly what was found, instead of
+    // leaving it as a variance someone has to go correct by hand later.
+    // Different count types pull from different tables (warehouse supplies,
+    // housekeeping/amenity supplies, store items), so each one is routed to
+    // its own matching endpoint. (Loaner items are tracked as found/missing
+    // rather than a quantity, so there's nothing to "set" for those — the
+    // variance list still flags them for follow-up same as before.)
+    for (const item of s.items) {
+      if (item.type !== 'supply' || !item.supplyId || !item.source) continue;
+      const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : 0;
+      if (item.source === 'store') {
+        await fetch(`/api/store/items/${item.supplyId}/set-count`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: _currentPin, quantity: counted, performed_by: _currentStaffName, notes: `Physical count (${s.areas.join(', ')})` })
+        });
+      } else {
+        const endpoint = item.source === 'hk_supply' ? '/api/hk-supplies/' : '/api/supplies/';
+        await fetch(`${endpoint}${item.supplyId}/transaction`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: _currentPin, action: 'set', quantity: counted, performed_by: _currentStaffName, notes: `Physical count (${s.areas.join(', ')})` })
+        });
+      }
+    }
     _countSessions[_countReturnTarget] = null;
     const isAmenities = _countReturnTarget === 'amenities_inventory';
     const canSeeResults = userRoles.includes('admin') || userRoles.includes('manager');
@@ -2140,7 +2164,7 @@ async function startAmenitiesCount() {
   await loadHKSupplies();
   const items = _hkSupplies.filter(s => s.bucket === 'Amenities').map(s => ({
     id: 'A-'+s.id, label: s.name, tag: s.category, type: 'supply',
-    expected: s.quantity, expectedLabel: `${s.quantity} ${s.unit}`, unit: s.unit, category: s.category, supplyId: s.id
+    expected: s.quantity, expectedLabel: `${s.quantity} ${s.unit}`, unit: s.unit, category: s.category, supplyId: s.id, source: 'hk_supply'
   }));
   _countSessions.amenities_inventory = { areas: ['amenities'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
@@ -2675,7 +2699,7 @@ async function startStoreCount() {
   if (!_storeItems.length) { try { _storeItems = await fetch('/api/store/items').then(r=>r.json()); } catch(e) {} }
   const items = _storeItems.map(s => ({
     id: 'ST-'+s.id, label: s.name, tag: s.category, type: 'supply',
-    expected: s.quantity, expectedLabel: `${s.quantity} in stock`, unit: 'ea', category: s.category, supplyId: s.id
+    expected: s.quantity, expectedLabel: `${s.quantity} in stock`, unit: 'ea', category: s.category, supplyId: s.id, source: 'store'
   }));
   _countSessions.store = { areas: ['store'], items, startedAt: new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}), counts:{} };
   renderCountInProgress();
