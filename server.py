@@ -150,7 +150,16 @@ class PooledConnection(psycopg2.extensions.connection):
 
 _DB_POOL = ThreadedConnectionPool(
     minconn=2, maxconn=15,
-    dsn=_DB_URL, sslmode='require', connection_factory=PooledConnection
+    dsn=_DB_URL, sslmode='require', connection_factory=PooledConnection,
+    connect_timeout=10,  # psycopg2.connect() has NO timeout by default — a
+    # stalled TCP handshake when the pool opens a brand-new connection can
+    # otherwise hang a request forever, completely invisibly (it never even
+    # registers as a session in Postgres, so it's untraceable from the DB
+    # side). This makes a stuck connection attempt fail loudly in 10 seconds
+    # instead of hanging silently forever.
+    options='-c statement_timeout=20000'  # belt-and-suspenders: also cap any
+    # individual query at 20s once a connection IS established, so a runaway
+    # query can't hang a request forever either.
 )
 
 def get_db():
@@ -161,19 +170,21 @@ def get_db():
     would otherwise cause a confusing mid-scan error instead of just quietly
     getting replaced."""
     for _ in range(2):
-        conn = _DB_POOL.getconn()
+        conn = None
         try:
+            conn = _DB_POOL.getconn()
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')
             return conn
         except psycopg2.OperationalError:
-            try:
-                _DB_POOL.putconn(conn, close=True)
-            except Exception:
-                pass
+            if conn is not None:
+                try:
+                    _DB_POOL.putconn(conn, close=True)
+                except Exception:
+                    pass
     # Last resort if the pool itself is having trouble — a plain direct
     # connection, so a request still succeeds instead of hard-failing.
-    return psycopg2.connect(_DB_URL, sslmode='require', connection_factory=PooledConnection)
+    return psycopg2.connect(_DB_URL, sslmode='require', connection_factory=PooledConnection, connect_timeout=10)
 
 def generate_cleaner_pin(conn):
     """Generate a unique random 5-digit PIN for a cleaner."""
