@@ -323,6 +323,10 @@ def init_db():
             created_at TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0,
             resolved_by TEXT, resolved_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS daily_alert_log (
+            id SERIAL PRIMARY KEY, alert_type TEXT NOT NULL, log_date TEXT NOT NULL,
+            sent_at TEXT NOT NULL, UNIQUE(alert_type, log_date)
+        );
         CREATE TABLE IF NOT EXISTS warehouse_daily_log (
             id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, staff_name TEXT NOT NULL,
             laundry_bins_received INTEGER NOT NULL DEFAULT 0,
@@ -1118,6 +1122,64 @@ def run_bag_overdue_check():
 def check_overdue():
     return jsonify(run_bag_overdue_check())
 
+@app.route('/api/hk-supplies/recalculate-thresholds', methods=['POST'])
+def recalculate_amenity_thresholds():
+    """Sets each amenity/supply item's low-stock threshold to 2x the amount
+    needed to pack every home twice (i.e. 4x what one full round through
+    every property requires) — pulled from each property's actual supply
+    formula, not a guess. Re-run this any time formulas change meaningfully
+    (new properties, formula edits) since it's a snapshot, not something
+    that recalculates itself automatically."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    import json
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT supplies FROM forecast_pack_list")
+    rows = cur.fetchall()
+    totals = {}
+    for r in rows:
+        supplies = r['supplies'] if isinstance(r['supplies'], dict) else json.loads(r['supplies'] or '{}')
+        for name, qty in supplies.items():
+            if not qty: continue
+            totals[name] = totals.get(name, 0) + qty
+    updated, not_found = [], []
+    for name, needed_once in totals.items():
+        threshold = needed_once * 4  # 2x the amount needed to pack every home twice
+        cur.execute("SELECT id, low_stock_threshold FROM hk_supply_items WHERE name=%s", (name,))
+        item = cur.fetchone()
+        if not item:
+            not_found.append(name); continue
+        cur.execute("UPDATE hk_supply_items SET low_stock_threshold=%s WHERE id=%s", (threshold, item['id']))
+        updated.append({'item': name, 'old_threshold': item['low_stock_threshold'], 'new_threshold': threshold, 'needed_per_round': needed_once})
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'updated': updated, 'not_found': not_found})
+
+@app.route('/api/hk-supplies/flag-low', methods=['POST'])
+def flag_supply_low():
+    """Lets any staff member proactively alert Sarah that something looks
+    like it's running low — regardless of what the tracked quantity says.
+    Independent of the automatic threshold-based alert; this is for when
+    someone notices it before the numbers catch up."""
+    data = request.json or {}
+    item_name = (data.get('item_name') or '').strip()
+    flagged_by = (data.get('flagged_by') or '').strip() or 'Unknown'
+    notes = (data.get('notes') or '').strip()
+    if not item_name:
+        return jsonify({'error': 'item_name is required'}), 400
+    body = f"{flagged_by} flagged '{item_name}' as running low.\n" + (f"Notes: {notes}" if notes else "No additional notes.")
+    sent = send_email(f"LOW STOCK FLAGGED: {item_name}", body, to=SARAH_EMAIL)
+    return jsonify({'success': True, 'alert_sent': sent})
+
+@app.route('/api/check-pickup-deadline', methods=['POST'])
+def check_pickup_deadline():
+    """Admin-only manual trigger, for testing/verifying the 11:30am alert
+    without waiting for the actual time of day or the next scheduler tick."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    return jsonify(run_pickup_deadline_check(force=bool(data.get('force'))))
+
 # ── Cleaners ──────────────────────────────────────────────────────────────────
 
 @app.route('/api/cleaners/bulk-set-emails', methods=['POST'])
@@ -1500,6 +1562,39 @@ def get_hk_supplies():
     else:
         cur.execute("SELECT * FROM hk_supply_items ORDER BY category,name")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/hk-supplies/recalculate-thresholds', methods=['POST'])
+def recalculate_hk_thresholds():
+    """Sets every housekeeping/amenity item's low-stock threshold to 2x the
+    quantity that would be needed to pack every single property in the
+    portfolio at once — a safety margin based on total real demand, not a
+    guessed number. Re-runnable any time (e.g. after adding/removing
+    properties or updating pack formulas), rather than a one-time fixed
+    value that goes stale."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT supplies FROM forecast_pack_list")
+    totals = {}
+    for row in cur.fetchall():
+        supplies = row['supplies'] if isinstance(row['supplies'], dict) else json.loads(row['supplies'] or '{}')
+        for item_name, qty in supplies.items():
+            if not qty: continue
+            totals[item_name] = totals.get(item_name, 0) + int(qty)
+
+    cur.execute("SELECT id, name, low_stock_threshold FROM hk_supply_items")
+    items = cur.fetchall()
+    changes = []
+    for item in items:
+        portfolio_need = totals.get(item['name'], 0)
+        new_threshold = portfolio_need * 2
+        if new_threshold != item['low_stock_threshold']:
+            cur.execute("UPDATE hk_supply_items SET low_stock_threshold=%s WHERE id=%s", (new_threshold, item['id']))
+            changes.append({'name': item['name'], 'old_threshold': item['low_stock_threshold'], 'new_threshold': new_threshold, 'portfolio_need': portfolio_need})
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'items_checked': len(items), 'items_changed': len(changes), 'changes': changes})
 
 @app.route('/api/hk-supplies', methods=['POST'])
 def add_hk_supply():
@@ -4110,6 +4205,14 @@ def pack_property():
                     "INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,'pack_deduct',%s,%s,%s,%s,%s)",
                     (item['id'], qty_needed, new_qty, packed_by, ts, f'Packed: {address}')
                 )
+                # Packing is what most often actually brings something low —
+                # so this needs the same low-stock alert manual Take/Restock
+                # transactions already trigger, not just those.
+                if new_qty <= item['low_stock_threshold']:
+                    alert_body = (f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\n"
+                                  f"Current qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}\n"
+                                  f"Triggered by packing: {address}")
+                    send_email(f"LOW STOCK (Housekeeping): {item['name']}", alert_body, to=SARAH_EMAIL)
         cur.execute(
             "INSERT INTO pack_supply_deductions (address,pack_date,deducted_at) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
             (addr_key, pack_date, ts)
@@ -4303,6 +4406,67 @@ def set_inventory_reminder_setting():
         set_setting('inventory_reminder_day', str(int(data['day'])))
     return jsonify({'success': True})
 
+def run_pickup_deadline_check(force=False):
+    """At/after 11:30am Central, alerts Cassie if any property packed for
+    TODAY still has bags sitting staged (not yet picked up by the cleaner).
+    Only ever sends once per day — checks daily_alert_log first, and the
+    unique constraint on it means even if two worker threads raced to send
+    this at the same moment, only one email could ever actually go out.
+    `force=True` skips the time-of-day gate — only used by the manual admin
+    test endpoint, never by the automatic scheduler."""
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    if not force and (now.hour, now.minute) < (11, 30):
+        return {'checked': 0, 'alerted': False, 'reason': 'before 11:30am Central'}
+    today_str = now.strftime('%Y-%m-%d')
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='pickup_deadline' AND log_date=%s", (today_str,))
+    if cur.fetchone():
+        cur.close(); conn.close()
+        return {'checked': 0, 'alerted': False, 'reason': 'already sent today'}
+
+    cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
+                   WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (today_str,))
+    rows = cur.fetchall()
+
+    still_staged = []  # [{address, bag_id, cleaner_name}]
+    for r in rows:
+        bag_ids = [b.strip() for b in r['staged_bag_ids'].split(',') if b.strip()]
+        if not bag_ids: continue
+        cur.execute("""SELECT b.id, b.status, c.name AS cleaner_name FROM bags b
+                       LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id = ANY(%s)""", (bag_ids,))
+        for b in cur.fetchall():
+            if b['status'] == 'staged':
+                still_staged.append({'address': r['address'], 'bag_id': b['id'], 'cleaner_name': b['cleaner_name'] or 'Unknown cleaner'})
+
+    if not still_staged:
+        cur.close(); conn.close()
+        return {'checked': len(rows), 'alerted': False, 'reason': 'nothing still staged'}
+
+    # Look up Cassie's email dynamically from her staff profile, rather than
+    # hardcoding it, so it stays correct if it's ever updated there.
+    cur.execute("SELECT email FROM staff_members WHERE LOWER(name) LIKE %s AND active=1 LIMIT 1", ('%cassie%',))
+    cassie = cur.fetchone()
+    cassie_email = cassie['email'] if cassie and cassie['email'] else None
+
+    alert_sent = False
+    if cassie_email:
+        lines = [f"- {s['address']} — bag {s['bag_id']} — {s['cleaner_name']}" for s in still_staged]
+        body = (f"As of 11:30am Central, the following {len(still_staged)} bag(s) packed for today "
+                f"have not been picked up by the cleaner yet:\n\n" + '\n'.join(lines))
+        alert_sent = send_email(f"Bags not picked up by 11:30am ({today_str})", body, to=cassie_email)
+
+    # Record that today's check ran, regardless of whether an email actually
+    # went out (e.g. Cassie's email isn't on file) — this is a once-a-day
+    # check, not a retry-until-it-works one; a missing email is a setup
+    # problem to fix in her staff profile, not something to keep retrying.
+    cur.execute("INSERT INTO daily_alert_log (alert_type,log_date,sent_at) VALUES ('pickup_deadline',%s,%s) ON CONFLICT DO NOTHING",
+                (today_str, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    if not cassie_email:
+        print(f"[Pickup Deadline Alert] {len(still_staged)} bag(s) still staged, but no email on file for Cassie — nothing sent.", flush=True)
+    return {'checked': len(rows), 'alerted': alert_sent, 'still_staged_count': len(still_staged)}
+
 def background_overdue_loop():
     while True:
         try:
@@ -4317,6 +4481,12 @@ def background_overdue_loop():
                 print(f"[Overdue Scheduler] Store loan alerts sent: {result['alerted']}", flush=True)
         except Exception as e:
             print(f"[Overdue Scheduler] Store check failed: {e}", flush=True)
+        try:
+            result = run_pickup_deadline_check()
+            if result['alerted']:
+                print(f"[Overdue Scheduler] Pickup deadline alert sent to Cassie: {result['still_staged_count']} bag(s) still staged", flush=True)
+        except Exception as e:
+            print(f"[Overdue Scheduler] Pickup deadline check failed: {e}", flush=True)
         time.sleep(OVERDUE_CHECK_INTERVAL_SECONDS)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
