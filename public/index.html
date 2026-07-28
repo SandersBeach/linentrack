@@ -1216,6 +1216,10 @@ async function renderSettings(gen) {
     <button class="btn btn-primary" style="margin-top:10px" onclick="addCleanerAlias()">Add Mapping</button>
     <div id="pl-alias-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     <div id="pl-alias-list" style="margin-top:12px"></div></div>
+    <div class="card"><div class="card-title">Backfill missed pack list (testing utility)</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Marks every past-dated "missed" property on Pack List as packed with a placeholder record, so old testing backlog stops cluttering the missed-items view. <strong>Does not touch bags, cleaners, or supply inventory</strong> — safe and reversible. Only use this to clear pre-go-live testing history, not real missed packs.</p>
+    <button class="btn btn-primary" onclick="backfillMissedPackList()">Backfill Missed (Testing)</button>
+    <div id="pl-backfill-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div></div>
   <div class="section-header" style="margin-top:1rem"><h2>Housekeeping Supplies</h2></div>
     <div class="card"><div class="card-title">Load real inventory</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Click below to load the current housekeeping supply inventory from the master list. <strong>This will replace all existing HK supply quantities.</strong> Only do this once, or when resetting to baseline.</p>
@@ -4453,6 +4457,21 @@ async function seedPackFormula() {
     checkPackFormulaMatches();
   } catch (e) {
     alert('Connection error'); btn.textContent = 'Load Packing Formula'; btn.disabled = false;
+  }
+}
+
+async function backfillMissedPackList() {
+  if (!confirm('This marks every past-dated missed property as packed with a placeholder (testing only). Bags, cleaners, and supply inventory are NOT touched. Continue?')) return;
+  const btn = event.target;
+  btn.textContent = 'Backfilling...'; btn.disabled = true;
+  try {
+    const res = await fetch('/api/pack-list/backfill-missed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admin_pin: _currentPin, performed_by: _currentStaffName || 'Backfill (testing)' }) });
+    const data = await res.json();
+    if (data.error) { alert(data.error); btn.textContent = 'Backfill Missed (Testing)'; btn.disabled = false; return; }
+    document.getElementById('pl-backfill-msg').textContent = `✓ Backfilled ${data.backfilled} missed entries.`;
+    btn.textContent = 'Backfill Missed (Testing)'; btn.disabled = false;
+  } catch (e) {
+    alert('Connection error'); btn.textContent = 'Backfill Missed (Testing)'; btn.disabled = false;
   }
 }
 
