@@ -277,6 +277,7 @@
   <div class="topbar">
     <div class="topbar-logo" id="topbar-logo"><span>Sanders</span>Central</div>
     <div class="topbar-role">
+      <button id="home-btn" onclick="showTab('warehouse_home')" style="display:none;margin-right:10px;background:var(--teal);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:13px">🏠 Home</button>
       <span id="role-label"></span>
       <button onclick="logout()">Sign out</button>
     </div>
@@ -526,7 +527,7 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
+  warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'amenities_inventory', 'orders'],
   maintenance: ['loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'orders'],
   inspector: ['amenities_inventory'],
   manager: ['warehouse_dashboard', 'pack_productivity'],
@@ -535,6 +536,7 @@ const TABS = {
   admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
+  warehouse_home: '🏠 Today\'s Priorities',
   scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
   loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
@@ -636,8 +638,11 @@ function buildTabs() {
   document.getElementById('tab-bar').innerHTML = tabs.map(t =>
     `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
   ).join('');
+  const homeBtn = document.getElementById('home-btn');
+  if (homeBtn) homeBtn.style.display = tabs.includes('warehouse_home') ? 'inline-block' : 'none';
 }
 const MODULE_NAMES = {
+  warehouse_home: 'PackListCentral',
   scan: 'LinenCentral',
   overdue: 'LinenCentral',
   status: 'LinenCentral',
@@ -677,6 +682,7 @@ function showTab(t) {
   const logoEl = document.getElementById('topbar-logo');
   if (logoEl) logoEl.innerHTML = '<span>Sanders</span>Central <span style="font-weight:400;color:var(--gray-400);font-size:13px">· ' + moduleName + '</span>';
   const fns = {
+    warehouse_home: renderWarehouseHome,
     scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes,
     log: renderLog, cleaners: renderCleaners, settings: renderSettings,
     loaner_scan: renderLoanerScan, loaner_status: renderLoanerStatus, loaner_log: renderLoanerLog,
@@ -706,6 +712,66 @@ function showTab(t) {
 // abandon writing to the screen — i.e. the person has since switched tabs
 // (or logged out and back in) before this fetch finished.
 function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
+
+// ── Warehouse Home / Today's Priorities ─────────────────────────────────────
+// A single at-a-glance landing page — big, tappable tiles for everything that
+// needs attention today, plus quick links to every other tab. Built for a
+// large iPad shared by the warehouse team: nobody should get stuck on one
+// screen and miss something else that needed doing.
+async function renderWarehouseHome(gen) {
+  const today = await getServerToday();
+  const [week, shortages, bundles, dailyLog] = await Promise.all([
+    fetch('/api/pack-list/week').then(r => r.json()),
+    fetch('/api/pack-list/shortages').then(r => r.json()),
+    fetch('/api/pack-list/bundles?days=1').then(r => r.json()),
+    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json())
+  ]);
+  if (_stale(gen)) return;
+
+  const todayDay = week.days.find(d => d.date === today) || { properties: [] };
+  const bagsToPackToday = todayDay.properties.filter(p => !p.packed).length;
+  const missedCount = week.missed.length;
+  const b = bundles.days[0] || {};
+  const dt = dailyLog.totals || {};
+
+  const tile = (icon, label, value, sub, colorVar, onclick) => `
+    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:20px;cursor:pointer;transition:transform 0.1s" onclick="${onclick}" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
+      <div style="font-size:32px;margin-bottom:6px">${icon}</div>
+      <div style="font-size:38px;font-weight:700;color:${colorVar};line-height:1">${value}</div>
+      <div style="font-size:15px;font-weight:600;margin-top:6px">${label}</div>
+      ${sub ? `<div style="font-size:12px;color:var(--gray-400);margin-top:2px">${sub}</div>` : ''}
+    </div>`;
+
+  const quickLink = (icon, label, tabId) => `
+    <div style="background:var(--gray-50);border-radius:10px;padding:14px 10px;text-align:center;cursor:pointer" onclick="showTab('${tabId}')">
+      <div style="font-size:24px;margin-bottom:4px">${icon}</div>
+      <div style="font-size:12px;font-weight:600;color:var(--gray-700)">${label}</div>
+    </div>`;
+
+  const html = `
+    <div style="margin-bottom:1.25rem">
+      <div style="font-size:20px;font-weight:700">Today's Priorities</div>
+      <div style="font-size:13px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:1.5rem">
+      ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
+      ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
+      ${tile('🧺', 'Bundles Needed Today', `${b.towel_bags_needed||0} bags`, `${b.king_bundles_needed||0}K · ${b.queen_bundles_needed||0}Q · ${b.twin_bundles_needed||0}T`, 'var(--teal)', "showTab('bundles_needed')")}
+      ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--amber)' : 'var(--teal)', "showTab('pack_list')")}
+      ${tile('📝', 'Daily Task Progress', `${dt.boxes_assembled||0}`, `boxes assembled · ${dt.bins_received||0} bins in · ${dt.bins_unpacked||0} unpacked`, 'var(--teal)', "showTab('daily_tasks')")}
+    </div>
+    <div style="font-size:13px;font-weight:600;color:var(--gray-400);margin-bottom:10px">MORE TABS</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
+      ${quickLink('⚠️', 'Flag Issue', 'pack_flags')}
+      ${quickLink('📷', 'Scan Bag', 'scan')}
+      ${quickLink('🚨', 'Overdue', 'overdue')}
+      ${quickLink('📦', 'Who Has What', 'status')}
+      ${quickLink('🏠', 'By Home', 'homes')}
+      ${quickLink('🧴', 'Amenities', 'amenities_inventory')}
+      ${quickLink('📬', 'Orders', 'orders')}
+    </div>`;
+  document.getElementById('main-content').innerHTML = html;
+}
 
 // ── Scan Tab ───────────────────────────────────────────────────────────────────
 let scanState = { bag: null, cleaners: [], selectedCleaner: null, sessionLog: [], mode: 'out' };
