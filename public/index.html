@@ -3924,19 +3924,32 @@ async function resolvePackShortage(id) {
 }
 
 async function renderPackList(gen) {
-  const [wkRes, clRes, invRes, shortRes] = await Promise.all([
-    fetch('/api/pack-list/week'),
-    fetch('/api/cleaners'),
-    fetch('/api/inventory-counts/weekly-task-status'),
-    fetch('/api/pack-list/shortages')
-  ]);
-  const wk = await wkRes.json();
-  packListState.cleaners = await clRes.json();
-  packListState.week = wk;
-  const invTask = await invRes.json();
-  const shortages = await shortRes.json();
-  if (_stale(gen)) return;
-  renderPackListBody(invTask, shortages);
+  try {
+    const [wkRes, clRes, invRes, shortRes] = await Promise.all([
+      fetch('/api/pack-list/week'),
+      fetch('/api/cleaners'),
+      fetch('/api/inventory-counts/weekly-task-status'),
+      fetch('/api/pack-list/shortages')
+    ]);
+    for (const [label, res] of [['week', wkRes], ['cleaners', clRes], ['inventory task status', invRes], ['shortages', shortRes]]) {
+      if (!res.ok) throw new Error(`${label} request failed (HTTP ${res.status})`);
+    }
+    const wk = await wkRes.json();
+    packListState.cleaners = await clRes.json();
+    packListState.week = wk;
+    const invTask = await invRes.json();
+    const shortages = await shortRes.json();
+    if (_stale(gen)) return;
+    renderPackListBody(invTask, shortages);
+  } catch (e) {
+    if (_stale(gen)) return;
+    document.getElementById('main-content').innerHTML = `<div class="card" style="text-align:center;padding:2rem">
+      <div style="font-size:15px;color:var(--coral-dark);font-weight:600;margin-bottom:8px">Couldn't load Pack List</div>
+      <div style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">${e.message}</div>
+      <button class="btn btn-primary" onclick="showTab('pack_list')">Try Again</button>
+    </div>`;
+    return;
+  }
 
   if (_packListRefreshTimer) clearInterval(_packListRefreshTimer);
   _packListRefreshTimer = setInterval(async () => {
