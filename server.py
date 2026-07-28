@@ -110,9 +110,20 @@ def resolve_roles(pin):
     legacy = check_pin(pin)
     return [legacy] if legacy else []
 
-_DB_URL = (os.environ.get('DATABASE_URL') or
-           os.environ.get('DATABASE_PUBLIC_URL') or
-           'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
+_DB_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_PUBLIC_URL')
+if not _DB_URL:
+    # Fail loudly and immediately at startup rather than silently falling
+    # back to a hardcoded credential — a real database password should
+    # never live in source code, especially in a public GitHub repo where
+    # it's visible to anyone. If this fires, DATABASE_URL isn't set on the
+    # Railway service — go set it (ideally as a reference to the Postgres
+    # service's own DATABASE_URL, not a copy-pasted value) rather than
+    # putting a real connection string back in this file.
+    raise RuntimeError(
+        'DATABASE_URL is not set. Set it on this service in Railway — '
+        'ideally as a reference to the Postgres service\'s DATABASE_URL '
+        '(so it always stays in sync), not a hardcoded value here in code.'
+    )
 if _DB_URL.startswith('postgres://'):
     _DB_URL = _DB_URL.replace('postgres://', 'postgresql://', 1)
 
@@ -150,7 +161,7 @@ class PooledConnection(psycopg2.extensions.connection):
 
 _DB_POOL = ThreadedConnectionPool(
     minconn=2, maxconn=15,
-    dsn=_DB_URL, sslmode='require', connection_factory=PooledConnection,
+    dsn=_DB_URL, sslmode='prefer', connection_factory=PooledConnection,
     connect_timeout=10,  # psycopg2.connect() has NO timeout by default — a
     # stalled TCP handshake when the pool opens a brand-new connection can
     # otherwise hang a request forever, completely invisibly (it never even
@@ -184,7 +195,7 @@ def get_db():
                     pass
     # Last resort if the pool itself is having trouble — a plain direct
     # connection, so a request still succeeds instead of hard-failing.
-    return psycopg2.connect(_DB_URL, sslmode='require', connection_factory=PooledConnection, connect_timeout=10)
+    return psycopg2.connect(_DB_URL, sslmode='prefer', connection_factory=PooledConnection, connect_timeout=10)
 
 def generate_cleaner_pin(conn):
     """Generate a unique random 5-digit PIN for a cleaner."""
