@@ -371,7 +371,23 @@
       <div id="pack-modal-shortage-fields" style="display:none;margin-top:10px">
         <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Use this if you had to pack fewer of an item than the formula calls for — it'll show up at the top of Pack List as a "Packed Bag Short" so it can get topped off when the bag returns.</p>
         <label>Item short</label>
-        <input id="pack-modal-shortage-item" placeholder="e.g. Wash cloths">
+        <input type="hidden" id="pack-modal-shortage-item">
+        <select id="pack-modal-shortage-item-select" onchange="const v=this.value; const other=document.getElementById('pack-modal-shortage-item-other'); if(v==='__other__'){other.style.display='block'; other.focus(); document.getElementById('pack-modal-shortage-item').value='';} else {other.style.display='none'; document.getElementById('pack-modal-shortage-item').value=v;}">
+          <option value="">Select item...</option>
+          <option value="King sets">King sets</option>
+          <option value="Queen sets">Queen sets</option>
+          <option value="Twin sets">Twin sets</option>
+          <option value="Queen sleeper sets">Queen sleeper sets</option>
+          <option value="Twin sleeper sets">Twin sleeper sets</option>
+          <option value="Bath towels">Bath towels</option>
+          <option value="Hand towels">Hand towels</option>
+          <option value="Wash cloths">Wash cloths</option>
+          <option value="Bath mats">Bath mats</option>
+          <option value="Pool towels">Pool towels</option>
+          <option value="Amenity boxes">Amenity boxes</option>
+          <option value="__other__">Other (type below)</option>
+        </select>
+        <input id="pack-modal-shortage-item-other" placeholder="Type the item name" style="display:none;margin-top:6px" oninput="document.getElementById('pack-modal-shortage-item').value=this.value">
         <label>How many short</label>
         <input id="pack-modal-shortage-qty" type="number" min="1" value="1">
         <label>Notes (optional)</label>
@@ -4132,6 +4148,9 @@ function openPackModal(address, packDate) {
   document.getElementById('pack-modal-scan').value = '';
   document.getElementById('pack-modal-scan-err').textContent = '';
   document.getElementById('pack-modal-shortage-item').value = '';
+  document.getElementById('pack-modal-shortage-item-select').value = '';
+  document.getElementById('pack-modal-shortage-item-other').value = '';
+  document.getElementById('pack-modal-shortage-item-other').style.display = 'none';
   document.getElementById('pack-modal-shortage-qty').value = '1';
   document.getElementById('pack-modal-shortage-notes').value = '';
   document.getElementById('pack-modal-shortage-fields').style.display = 'none';
