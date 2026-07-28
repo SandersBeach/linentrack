@@ -604,7 +604,7 @@ function logout() {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
   ['modal-receive-order','modal-store-checkout','modal-store-item','modal-staff','modal-staff-edit','modal-pack-cleaner','modal-pack-flag','modal-add-formula'].forEach(id => {
-    const el = document.getElementById(id); if (el) el.remove();
+    const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
   document.getElementById('login').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
