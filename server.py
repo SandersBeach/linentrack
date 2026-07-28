@@ -4308,8 +4308,26 @@ def background_overdue_loop():
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
-if __name__ == '__main__':
+_startup_done = False
+
+def start_background_jobs():
+    """Runs once at process start, regardless of whether this is launched
+    directly (`python server.py`, for local testing) or by gunicorn in
+    production (which imports this file rather than executing it as
+    __main__). Guarded so it can't accidentally fire twice and start two
+    copies of the overdue-check loop, which would double-send alert emails."""
+    global _startup_done
+    if _startup_done:
+        return
+    _startup_done = True
     init_db()
     threading.Thread(target=background_overdue_loop, daemon=True).start()
+
+# Runs when gunicorn imports this module in production.
+start_background_jobs()
+
+if __name__ == '__main__':
+    # Local/manual run only — gunicorn (used in production, see Procfile)
+    # never executes this block, since it imports the module instead.
     port=int(os.environ.get('PORT',3000))
     app.run(host='0.0.0.0', port=port, debug=False)
