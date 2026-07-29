@@ -735,12 +735,13 @@ function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 // screen and miss something else that needed doing.
 async function renderWarehouseHome(gen) {
   const today = await getServerToday();
-  const [week, shortages, bundles, goals, shiftNotes] = await Promise.all([
+  const [week, shortages, bundles, goals, shiftNotes, dailyLog] = await Promise.all([
     fetch('/api/pack-list/week').then(r => r.json()),
     fetch('/api/pack-list/shortages').then(r => r.json()),
     fetch('/api/pack-list/bundles?days=5').then(r => r.json()),
     fetch('/api/warehouse-goals').then(r => r.json()),
-    fetch('/api/warehouse-notes').then(r => r.json())
+    fetch('/api/warehouse-notes').then(r => r.json()),
+    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json())
   ]);
   if (_stale(gen)) return;
 
@@ -754,6 +755,12 @@ async function renderWarehouseHome(gen) {
   const bKing = bundles.missed.king_bundles_needed + bundles.days.reduce((s,d)=>s+d.king_bundles_needed,0);
   const bQueen = bundles.missed.queen_bundles_needed + bundles.days.reduce((s,d)=>s+d.queen_bundles_needed,0);
   const bTwin = bundles.missed.twin_bundles_needed + bundles.days.reduce((s,d)=>s+d.twin_bundles_needed,0);
+  // Ready-to-go amenity boxes vs. what the next 5 days actually need — the
+  // two numbers used to live on separate screens with nothing comparing
+  // them, so a real shortfall could go unnoticed until someone was mid-pack.
+  const boxesNeeded5Day = bundles.missed.amenity_boxes_needed + bundles.days.reduce((s,d)=>s+d.amenity_boxes_needed,0);
+  const boxesReady = dailyLog.amenity_box_stock || 0;
+  const boxesShort = boxesNeeded5Day - boxesReady;
   // How many checklist items (today's focus tasks + every-day standing
   // notes) are still unchecked — not the raw bins/boxes numbers, which read
   // confusingly large and look like a task count when they're really just
@@ -790,6 +797,7 @@ async function renderWarehouseHome(gen) {
       ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('🧺', 'Bundles Needed (5 day)', `${bTowelBags} towel bags`, `${bKing} King · ${bQueen} Queen · ${bTwin} Twin sheet sets`, 'var(--teal)', "showTab('bundles_needed')")}
+      ${tile('📦', 'Amenity Boxes Ready', boxesReady, boxesShort > 0 ? `${boxesShort} short of 5-day need (${boxesNeeded5Day})` : `Covers 5-day need (${boxesNeeded5Day})`, boxesShort > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
       ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
       ${tile('📝', 'Daily Checklist', checklistRemaining, checklistTotal ? `${checklistDone}/${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
     </div>
@@ -1369,6 +1377,23 @@ async function renderSettings(gen) {
     </div>
     <div id="bag-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
+  html += `<div class="card"><div class="card-title">🖨️ Print perforated business cards (Avery 5390)</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Front: QR code + bag ID + home name, same as above. Back: just the home name, large and easy to read, for the perforated 2.25" x 3.5" name badge insert sheets that slide into bag tag holders.</p>
+    <p style="font-size:12px;color:var(--coral-dark);margin-bottom:10px"><strong>First time using this:</strong> print just one test sheet on a scrap sheet of plain paper for both Front and Back before running actual cardstock — the exact margins are a best estimate since Avery doesn't publish precise numbers for this product, and it's much cheaper to catch a small offset on paper than on 400 real inserts.</p>
+    <label>Print for one home</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:10px">
+      <select id="bag-card-home-sel" style="flex:1;min-width:200px">${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="openBagCardsPDF(document.getElementById('bag-card-home-sel').value,'front')">Front — this home</button>
+      <button class="btn btn-primary btn-sm" onclick="openBagCardsPDF(document.getElementById('bag-card-home-sel').value,'back')">Back — this home</button>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="openBagCardsPDF(null,'front')">Front — ALL homes</button>
+      <button class="btn btn-ghost btn-sm" onclick="openBagCardsPDF(null,'back')">Back — ALL homes</button>
+    </div>
+    <p style="font-size:11px;color:var(--gray-400);margin-top:10px">Print every "Front" sheet first. Then flip the <em>entire printed stack</em> over as one block — like turning a book cover, left edge to right — and feed it back into the printer before printing "Back." Don't flip sheets one at a time, or the backs will end up matched to the wrong front.</p>
+    </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
     <div class="card"><div class="card-title">Print loaner QR labels</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the item ID directly into the Scan Item field in LoanerCentral. Good for labeling all 24 loaner items or replacing a lost/damaged label.</p>
@@ -1508,6 +1533,13 @@ async function printAllQRCodes(kind) {
   } catch (e) {
     msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the QR codes — please try again.';
   }
+}
+
+function openBagCardsPDF(homeId, side) {
+  if (!homeId && !confirm(`This generates ${side} cards for every bag across every home — could be a lot of pages. Continue?`)) return;
+  const params = new URLSearchParams({ side });
+  if (homeId) params.set('home_id', homeId);
+  window.open(`/api/bags/qr-cards-pdf?${params.toString()}`, '_blank');
 }
 
 async function printBagQRCodes(homeId) {
@@ -2889,14 +2921,15 @@ function renderStoreCards() {
   if (!grid) return;
   if (!items.length) { grid.innerHTML='<div class="empty" style="grid-column:1/-1">No items found.</div>'; return; }
   grid.innerHTML = items.map(item => `
-    <div class="supply-card ${item.quantity===0?'low-stock':''}">
+    <div class="supply-card ${item.quantity<=item.low_stock_threshold?'low-stock':''}">
       <div class="supply-card-top">
         <div class="supply-name">${item.name}</div>
-        ${item.quantity===0?'<span class="badge badge-out" style="font-size:10px">OUT</span>':''}
+        ${item.quantity===0?'<span class="badge badge-out" style="font-size:10px">OUT</span>':(item.quantity<=item.low_stock_threshold?'<span class="badge badge-out" style="font-size:10px">LOW</span>':'')}
       </div>
       <div class="supply-cat">${item.category}</div>
-      <div class="supply-qty" style="color:${item.quantity===0?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
+      <div class="supply-qty" style="color:${item.quantity<=item.low_stock_threshold?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
       <div class="supply-unit">in stock</div>
+      <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
@@ -3107,6 +3140,8 @@ function showStoreItemModal(item) {
     </select>
     <label style="margin-top:0.75rem">Price per unit ($)</label>
     <input type="number" id="si-price" min="0" step="0.01" value="${item?.price||'0'}">
+    <label style="margin-top:0.75rem">Alert below (low-stock threshold)</label>
+    <input type="number" id="si-threshold" min="0" value="${item?.low_stock_threshold ?? 2}">
     ${!isEdit?`<label style="margin-top:0.75rem">Starting quantity</label>
     <input type="number" id="si-qty" min="0" value="0">`:''}
     <div class="modal-actions">
@@ -3121,11 +3156,12 @@ async function saveStoreItem(itemId) {
   const name = document.getElementById('si-name')?.value?.trim();
   const category = document.getElementById('si-category')?.value;
   const price = parseFloat(document.getElementById('si-price')?.value||0);
+  const low_stock_threshold = parseInt(document.getElementById('si-threshold')?.value||2);
   const qty = parseInt(document.getElementById('si-qty')?.value||0);
   if (!name) { alert('Please enter an item name.'); return; }
   const isEdit = itemId !== null;
   const url = isEdit ? `/api/store/items/${itemId}` : '/api/store/items';
-  const body = {pin:_currentPin, name, category, price};
+  const body = {pin:_currentPin, name, category, price, low_stock_threshold};
   if (!isEdit) body.quantity = qty;
   const res = await fetch(url, {method:isEdit?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data = await res.json();
@@ -4074,18 +4110,28 @@ async function removeStaffDayOff(id) {
 
 async function renderDailyTasks(gen) {
   const today = await getServerToday();
-  const [data, goals] = await Promise.all([
+  const [data, goals, bundles] = await Promise.all([
     fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json()),
-    fetch('/api/warehouse-goals').then(r => r.json())
+    fetch('/api/warehouse-goals').then(r => r.json()),
+    fetch('/api/pack-list/bundles?days=5').then(r => r.json())
   ]);
   if (_stale(gen)) return;
   const t = data.totals;
+  // How many boxes the next 5 days actually need, vs. how many are sitting
+  // ready right now — the two numbers used to live in totally separate
+  // places with nothing comparing them, so a real shortfall could go
+  // unnoticed until someone was mid-pack and came up short.
+  const boxesNeeded5Day = bundles.missed.amenity_boxes_needed + bundles.days.reduce((s, d) => s + d.amenity_boxes_needed, 0);
+  const boxesShort = boxesNeeded5Day - data.amenity_box_stock;
   let html = renderGoalsHtml(goals);
   html += `
     <div class="card" style="margin-bottom:1rem;text-align:center">
       <div class="card-title">📦 Amenity Boxes Ready to Go</div>
       <div style="font-size:40px;font-weight:700;color:var(--teal)">${data.amenity_box_stock}</div>
       <div class="row-sub">Goes up when you log boxes assembled below, goes down automatically as properties get packed</div>
+      <div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--gray-200);font-size:14px;font-weight:600;color:${boxesShort > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)'}">
+        ${boxesShort > 0 ? `⚠️ ${boxesShort} short of the 5-day forecast (${boxesNeeded5Day} needed)` : `✓ Covers the 5-day forecast (${boxesNeeded5Day} needed)`}
+      </div>
     </div>
     <div class="card" style="margin-bottom:1rem">
       <div class="card-title">Log today's numbers</div>
