@@ -1125,11 +1125,10 @@ def check_overdue():
 @app.route('/api/hk-supplies/recalculate-thresholds', methods=['POST'])
 def recalculate_amenity_thresholds():
     """Sets each amenity/supply item's low-stock threshold to 2x the amount
-    needed to pack every home twice (i.e. 4x what one full round through
-    every property requires) — pulled from each property's actual supply
-    formula, not a guess. Re-run this any time formulas change meaningfully
-    (new properties, formula edits) since it's a snapshot, not something
-    that recalculates itself automatically."""
+    needed to pack every home once — pulled from each property's actual
+    supply formula, not a guess. Re-run this any time formulas change
+    meaningfully (new properties, formula edits) since it's a snapshot, not
+    something that recalculates itself automatically."""
     data = request.json or {}
     if not is_admin_pin(str(data.get('pin', ''))):
         return jsonify({'error': 'Admin PIN required'}), 403
@@ -1145,7 +1144,7 @@ def recalculate_amenity_thresholds():
             totals[name] = totals.get(name, 0) + qty
     updated, not_found = [], []
     for name, needed_once in totals.items():
-        threshold = needed_once * 4  # 2x the amount needed to pack every home twice
+        threshold = needed_once * 2  # 2x the amount needed to pack every home once
         cur.execute("SELECT id, low_stock_threshold FROM hk_supply_items WHERE name=%s", (name,))
         item = cur.fetchone()
         if not item:
@@ -1562,39 +1561,6 @@ def get_hk_supplies():
     else:
         cur.execute("SELECT * FROM hk_supply_items ORDER BY category,name")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
-
-@app.route('/api/hk-supplies/recalculate-thresholds', methods=['POST'])
-def recalculate_hk_thresholds():
-    """Sets every housekeeping/amenity item's low-stock threshold to 2x the
-    quantity that would be needed to pack every single property in the
-    portfolio at once — a safety margin based on total real demand, not a
-    guessed number. Re-runnable any time (e.g. after adding/removing
-    properties or updating pack formulas), rather than a one-time fixed
-    value that goes stale."""
-    data = request.json or {}
-    if not is_admin_pin(str(data.get('pin', ''))):
-        return jsonify({'error': 'Admin PIN required'}), 403
-
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT supplies FROM forecast_pack_list")
-    totals = {}
-    for row in cur.fetchall():
-        supplies = row['supplies'] if isinstance(row['supplies'], dict) else json.loads(row['supplies'] or '{}')
-        for item_name, qty in supplies.items():
-            if not qty: continue
-            totals[item_name] = totals.get(item_name, 0) + int(qty)
-
-    cur.execute("SELECT id, name, low_stock_threshold FROM hk_supply_items")
-    items = cur.fetchall()
-    changes = []
-    for item in items:
-        portfolio_need = totals.get(item['name'], 0)
-        new_threshold = portfolio_need * 2
-        if new_threshold != item['low_stock_threshold']:
-            cur.execute("UPDATE hk_supply_items SET low_stock_threshold=%s WHERE id=%s", (new_threshold, item['id']))
-            changes.append({'name': item['name'], 'old_threshold': item['low_stock_threshold'], 'new_threshold': new_threshold, 'portfolio_need': portfolio_need})
-    conn.commit(); cur.close(); conn.close()
-    return jsonify({'success': True, 'items_checked': len(items), 'items_changed': len(changes), 'changes': changes})
 
 @app.route('/api/hk-supplies', methods=['POST'])
 def add_hk_supply():
