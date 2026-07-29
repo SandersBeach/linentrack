@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
 import pytz
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 CENTRAL = pytz.timezone('America/Chicago')
@@ -855,6 +858,100 @@ def bags_qr_sheet():
     rows = cur.fetchall(); cur.close(); conn.close()
     result = [{'id': r['id'], 'home_name': r['home_name'], 'qr_code': make_bag_qr(r['id'])} for r in rows]
     return jsonify(result)
+
+# ── Bag tag business cards (Avery 5390 name badge insert refills) ──────────
+# Card is 3.5in wide x 2.25in tall (landscape), 8 per letter sheet, 2 columns
+# x 4 rows. Avery doesn't publish exact margin/pitch numbers for this SKU
+# publicly, so these are a best-supported estimate (they divide evenly into
+# an 8.5x11 sheet with zero gutter, which matches how these micro-perforated
+# sheets typically look): adjust these four numbers first if a test print
+# comes out shifted, rather than touching anything else below.
+_CARD_IN = 72.0  # points per inch
+_CARD_W, _CARD_H = 3.5 * _CARD_IN, 2.25 * _CARD_IN
+_CARD_COLS, _CARD_ROWS = 2, 4
+_CARD_LEFT_MARGIN, _CARD_TOP_MARGIN = 0.75 * _CARD_IN, 1.0 * _CARD_IN
+_CARD_PER_PAGE = _CARD_COLS * _CARD_ROWS
+
+def _card_xy(row, col):
+    page_w, page_h = letter
+    x = _CARD_LEFT_MARGIN + col * _CARD_W
+    y = page_h - _CARD_TOP_MARGIN - (row + 1) * _CARD_H
+    return x, y
+
+def _fetch_bags_for_cards(home_id=None):
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if home_id:
+        cur.execute("SELECT b.id, h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id WHERE b.home_id=%s ORDER BY b.id", (home_id,))
+    else:
+        cur.execute("SELECT b.id, h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id ORDER BY h.code, b.id")
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return rows
+
+@app.route('/api/bags/qr-cards-pdf', methods=['GET'])
+def bags_qr_cards_pdf():
+    """Print-ready PDF for Avery 5390 name badge insert refills (2.25x3.5in,
+    8/sheet) — front side matches the existing bag tag design (QR + bag ID +
+    home name), back side is just the home name in large print.
+
+    Two separate files (?side=front / ?side=back) rather than relying on an
+    auto-duplex printer setting, since that's more broadly compatible with
+    how people actually run cardstock through a printer — print all the
+    front sheets first, physically flip the WHOLE printed stack over as one
+    block (like flipping a book cover, left edge to right), then feed it
+    back through and print the 'back' file.
+
+    Because the whole stack gets flipped as a unit (not sheet-by-sheet),
+    the back file's sheet order is reversed to match, and each sheet's
+    column order is mirrored left-right so every card's back lines up with
+    its own front. Strongly recommend a one-sheet test print of each side
+    before running a full box of 400 inserts, since the exact margins here
+    are a best estimate (Avery doesn't publish precise numbers for this
+    SKU) and manual-flip direction can vary slightly by printer."""
+    side = request.args.get('side', 'front')
+    home_id = request.args.get('home_id')
+    if side not in ('front', 'back'):
+        return jsonify({'error': "side must be 'front' or 'back'"}), 400
+
+    bags = _fetch_bags_for_cards(home_id)
+    if not bags:
+        return jsonify({'error': 'No bags found'}), 404
+    sheets = [bags[i:i + _CARD_PER_PAGE] for i in range(0, len(bags), _CARD_PER_PAGE)]
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    sheet_order = sheets if side == 'front' else list(reversed(sheets))
+    for sheet in sheet_order:
+        for i, bag in enumerate(sheet):
+            row, col = divmod(i, _CARD_COLS)
+            if side == 'back':
+                col = _CARD_COLS - 1 - col  # mirror so the flipped stack lines up
+            x, y = _card_xy(row, col)
+            if side == 'front':
+                qr_bytes = base64.b64decode(bag['qr_code'].split(',', 1)[1])
+                qr_img = ImageReader(io.BytesIO(qr_bytes))
+                qr_size = 1.5 * _CARD_IN
+                qr_x, qr_y = x + 0.2 * _CARD_IN, y + (_CARD_H - qr_size) / 2
+                c.drawImage(qr_img, qr_x, qr_y, qr_size, qr_size)
+                text_x = qr_x + qr_size + 0.15 * _CARD_IN
+                c.setFont('Helvetica-Bold', 13)
+                c.drawString(text_x, y + _CARD_H / 2 + 8, bag['id'])
+                c.setFont('Helvetica', 9)
+                c.drawString(text_x, y + _CARD_H / 2 - 10, bag['home_name'][:26])
+            else:
+                c.setFont('Helvetica-Bold', 20)
+                # Shrink automatically if a long property name wouldn't fit
+                name = bag['home_name']
+                font_size = 20
+                while c.stringWidth(name, 'Helvetica-Bold', font_size) > _CARD_W - 0.4 * _CARD_IN and font_size > 10:
+                    font_size -= 1
+                c.setFont('Helvetica-Bold', font_size)
+                c.drawCentredString(x + _CARD_W / 2, y + _CARD_H / 2 - font_size / 3, name)
+        c.showPage()
+    c.save()
+    buf.seek(0)
+    filename = f"bag-tag-cards-{side}.pdf"
+    return Response(buf.getvalue(), mimetype='application/pdf',
+                     headers={'Content-Disposition': f'inline; filename="{filename}"'})
 
 @app.route('/api/inventory', methods=['GET'])
 def get_inventory():
