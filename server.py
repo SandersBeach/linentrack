@@ -237,8 +237,10 @@ def init_db():
             category TEXT NOT NULL DEFAULT 'General',
             quantity INTEGER NOT NULL DEFAULT 0,
             price NUMERIC(10,2) DEFAULT 0,
+            low_stock_threshold INTEGER NOT NULL DEFAULT 2,
             created_at TEXT NOT NULL
         );
+        ALTER TABLE store_items ADD COLUMN IF NOT EXISTS low_stock_threshold INTEGER NOT NULL DEFAULT 2;
         CREATE TABLE IF NOT EXISTS store_transactions (
             id SERIAL PRIMARY KEY,
             item_id INTEGER NOT NULL REFERENCES store_items(id),
@@ -967,6 +969,7 @@ def checkin(bag_id):
 # This exists specifically to prevent "false" check-ins claimed from off-site.
 
 WAREHOUSE_CHECKIN_PAUSED = True  # set to False to re-enable cleaner self-checkin via the warehouse QR screen
+PICKUP_DEADLINE_ALERT_ENABLED = False  # set to True once this has been discussed with Cassie — the check still runs and logs what it *would* have sent either way, so the logic can be verified, but no email actually goes out while this is False
 WH_TOKEN_ROTATE_SECONDS = 900   # how often the displayed QR changes (15 min)
 WH_SESSION_MINUTES = 20        # how long a validated session stays usable, once started
 
@@ -2256,8 +2259,8 @@ def add_store_item():
     name=data.get('name','').strip()
     if not name: return jsonify({'error':'Name required'}), 400
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("INSERT INTO store_items (name,category,quantity,price,created_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (name, data.get('category','General'), int(data.get('quantity',0)), float(data.get('price',0)), now_central()))
+    cur.execute("INSERT INTO store_items (name,category,quantity,price,low_stock_threshold,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+        (name, data.get('category','General'), int(data.get('quantity',0)), float(data.get('price',0)), int(data.get('low_stock_threshold',2)), now_central()))
     sid=cur.fetchone()['id']
     conn.commit(); cur.close(); conn.close()
     log_audit('StoreCentral', 'Added store item', name, resolve_performer(data))
@@ -2269,8 +2272,8 @@ def update_store_item(sid):
     if not is_admin_pin(str(data.get('pin',''))):
         return jsonify({'error':'Admin PIN required'}), 403
     conn=get_db(); cur=conn.cursor()
-    cur.execute("UPDATE store_items SET name=%s,category=%s,price=%s WHERE id=%s",
-        (data.get('name'), data.get('category','General'), float(data.get('price',0)), sid))
+    cur.execute("UPDATE store_items SET name=%s,category=%s,price=%s,low_stock_threshold=%s WHERE id=%s",
+        (data.get('name'), data.get('category','General'), float(data.get('price',0)), int(data.get('low_stock_threshold',2)), sid))
     conn.commit(); cur.close(); conn.close()
     log_audit('StoreCentral', 'Edited store item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
@@ -2306,6 +2309,13 @@ def restock_store_item(sid):
 
     cur.close(); conn.close()
     log_audit('StoreCentral', 'Restocked item', item['name'], resolve_performer(data), f'+{qty} -> {new_qty}')
+    if new_qty <= item['low_stock_threshold']:
+        try:
+            send_email(f"LOW STOCK (Store): {item['name']}",
+                       f"Low stock alert for '{item['name']}' (StoreCentral).\nCurrent qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\nStill low even after a restock of +{qty}.",
+                       to=SARAH_EMAIL)
+        except Exception as e:
+            print(f'[STORE LOW STOCK EMAIL ERROR] {e}', flush=True)
     return jsonify({'success':True,'new_quantity':new_qty})
 
 @app.route('/api/store/items/<int:sid>/set-count', methods=['POST'])
@@ -2342,6 +2352,13 @@ def set_store_item_count(sid):
 
     cur.close(); conn.close()
     log_audit('StoreCentral', 'Count adjustment', item['name'], resolve_performer(data), f'set to {new_qty}')
+    if new_qty <= item['low_stock_threshold']:
+        try:
+            send_email(f"LOW STOCK (Store): {item['name']}",
+                       f"Low stock alert for '{item['name']}' (StoreCentral).\nCurrent qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\nFound during a physical count.",
+                       to=SARAH_EMAIL)
+        except Exception as e:
+            print(f'[STORE LOW STOCK EMAIL ERROR] {e}', flush=True)
     return jsonify({'success':True,'new_quantity':new_qty})
 
 @app.route('/api/store/checkout', methods=['POST'])
@@ -2452,6 +2469,18 @@ This item has been marked as sold out and will remain at the property. Please bi
             )
         except Exception as e:
             import traceback; print(f'[STORE SOLD-OUT EMAIL ERROR] {e}', flush=True); traceback.print_exc()
+
+    # Low-stock alert — same pattern used for amenity/warehouse supplies,
+    # so a checked-out item that's now running low doesn't go unnoticed the
+    # way it did before (store items had no alerting at all until now).
+    if new_qty <= item['low_stock_threshold']:
+        try:
+            alert_body = (f"Low stock alert for '{item['name']}' (StoreCentral).\n"
+                          f"Current qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\n"
+                          f"Triggered by checkout: {property_address}")
+            send_email(f"LOW STOCK (Store): {item['name']}", alert_body, to=SARAH_EMAIL)
+        except Exception as e:
+            print(f'[STORE LOW STOCK EMAIL ERROR] {e}', flush=True)
 
     cur.close(); conn.close()
     return jsonify({'success':True,'transaction_id':tx_id,'new_quantity':new_qty})
@@ -4416,11 +4445,13 @@ def run_pickup_deadline_check(force=False):
     cassie_email = cassie['email'] if cassie and cassie['email'] else None
 
     alert_sent = False
-    if cassie_email:
+    if cassie_email and PICKUP_DEADLINE_ALERT_ENABLED:
         lines = [f"- {s['address']} — bag {s['bag_id']} — {s['cleaner_name']}" for s in still_staged]
         body = (f"As of 11:30am Central, the following {len(still_staged)} bag(s) packed for today "
                 f"have not been picked up by the cleaner yet:\n\n" + '\n'.join(lines))
         alert_sent = send_email(f"Bags not picked up by 11:30am ({today_str})", body, to=cassie_email)
+    elif not PICKUP_DEADLINE_ALERT_ENABLED:
+        print(f"[Pickup Deadline Alert] PAUSED — would have alerted about {len(still_staged)} bag(s) still staged, but PICKUP_DEADLINE_ALERT_ENABLED is False. Nothing sent.", flush=True)
 
     # Record that today's check ran, regardless of whether an email actually
     # went out (e.g. Cassie's email isn't on file) — this is a once-a-day
