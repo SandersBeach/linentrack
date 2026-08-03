@@ -2027,7 +2027,7 @@ function renderSupplyCards() {
       <div class="supply-actions">
         <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">Restock</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showSupplyQR(${item.id})"></button><button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})"></button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">QR</button><button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">Edit</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -2594,7 +2594,7 @@ function renderHKCards() {
       <div class="supply-actions">
         ${_hkBucket !== 'Amenities' ? `<button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">Restock</button>` : ''}
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})"></button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})"></button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})">QR</button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">Edit</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -2743,7 +2743,7 @@ async function renderPendingOrders() {
       ${o.items.map(it=>`<div style="font-size:13px;padding:4px 0;color:var(--gray-700)">${it.item_name} — expecting <strong>${it.expected_units} ${it.unit_label}</strong> (${it.cases_ordered} case${it.cases_ordered!=1?'s':''} × ${it.units_per_case})</div>`).join('')}
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn btn-primary" style="flex:1" onclick="openReceiveModal(${o.id})">Receive This Order</button>
-        <button class="btn btn-danger btn-sm" onclick="cancelOrder(${o.id})" title="Cancel order"></button>
+        <button class="btn btn-danger btn-sm" onclick="cancelOrder(${o.id})" title="Cancel order">Cancel</button>
       </div>
     </div>`;
   }).join('');
@@ -3152,7 +3152,7 @@ function renderStoreCards() {
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
         <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color: var(--green-dark)" onclick="showStoreRestockModal(${item.id})">Restock</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})"></button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">Edit</button>`:''}
       </div>
     </div>`).join('');
 }
