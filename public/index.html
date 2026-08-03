@@ -3,204 +3,227 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>SandersCentral</title>
+<title>Sanders Beach Rentals · Operations</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="SandersCentral">
-<meta name="theme-color" content="#2B3944">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/sbr-icon-192.png">
+<meta name="apple-mobile-web-app-title" content="Operations">
+<meta name="theme-color" content="#89BBBE">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/sbr-icon-192.png">
 <style>
   :root {
-    /* Primary (was teal) — slate */
-    --teal: #2B3944; --teal-light: #E9EDEC; --teal-dark: #212B33; --teal-mid: #5A6E78;
-    /* Informational (was blue) — muted denim, distinct from primary */
-    --blue: #3A5560; --blue-light: #E7EEEE; --blue-mid: #6E8A94;
-    /* Alerts / danger (was coral) — rust */
-    --coral: #AE5330; --coral-light: #F3E3D8; --coral-dark: #7C3B20;
-    /* Warnings (was amber) — gold */
-    --amber: #8A6423; --amber-light: #F6ECD3;
-    /* Success (was green) — warmed to sit with the palette */
-    --green: #4B6B2E; --green-light: #EAF0DE; --green-dark: #33481F;
-    /* Neutrals — warm cream family instead of cool gray */
-    --gray-50: #F3EFE6; --gray-100: #ECE6D8; --gray-200: #E2DBCB;
-    --gray-400: #9C9587; --gray-700: #5A5548; --gray-900: #212B33;
-    --gold: #C79A3F;
-    --radius: 12px; --radius-sm: 8px;
-    --shadow: 0 1px 2px rgba(33,29,20,0.05), 0 6px 18px rgba(33,29,20,0.07);
-    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-serif: 'Playfair Display', Georgia, serif;
+    --teal: #4C6477; --teal-light: #EAF1F1; --teal-dark: #3A4E5D; --teal-mid: #89BBBE;
+    --blue: #4C6477; --blue-light: #E7EEF2; --blue-mid: #89BBBE;
+    --coral: #B4553A; --coral-light: #F6EAE5; --coral-dark: #8C4029;
+    --amber: #8A6A2F; --amber-light: #F5EEDF;
+    --green: #89BBBE; --green-light: #E7F1F2; --green-dark: #3D5B5D;
+    --gray-50: #FAF9F6; --gray-100: #F3EEE7; --gray-200: #E3DDD4;
+    --gray-400: #767B7D; --gray-700: #4A4E50; --gray-900: #2E3234;
+    --sand: #F3EEE7; --driftwood: #CBBEAF;
+    --radius: 4px; --radius-sm: 3px;
+    --shadow: 0 1px 2px rgba(58,78,93,0.04), 0 4px 16px rgba(58,78,93,0.06);
+    --font: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'Cormorant Garamond', Georgia, serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: var(--font); background: var(--gray-50); color: var(--gray-900); min-height: 100vh; }
+  body { font-family: var(--font); font-weight: 400; background: var(--gray-50); color: var(--gray-900); min-height: 100vh; -webkit-font-smoothing: antialiased; text-wrap: pretty; }
+  a { color: var(--teal); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
+  a:hover { border-bottom-color: var(--teal-mid); }
 
   /* ── Login ── */
-  .login-wrap {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    padding: 1.25rem; background: linear-gradient(135deg, #384A56 0%, #212B33 100%);
-  }
-  .login-card {
-    width: 100%; max-width: 860px;
-    display: grid; grid-template-columns: 1.15fr 1fr;
-    border-radius: 20px; overflow: hidden;
-    box-shadow: 0 30px 80px rgba(0,0,0,0.35);
-    color: #EDE9DF;
-  }
-  .login-brand-side {
-    padding: 3rem 2.75rem; display: flex; flex-direction: column; justify-content: center;
-    border-right: 1px solid rgba(237,233,223,0.1);
-  }
-  .login-mark { width: 40px; height: 40px; object-fit: contain; margin-bottom: 14px; }
-  .login-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #E4CD97; margin-bottom: 12px; }
-  .login-logo { font-family: var(--font-serif); font-size: 30px; line-height: 1.2; font-weight: 600; margin-bottom: 0; color: #F7F4EC; }
-  .login-logo span { color: var(--gold); }
-  .login-rule { width: 36px; height: 1px; background: rgba(237,233,223,0.3); margin: 1.1rem 0; }
-  .login-sub { font-size: 13px; color: #B9C0C4; margin-bottom: 1.5rem; line-height: 1.6; max-width: 300px; }
-  .login-pin-side {
-    padding: 3rem 2.75rem; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  }
-  .pin-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #9FA9AE; margin-bottom: 1rem; }
-  .pin-dots { display: flex; justify-content: center; gap: 12px; margin-bottom: 1.5rem; }
-  .pin-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid #6C7A82; transition: all 0.15s; }
-  .pin-dot.filled { background: var(--gold); border-color: var(--gold); }
-  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; max-width: 260px; }
-  .num-btn {
-    padding: 16px; border: 1px solid rgba(237,233,223,0.1); border-radius: var(--radius-sm);
-    background: rgba(255,255,255,0.045); color: #EDE9DF; font-family: var(--font); font-size: 18px; font-weight: 500;
-    cursor: pointer; transition: all 0.1s;
-  }
-  .num-btn:hover { background: rgba(255,255,255,0.09); }
-  .num-btn:active { background: rgba(255,255,255,0.14); transform: scale(0.97); }
-  .num-btn.del { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: #9FA9AE; }
-  .login-err { color: #E39A78; font-size: 13px; margin-top: 1rem; min-height: 20px; text-align: center; }
-  @media (max-width: 960px) {
-    .login-card { grid-template-columns: 1fr; max-width: 420px; }
-    .login-brand-side { border-right: none; border-bottom: 1px solid rgba(237,233,223,0.1); padding: 2.25rem 2rem 1.5rem; text-align: center; }
-    .login-pin-side { padding: 2.25rem 2rem; }
-  }
-  @media (max-width: 420px) {
-    .login-brand-side { padding: 2rem 1.5rem 1.25rem; }
-    .login-pin-side { padding: 2rem 1.5rem; }
-    .numpad { max-width: 260px; }
+  .login-wrap { min-height: 100vh; display: flex; background: var(--teal-dark); }
+  .login-hero { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 20px; padding: 0 6vw; overflow: hidden; }
+  .login-hero::before { content: ''; position: absolute; inset: 0; background: linear-gradient(120deg, rgba(137,187,190,0.28), rgba(58,78,93,0) 60%); }
+  .login-hero > * { position: relative; }
+  .login-hero img { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 0 26px rgba(235,197,94,0.3)); }
+  .login-eyebrow { font-size: 11px; font-weight: 300; letter-spacing: 0.34em; text-transform: uppercase; color: rgba(250,249,246,0.72); }
+  .login-head { font-family: var(--font-display); font-size: clamp(38px, 4.4vw, 62px); font-weight: 400; line-height: 1.05; color: #FAF9F6; max-width: 520px; text-wrap: pretty; }
+  .login-rule { width: 56px; height: 1px; background: var(--teal-mid); }
+  .login-note { font-size: 15px; font-weight: 300; line-height: 1.7; color: rgba(250,249,246,0.62); max-width: 460px; text-wrap: pretty; }
+  .login-card { width: 520px; flex: none; background: rgba(250,249,246,0.06); border-left: 1px solid rgba(250,249,246,0.14); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 3rem 5vw; }
+  .login-logo { font-size: 12px; font-weight: 300; letter-spacing: 0.26em; text-transform: uppercase; color: rgba(250,249,246,0.82); text-align: center; }
+  .login-logo span { color: var(--teal-mid); }
+  .login-sub { font-size: 10px; font-weight: 300; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(250,249,246,0.38); text-align: center; line-height: 1.9; max-width: 280px; }
+  .pin-dots { display: flex; justify-content: center; gap: 18px; height: 15px; align-items: center; }
+  .pin-dot { width: 13px; height: 13px; border-radius: 50%; border: 1px solid rgba(250,249,246,0.5); transition: background 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+  .pin-dot.filled { background: #FAF9F6; }
+  .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; }
+  .num-btn { height: 84px; border: 1px solid rgba(250,249,246,0.22); border-radius: 8px; background: rgba(250,249,246,0.04); font-family: var(--font); font-size: 28px; font-weight: 300; color: #FAF9F6; cursor: pointer; transition: background 0.16s ease, transform 0.12s ease; }
+  .num-btn:hover { background: rgba(250,249,246,0.1); }
+  .num-btn:active { background: rgba(250,249,246,0.16); transform: translateY(1px); }
+  .num-btn.del { font-size: 11px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(250,249,246,0.7); }
+  .login-err { color: #E7B7A8; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; min-height: 16px; text-align: center; }
+
+  @media (max-width: 900px) {
+    .login-wrap { flex-direction: column; }
+    .login-hero { flex: none; padding: 3rem 1.75rem 2rem; gap: 14px; }
+    .login-hero img { width: 44px; height: 44px; }
+    .login-note { display: none; }
+    .login-card { width: auto; border-left: none; border-top: 1px solid rgba(250,249,246,0.14); padding: 2rem 1.75rem 3rem; gap: 22px; }
+    .num-btn { height: 68px; font-size: 24px; }
   }
 
   /* ── App shell ── */
   #app { display: none; }
-  .topbar { background: #fff; border-bottom: 0.5px solid var(--gray-200); padding: 0 1.25rem; display: flex; align-items: center; justify-content: space-between; height: 52px; position: sticky; top: 0; z-index: 100; }
-  .topbar-logo { font-family: var(--font-serif); font-size: 17px; font-weight: 600; }
-  .topbar-logo span { color: var(--gold); }
-  .topbar-role { font-size: 12px; color: var(--gray-400); display: flex; align-items: center; gap: 8px; }
-  .topbar-role button { font-size: 12px; color: var(--coral); background: none; border: none; cursor: pointer; padding: 4px 8px; }
-  .app-hero { background: #fff; border-bottom: 1px solid var(--gray-200); padding: 14px 1.25rem 12px; }
-  .app-hero-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 4px; }
-  .app-hero-greeting { font-family: var(--font-serif); font-size: 21px; font-weight: 600; color: var(--gray-900); }
-  .tab-bar { background: #fff; border-bottom: 0.5px solid var(--gray-200); display: flex; padding: 0 1rem; overflow-x: auto; gap: 0; }
-  .tab-btn { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--gray-400); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.15s; }
-  .tab-btn.active { color: var(--teal-dark); border-bottom-color: var(--gold); }
-  .content { padding: 1.25rem; max-width: 760px; margin: 0 auto; }
+  #app.on { display: grid; grid-template-columns: 252px minmax(0, 1fr); grid-template-rows: auto 1fr; min-height: 100vh; }
+  .topbar { grid-column: 1 / -1; background: #fff; border-bottom: 1px solid var(--gray-200); padding: 0 1.5rem; display: flex; align-items: center; justify-content: space-between; height: 60px; position: sticky; top: 0; z-index: 100; }
+  .topbar-logo { display: flex; align-items: center; gap: 12px; }
+  .topbar-logo img { width: 28px; height: 28px; object-fit: contain; flex: none; }
+  .tl-brand { display: block; font-size: 8.5px; font-weight: 300; letter-spacing: 0.3em; text-transform: uppercase; color: var(--gray-400); white-space: nowrap; }
+  .tl-name { display: block; font-family: var(--font-display); font-size: 19px; font-weight: 500; line-height: 1.1; color: var(--teal-dark); margin-top: 4px; white-space: nowrap; }
+  .tl-name em { font-style: normal; color: var(--gray-400); font-size: 15px; }
+  .topbar-role { font-size: 11px; letter-spacing: 0.06em; color: var(--gray-400); display: flex; align-items: center; gap: 8px; }
+  .topbar-role button { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; color: var(--gray-400); background: none; border: none; cursor: pointer; padding: 6px 8px; transition: color 0.2s; }
+  .topbar-role button:hover { color: var(--coral-dark); }
+  /* ── Navigation rail ── */
+  .tab-bar { background: var(--teal-dark); display: flex; flex-direction: column; align-items: stretch; padding: 1.5rem 0 3rem; gap: 0; position: sticky; top: 60px; align-self: start; height: calc(100vh - 60px); overflow-y: auto; }
+  .rail-group { padding: 0 0 1.5rem; }
+  .rail-label { font-size: 9px; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(250,249,246,0.42); padding: 0 1.5rem 10px; }
+  .tab-btn { display: block; width: 100%; text-align: left; padding: 9px 1.5rem; font-size: 13px; font-weight: 400; letter-spacing: 0.01em; color: rgba(250,249,246,0.74); border: none; background: none; cursor: pointer; border-left: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s, background 0.2s, border-color 0.2s; font-family: var(--font); }
+  .tab-btn:hover { color: #FAF9F6; background: rgba(250,249,246,0.06); }
+  .tab-btn.active { color: #FAF9F6; background: rgba(137,187,190,0.16); border-left-color: var(--teal-mid); font-weight: 500; }
+  .content { padding: 2rem 2.25rem 4rem; max-width: 1000px; margin: 0; min-width: 0; }
+
+  @media (max-width: 900px) {
+    .content { padding: 1.25rem 1rem 3rem; max-width: none; }
+  }
+
+  /* ── Touch navigation: pop-out panel + bottom bar (phone and iPad) ── */
+  #nav-toggle, #nav-scrim, #bottom-bar { display: none; }
+  @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
+    #app.on { display: block; }
+    #nav-toggle { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-right: 4px; margin-left: -10px; flex: none; background: none; border: 0; cursor: pointer; color: var(--teal-dark); }
+  #nav-toggle svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; }
+    .tab-bar { position: fixed; top: 0; bottom: 0; left: 0; width: 284px; max-width: 82vw; height: auto; align-self: auto; z-index: 100001; padding: 1.5rem 0 2rem; transform: translateX(-100%); transition: transform 280ms cubic-bezier(0.25,0.46,0.45,0.94); box-shadow: 0 0 40px rgba(58,78,93,0.22); }
+    #app.nav-open .tab-bar { transform: none; }
+    #nav-scrim { display: block; position: fixed; inset: 0; z-index: 100000; background: rgba(58,78,93,0.34); opacity: 0; pointer-events: none; transition: opacity 280ms ease; }
+    #app.nav-open #nav-scrim { opacity: 1; pointer-events: auto; }
+    .content { padding: 1.5rem 1.25rem 6.5rem; max-width: none; }
+    #bottom-bar { display: grid; }
+  }
+  /* Preview/force flag for the touch layout — identical rules, class-driven. */
+  body.touchnav #app.on { display: block; }
+  body.touchnav #nav-toggle { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-right: 4px; margin-left: -10px; flex: none; background: none; border: 0; cursor: pointer; color: var(--teal-dark); }
+  #nav-toggle svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; }
+  body.touchnav .tab-bar { position: fixed; top: 0; bottom: 0; left: 0; width: 284px; max-width: 82vw; height: auto; align-self: auto; z-index: 100001; padding: 1.5rem 0 2rem; transform: translateX(-100%); transition: transform 280ms cubic-bezier(0.25,0.46,0.45,0.94); box-shadow: 0 0 40px rgba(58,78,93,0.22); }
+  body.touchnav #app.nav-open .tab-bar { transform: none; }
+  body.touchnav #nav-scrim { display: block; position: fixed; inset: 0; z-index: 100000; background: rgba(58,78,93,0.34); opacity: 0; pointer-events: none; transition: opacity 280ms ease; }
+  body.touchnav #app.nav-open #nav-scrim { opacity: 1; pointer-events: auto; }
+  body.touchnav .content { padding: 1.5rem 1.25rem 6.5rem; max-width: none; }
+  body.touchnav #bottom-bar { display: grid; }
+
+  #bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 350; background: #fff; border-top: 1px solid var(--gray-200); grid-auto-flow: column; grid-auto-columns: 1fr; box-shadow: 0 -2px 16px rgba(58,78,93,0.06); }
+  .bb-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 68px; padding: 10px 4px; background: none; border: 0; border-top: 2px solid transparent; cursor: pointer; font-family: var(--font); font-size: 11px; font-weight: 500; letter-spacing: 0.03em; line-height: 1.2; text-align: center; white-space: nowrap; color: var(--gray-700); transition: color 0.2s, border-color 0.2s; }
+  .bb-btn svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .bb-btn.active { color: var(--teal-dark); border-top-color: var(--teal-mid); }
 
   /* ── Components ── */
-  .card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
-  .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gray-400); margin-bottom: 1rem; }
-  .scan-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius); padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.15s; margin-bottom: 1rem; }
+  .card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.5rem; margin-bottom: 1.25rem; }
+  .card-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; color: var(--gray-400); margin-bottom: 1.125rem; }
+  .scan-zone { border: 1px dashed var(--driftwood); border-radius: var(--radius); padding: 2rem 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; margin-bottom: 1.25rem; background: var(--gray-50); }
   .scan-zone:hover { border-color: var(--teal-mid); background: var(--teal-light); }
   .scan-zone svg { width: 36px; height: 36px; stroke: var(--teal); margin-bottom: 8px; }
   .scan-zone p { font-size: 13px; color: var(--gray-400); }
   .scan-zone .hint { font-size: 11px; color: var(--teal); margin-top: 4px; }
-  label { font-size: 12px; color: var(--gray-400); display: block; margin-bottom: 4px; }
-  input, select { width: 100%; padding: 9px 12px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); background: #fff; color: var(--gray-900); margin-bottom: 10px; outline: none; transition: border 0.15s; }
-  input:focus, select:focus { border-color: var(--teal); }
-  .btn { padding: 10px 20px; border-radius: var(--radius-sm); border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+  label { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gray-400); display: block; margin-bottom: 6px; }
+  input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font); background: #fff; color: var(--gray-900); margin-bottom: 12px; outline: none; transition: border-color 0.2s; }
+  input:focus, select:focus, textarea:focus { border-color: var(--teal-mid); }
+  input::placeholder, textarea::placeholder { color: #B4B8B9; }
+  .btn { padding: 11px 22px; border-radius: var(--radius-sm); border: 1px solid transparent; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; font-family: var(--font); cursor: pointer; transition: background 0.2s, color 0.2s, border-color 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn:active { transform: translateY(1px); }
   .btn-full { width: 100%; justify-content: center; }
   .btn-primary { background: var(--teal); color: #fff; }
   .btn-primary:hover { background: var(--teal-dark); }
-  .btn-blue { background: var(--blue-light); color: var(--blue); }
-  .btn-blue:hover { background: #D3DEDF; }
-  .btn-danger { background: var(--coral-light); color: var(--coral-dark); }
-  .btn-danger:hover { background: #E9C7AE; }
-  .btn-ghost { background: var(--gray-100); color: var(--gray-700); }
-  .btn-ghost:hover { background: var(--gray-200); }
-  .btn-sm { padding: 5px 12px; font-size: 12px; }
-  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 1rem; }
-  .stat { background: var(--gray-50); border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; }
-  .stat-num { font-family: var(--font-serif); font-size: 27px; font-weight: 600; line-height: 1; }
-  .stat-lbl { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
-  .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 10px; border-radius: 20px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .btn-blue { background: var(--teal-light); color: var(--teal-dark); border-color: var(--teal-mid); }
+  .btn-blue:hover { background: #DCE8E9; }
+  .btn-danger { background: var(--coral-light); color: var(--coral-dark); border-color: #E6CFC6; }
+  .btn-danger:hover { background: #EFDCD4; }
+  .btn-ghost { background: #fff; color: var(--gray-700); border-color: var(--gray-200); }
+  .btn-ghost:hover { background: var(--gray-50); border-color: var(--driftwood); }
+  .btn-sm { padding: 7px 14px; font-size: 10px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1.25rem; }
+  .stat { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: var(--radius-sm); padding: 1.125rem 1.125rem 1rem; }
+  .stat-num { font-family: var(--font-display); font-variant-numeric: lining-nums; font-feature-settings: 'lnum' 1; font-size: 38px; font-weight: 500; line-height: 1; color: var(--teal-dark); }
+  .stat-lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gray-400); margin-top: 8px; }
+  .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .badge-out { background: var(--coral-light); color: var(--coral-dark); }
   .badge-in { background: var(--teal-light); color: var(--teal-dark); }
   .badge-count { background: var(--blue-light); color: var(--blue); }
   .badge-warn { background: var(--amber-light); color: var(--amber); }
   .badge-ok { background: var(--green-light); color: var(--green-dark); }
-  .row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); }
+  .row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
   .row:last-child { border-bottom: none; }
   .row-main { flex: 1; min-width: 0; }
-  .row-title { font-size: 13px; font-weight: 500; }
-  .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
-  .result-box { border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1rem; }
-  .result-success { background: var(--teal-light); border: 0.5px solid var(--teal-mid); }
-  .result-return { background: var(--blue-light); border: 0.5px solid var(--blue-mid); }
-  .result-error { background: var(--coral-light); border: 0.5px solid var(--coral); }
-  .result-box .r-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .row-title { font-size: 13px; font-weight: 500; color: var(--gray-900); }
+  .row-sub { font-size: 12px; color: var(--gray-400); margin-top: 3px; }
+  .result-box { border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; }
+  .result-success { background: var(--teal-light); border: 1px solid var(--teal-mid); }
+  .result-return { background: var(--blue-light); border: 1px solid var(--blue-mid); }
+  .result-error { background: var(--coral-light); border: 1px solid #D9B5A8; }
+  .result-box .r-title { font-family: var(--font-display); font-size: 20px; font-weight: 500; color: var(--teal-dark); margin-bottom: 3px; }
   .result-box .r-sub { font-size: 12px; color: var(--gray-700); }
   .search-row { display: flex; gap: 8px; margin-bottom: 1rem; }
   .search-row input, .search-row select { margin-bottom: 0; }
-  .empty { text-align: center; padding: 2.5rem; color: var(--gray-400); font-size: 13px; }
-  .divider { height: 0.5px; background: var(--gray-100); margin: 12px 0; }
-  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-  .section-header h2 { font-family: var(--font-serif); font-size: 18px; font-weight: 600; }
-  .tag { display: inline-block; padding: 2px 8px; background: var(--gray-100); border-radius: 20px; font-size: 11px; color: var(--gray-700); font-family: monospace; }
+  .empty { text-align: center; padding: 3rem 2.5rem; color: var(--gray-400); font-size: 13px; font-style: italic; }
+  .divider { height: 1px; background: var(--gray-100); margin: 14px 0; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; }
+  .section-header h2 { font-family: var(--font-display); font-size: 26px; font-weight: 500; letter-spacing: 0.01em; color: var(--teal-dark); }
+  .tag { display: inline-block; padding: 2px 9px; background: var(--sand); border-radius: 20px; font-size: 11px; color: var(--gray-700); font-family: ui-monospace, monospace; letter-spacing: 0.02em; }
   .cleaner-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 1rem; }
-  .cleaner-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); padding: 0.875rem 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .cleaner-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); padding: 1rem; display: flex; align-items: center; justify-content: space-between; transition: border-color 0.2s; }
+  .cleaner-card:hover { border-color: var(--driftwood); }
   .cleaner-card .c-name { font-size: 13px; font-weight: 500; }
   .cleaner-card .c-count { font-size: 11px; color: var(--gray-400); }
 
   /* ── Supply cards grid ── */
   .supply-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 1rem; }
-  .supply-card { background: #fff; border: 0.5px solid var(--gray-200); border-radius: var(--radius); padding: 1rem; }
-  .supply-card.low-stock { border-color: var(--coral); border-width: 1.5px; }
+  .supply-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.125rem; }
+  .supply-card.low-stock { border-color: var(--coral); }
   .supply-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
-  .supply-name { font-size: 14px; font-weight: 600; }
-  .supply-cat { font-size: 11px; color: var(--gray-400); margin-bottom: 10px; }
-  .supply-qty { font-size: 28px; font-weight: 700; line-height: 1; }
+  .supply-name { font-size: 14px; font-weight: 600; color: var(--teal-dark); }
+  .supply-cat { font-size: 10px; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+  .supply-qty { font-family: var(--font-display); font-variant-numeric: lining-nums; font-feature-settings: 'lnum' 1; font-size: 36px; font-weight: 500; line-height: 1; color: var(--teal-dark); }
   .supply-unit { font-size: 11px; color: var(--gray-400); }
   .supply-threshold { font-size: 11px; color: var(--gray-400); margin-top: 2px; margin-bottom: 10px; }
   .supply-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .supply-actions .btn { font-size: 12px; padding: 6px 12px; }
 
   /* ── Sub-tabs ── */
-  .subtab-bar { display: flex; gap: 0; border-bottom: 0.5px solid var(--gray-200); margin-bottom: 1rem; }
-  .subtab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--gray-400); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .subtab.active { color: var(--teal); border-bottom-color: var(--teal); }
+  .subtab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--gray-200); margin-bottom: 1.25rem; }
+  .subtab { padding: 11px 16px; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gray-400); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.2s, border-color 0.2s; }
+  .subtab:hover { color: var(--teal-dark); }
+  .subtab.active { color: var(--teal-dark); border-bottom-color: var(--teal-mid); }
 
   /* ── Modal ── */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 1rem; }
-  .modal-box { background: #fff; border-radius: 16px; padding: 1.5rem; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(20,26,31,0.25); }
-  .modal-box h3 { font-family: var(--font-serif); font-size: 19px; font-weight: 600; margin-bottom: 1.25rem; color: var(--teal-dark); }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(58,78,93,0.32); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 500; padding: 1rem; }
+  .modal-box { background: #fff; border-radius: var(--radius); box-shadow: 0 18px 50px rgba(58,78,93,0.18); padding: 1.75rem; width: 100%; max-width: 440px; max-height: 90vh; overflow-y: auto; animation: slideIn 0.28s cubic-bezier(0.25,0.46,0.45,0.94); }
+  .modal-box h3 { font-family: var(--font-display); font-size: 24px; font-weight: 500; margin-bottom: 1.25rem; color: var(--teal-dark); }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 1rem; }
 
   /* ── Inventory count ── */
-  .count-area-card { border: 1.5px solid var(--gray-200); border-radius: var(--radius); padding: 1rem; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 12px; }
-  .count-area-card.selected { border-color: var(--teal); background: var(--teal-light); }
-  .count-area-card input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--teal); flex-shrink: 0; }
-  .count-progress { height: 6px; background: var(--gray-200); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
-  .count-progress-bar { height: 100%; background: var(--teal); border-radius: 4px; transition: width 0.3s; }
-  .count-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid var(--gray-100); gap: 10px; }
+  .count-area-card { border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 1rem; margin-bottom: 8px; cursor: pointer; transition: border-color 0.2s, background 0.2s; display: flex; align-items: center; gap: 12px; background: #fff; }
+  .count-area-card.selected { border-color: var(--teal-mid); background: var(--teal-light); }
+  .count-area-card input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--teal-mid); flex-shrink: 0; }
+  .count-progress { height: 4px; background: var(--gray-100); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .count-progress-bar { height: 100%; background: var(--teal-mid); border-radius: 4px; transition: width 0.3s cubic-bezier(0.25,0.46,0.45,0.94); }
+  .count-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--gray-100); gap: 10px; }
   .count-row:last-child { border-bottom: none; }
   .count-row-left { flex: 1; min-width: 0; }
   .count-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-  .count-input { width: 70px; padding: 6px 8px; border: 0.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; text-align: center; margin-bottom: 0; }
-  .count-input:focus { border-color: var(--teal); }
+  .count-input { width: 72px; padding: 8px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; text-align: center; margin-bottom: 0; }
+  .count-input:focus { border-color: var(--teal-mid); }
   .variance-pos { color: var(--amber); font-weight: 600; font-size: 12px; }
   .variance-neg { color: var(--coral-dark); font-weight: 600; font-size: 12px; }
   .variance-ok { color: var(--green-dark); font-weight: 600; font-size: 12px; }
   .report-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 1rem; }
   .report-stat { border-radius: var(--radius-sm); padding: 0.75rem 1rem; text-align: center; }
-  .report-stat .rnum { font-size: 22px; font-weight: 700; line-height: 1; }
-  .report-stat .rlbl { font-size: 11px; margin-top: 4px; }
+  .report-stat .rnum { font-family: var(--font-display); font-variant-numeric: lining-nums; font-feature-settings: 'lnum' 1; font-size: 28px; font-weight: 500; line-height: 1; }
+  .report-stat .rlbl { font-size: 10px; margin-top: 5px; text-transform: uppercase; letter-spacing: 0.08em; }
 
   /* ── PO Request ── */
   .po-urgency-routine { background: var(--gray-100); color: var(--gray-700); }
@@ -208,10 +231,21 @@
   .po-urgency-unstayable { background: var(--coral-light); color: var(--coral-dark); }
 
   /* ── Scan result animated entry ── */
-  @keyframes slideIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-  .anim { animation: slideIn 0.2s ease; }
+  @keyframes slideIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+  .anim { animation: slideIn 0.28s cubic-bezier(0.25,0.46,0.45,0.94); }
+
+  /* ── iPad landscape (primary warehouse device) ── */
+  @media (min-width: 1024px) {
+    .content { max-width: 1060px; padding: 2rem 2.5rem 4rem; }
+    .btn { padding: 12px 24px; }
+    .num-btn { padding: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
 </style>
 </head>
+
 <body>
 
 <!-- ══════════════ PO REQUEST PRE-LOGIN ══════════════ -->
@@ -221,8 +255,8 @@
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem">
         <button onclick="hidePOPreLogin()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--gray-400);line-height:1">←</button>
         <div>
-          <div style="font-size:16px;font-weight:600">📝 POCentral</div>
-          <div style="font-size:12px;color:var(--gray-400)">SandersCentral</div>
+          <div style="font-size:16px;font-weight:600">Purchase request</div>
+          <div style="font-size:12px;color:var(--gray-400)">Sanders Beach Rentals · Operations</div>
         </div>
       </div>
       <div class="form-row">
@@ -277,9 +311,9 @@
       </select>
       <label>Urgency</label>
       <select id="po-pl-urgency">
-        <option value="Routine">📋 Routine</option>
-        <option value="At Risk">⚠️ At Risk</option>
-        <option value="Unstayable">🚨 Unstayable</option>
+        <option value="Routine">Routine</option>
+        <option value="At Risk">At Risk</option>
+        <option value="Unstayable">Unstayable</option>
       </select>
       <label>Date needed by</label>
       <input type="date" id="po-pl-date">
@@ -293,37 +327,37 @@
 
 <!-- ══════════════ LOGIN ══════════════ -->
 <div class="login-wrap" id="login">
+  <div class="login-hero">
+    <div class="login-eyebrow">Sanders Beach Rentals</div>
+    <div class="login-head" id="login-greeting">Good morning.</div>
+    <div class="login-rule"></div>
+    <div class="login-note">Linens, loaners, supplies, inventory and purchasing — every area in one place. Sign in with your staff PIN to see the areas assigned to you.</div>
+  </div>
   <div class="login-card">
-    <div class="login-brand-side">
-      <img class="login-mark" src="/sbr-icon-192.png" alt="Sanders Beach Rentals">
-      <div class="login-eyebrow">Sanders Beach Rentals</div>
-      <div class="login-logo" id="login-greeting">Good morning.</div>
-      <div class="login-rule"></div>
-      <div class="login-sub">Warehouse · Admin · Maintenance · Coordinator</div>
+    <img src="/sbr-icon-192.png" alt="" style="width:44px;height:44px;object-fit:contain;filter:drop-shadow(0 0 18px rgba(235,197,94,0.28))">
+    <div class="login-logo">Sanders Beach Rentals</div>
+    <div style="font-family:var(--font-display);font-size:27px;font-weight:400;font-style:italic;line-height:1.15;color:#FAF9F6;text-align:center;white-space:nowrap">Welcome back</div>
+    <div class="login-sub">Enter your staff PIN</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="d0"></div>
+      <div class="pin-dot" id="d1"></div>
+      <div class="pin-dot" id="d2"></div>
+      <div class="pin-dot" id="d3"></div>
     </div>
-    <div class="login-pin-side">
-      <div class="pin-label">Enter your staff PIN</div>
-      <div class="pin-dots" id="pin-dots">
-        <div class="pin-dot" id="d0"></div>
-        <div class="pin-dot" id="d1"></div>
-        <div class="pin-dot" id="d2"></div>
-        <div class="pin-dot" id="d3"></div>
-      </div>
-      <div class="numpad">
-        <button class="num-btn" onclick="pinPress('1')">1</button>
-        <button class="num-btn" onclick="pinPress('2')">2</button>
-        <button class="num-btn" onclick="pinPress('3')">3</button>
-        <button class="num-btn" onclick="pinPress('4')">4</button>
-        <button class="num-btn" onclick="pinPress('5')">5</button>
-        <button class="num-btn" onclick="pinPress('6')">6</button>
-        <button class="num-btn" onclick="pinPress('7')">7</button>
-        <button class="num-btn" onclick="pinPress('8')">8</button>
-        <button class="num-btn" onclick="pinPress('9')">9</button>
-        <button class="num-btn del" onclick="pinClear()">Clear</button>
-        <button class="num-btn" onclick="pinPress('0')">0</button>
-        <button class="num-btn del" onclick="pinDel()">⌫</button>
-      </div>
-      <div class="login-err" id="login-err"></div>
+    <div class="login-err" id="login-err"></div>
+    <div class="numpad">
+      <button class="num-btn" onclick="pinPress('1')">1</button>
+      <button class="num-btn" onclick="pinPress('2')">2</button>
+      <button class="num-btn" onclick="pinPress('3')">3</button>
+      <button class="num-btn" onclick="pinPress('4')">4</button>
+      <button class="num-btn" onclick="pinPress('5')">5</button>
+      <button class="num-btn" onclick="pinPress('6')">6</button>
+      <button class="num-btn" onclick="pinPress('7')">7</button>
+      <button class="num-btn" onclick="pinPress('8')">8</button>
+      <button class="num-btn" onclick="pinPress('9')">9</button>
+      <button class="num-btn del" onclick="pinClear()">Clear</button>
+      <button class="num-btn" onclick="pinPress('0')">0</button>
+      <button class="num-btn del" onclick="pinDel()">⌫</button>
     </div>
   </div>
 </div>
@@ -339,19 +373,17 @@
 <!-- ══════════════ APP ══════════════ -->
 <div id="app">
   <div class="topbar">
-    <div class="topbar-logo" id="topbar-logo"><span>Sanders</span>Central</div>
+    <button id="nav-toggle" onclick="toggleNav()" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+    <div class="topbar-logo" id="topbar-logo"><img src="/sbr-icon-192.png" alt=""><div><span class="tl-brand">Sanders Beach Rentals</span><span class="tl-name">Operations</span></div></div>
     <div class="topbar-role">
-      <button id="home-btn" onclick="showTab('warehouse_home')" style="display:none;margin-right:10px;background:var(--teal);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:13px">🏠 Home</button>
       <span id="role-label"></span>
       <button onclick="logout()">Sign out</button>
     </div>
   </div>
-  <div class="app-hero" id="app-hero">
-    <div class="app-hero-eyebrow">Sanders Beach Rentals</div>
-    <div class="app-hero-greeting" id="app-hero-greeting"></div>
-  </div>
   <div class="tab-bar" id="tab-bar"></div>
+  <div id="nav-scrim" onclick="closeNav()"></div>
   <div class="content" id="main-content"></div>
+  <nav id="bottom-bar"></nav>
 </div>
 
 <!-- ══════════════ SUPPLY MODALS ══════════════ -->
@@ -415,7 +447,7 @@
     <p style="font-size:12px;color:var(--gray-400);margin-bottom:1rem">Scan to take or restock</p>
     <div style="display:flex;gap:8px;justify-content:center">
       <button class="btn btn-ghost" onclick="document.getElementById('modal-supply-qr').style.display='none'">Close</button>
-      <button class="btn btn-primary" onclick="printSupplyQR()">🖨 Print</button>
+      <button class="btn btn-primary" onclick="printSupplyQR()">Print</button>
     </div>
   </div>
 </div>
@@ -431,12 +463,12 @@
     <div style="display:flex;gap:8px;align-items:flex-start">
       <input id="pack-modal-scan" placeholder="Scan or type bag ID..." autocomplete="off" autocapitalize="off"
         onkeydown="if(event.key==='Enter'){event.preventDefault();scanPackBag();}" style="flex:1">
-      <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('pack-modal-scan','scanPackBag')">📷 Camera</button>
+      <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('pack-modal-scan','scanPackBag')">Camera</button>
     </div>
     <div id="pack-modal-scan-err" style="font-size:12px;color:var(--coral-dark);min-height:16px;margin-top:4px"></div>
     <div id="pack-modal-bag-list" style="margin-top:6px"></div>
     <div style="margin-top:12px;border-top:1px solid var(--gray-100);padding-top:10px">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('pack-modal-shortage-fields').style.display=document.getElementById('pack-modal-shortage-fields').style.display==='none'?'block':'none'">⚠️ Report a shortage (optional)</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('pack-modal-shortage-fields').style.display=document.getElementById('pack-modal-shortage-fields').style.display==='none'?'block':'none'">Report a shortage (optional)</button>
       <div id="pack-modal-shortage-fields" style="display:none;margin-top:10px">
         <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Use this if you had to pack fewer of an item than the formula calls for — it'll show up at the top of Pack List as a "Packed Bag Short" so it can get topped off when the bag returns.</p>
         <div id="pack-modal-shortage-list" style="margin-bottom:8px"></div>
@@ -481,7 +513,7 @@
 
 <div id="modal-camera-scan" class="modal-overlay" style="display:none">
   <div class="modal-box" style="max-width:420px">
-    <h3>📷 Scan with Camera</h3>
+    <h3>Scan with Camera</h3>
     <div style="position:relative;border-radius:var(--radius-sm);overflow:hidden;background:#000;margin-top:10px">
       <video id="camera-scan-video" autoplay playsinline muted style="width:100%;display:block"></video>
     </div>
@@ -549,7 +581,7 @@
     <input id="flag-low-notes" placeholder="e.g. Only a couple bottles left on the shelf">
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-flag-low-stock').style.display='none'">Cancel</button>
-      <button class="btn btn-danger" style="flex:1" onclick="submitFlagLowStock()">🚩 Alert Sarah</button>
+      <button class="btn btn-danger" style="flex:1" onclick="submitFlagLowStock()">Alert Sarah</button>
     </div>
   </div>
 </div>
@@ -587,7 +619,7 @@ function showUpdateBanner() {
   banner = document.createElement('div');
   banner.id = 'update-banner';
   banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:var(--coral);color:#fff;padding:12px 16px;text-align:center;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 2px 8px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;gap:12px';
-  banner.innerHTML = `<span>🔄 An update is available.</span>
+  banner.innerHTML = `<span>An update is available.</span>
     <button onclick="window.location.reload(true)" style="background:#fff;color:var(--coral-dark);border:none;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer;font-size:13px">Refresh now</button>
     <button onclick="document.getElementById('update-banner').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.6);border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:13px">Later</button>`;
   document.body.prepend(banner);
@@ -619,26 +651,26 @@ const TABS = {
   admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'loaner_scan', 'loaner_status', 'loaner_log', 'supply_scan', 'amenities_inventory', 'cleaning_inventory', 'orders', 'forecast', 'inventory_count', 'cleaners', 'settings']
 };
 const TAB_LABELS = {
-  warehouse_home: '🏠 Today\'s Priorities',
-  scan: 'Scan Bag', overdue: '🚨 Overdue', status: 'Who Has What', homes: 'By Home',
+  warehouse_home: 'Daily Priorities',
+  scan: 'Scan Bag', overdue: 'Overdue', status: 'Who Has What', homes: 'By Home',
   log: 'Activity Log', cleaners: 'Cleaners', settings: 'Settings',
-  loaner_scan: '📦 Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
-  supply_scan: '🧰 SupplyCentral',
-  inventory_count: '📋 InventoryCentral',
-  po_request: '📝 POCentral',
-  amenities_inventory: '🧴 Amenities Inventory',
-  cleaning_inventory: '🧽 Cleaning Supplies Inventory',
-  orders: '📦 Orders',
-  forecast: '🔮 Forecast',
-  store: '🏪 Store',
-  pack_list: '📋 Pack List',
-  daily_tasks: '📝 Daily Tasks',
-  warehouse_dashboard: '📊 Dashboard',
-  admin_dashboard: '📊 Dashboard',
-  bundles_needed: '🧺 Bundles Needed',
-  pack_flags: '⚠️ Flag Issue',
-  pack_emergency: '⚡ Last-Min Add',
-  pack_productivity: '📊 Pack Productivity'
+  loaner_scan: 'Scan Loaner', loaner_status: 'Loaners Out', loaner_log: 'Loaner Log',
+  supply_scan: 'SupplyCentral',
+  inventory_count: 'InventoryCentral',
+  po_request: 'POCentral',
+  amenities_inventory: 'Amenities Inventory',
+  cleaning_inventory: 'Cleaning Supplies Inventory',
+  orders: 'Orders',
+  forecast: 'Forecast',
+  store: 'Store',
+  pack_list: 'Pack List',
+  daily_tasks: 'Daily Tasks',
+  warehouse_dashboard: 'Dashboard',
+  admin_dashboard: 'Dashboard',
+  bundles_needed: 'Bundles Needed',
+  pack_flags: 'Flag Issue',
+  pack_emergency: 'Last-Min Add',
+  pack_productivity: 'Pack Productivity'
 };
 let currentTab = 'scan';
 let _availableTabs = [];
@@ -672,13 +704,10 @@ async function submitPin() {
     _currentStaffId = data.id || null;
     _currentStaffEmail = data.email || '';
     document.getElementById('login').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    const ROLE_ICONS = { admin:'🔑 Admin', maintenance:'🔧 Maintenance', coordinator:'📋 Coordinator', inspector:'🔍 Inspector', warehouse:'📦 Warehouse', manager:'📊 Manager', store_manager:'🏪 Store Manager' };
+    document.getElementById('app').classList.add('on');
+    document.getElementById('app').style.display = '';
+    const ROLE_ICONS = { admin:'Admin', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', warehouse:'Warehouse', manager:'Manager', store_manager:'Store Manager' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
-    const _h = new Date().getHours();
-    const _greetWord = _h < 12 ? 'Good morning' : (_h < 17 ? 'Good afternoon' : 'Good evening');
-    const _firstName = (_currentStaffName || '').trim().split(' ')[0];
-    document.getElementById('app-hero-greeting').textContent = _firstName ? `${_greetWord}, ${_firstName}.` : `${_greetWord}.`;
     buildTabs();
     const defaultView = sessionStorage.getItem('defaultView');
     if (defaultView === 'loaners' && (userRoles.includes('maintenance') || userRoles.includes('admin'))) {
@@ -706,6 +735,8 @@ function logout() {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
   document.getElementById('login').style.display = 'flex';
+  document.getElementById('app').classList.remove('on');
+  document.getElementById('app').classList.remove('nav-open');
   document.getElementById('app').style.display = 'none';
 }
 
@@ -722,52 +753,97 @@ function buildTabs() {
   const seen = new Set(); const tabs = [];
   orderedRoles.forEach(r => (TABS[r] || []).forEach(t => { if (!seen.has(t)) { seen.add(t); tabs.push(t); } }));
   _availableTabs = tabs;
-  document.getElementById('tab-bar').innerHTML = tabs.map(t =>
-    `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`
+  const groups = [];
+  // Operational roles get two plain sections — the handful of screens they use
+  // every shift, then everything else. Module-by-module grouping is a map of
+  // the application, which only the people who administer it actually need.
+  const isAdminRail = userRoles.includes('admin') || userRoles.includes('manager');
+  const EVERY_DAY = ['warehouse_home', 'pack_list', 'scan', 'daily_tasks', 'loaner_scan', 'supply_scan', 'amenities_inventory', 'inventory_count', 'store'];
+  if (!isAdminRail) {
+    const daily = tabs.filter(t => EVERY_DAY.includes(t));
+    const rest = tabs.filter(t => !EVERY_DAY.includes(t));
+    if (daily.length) groups.push({ key: 'Every day', items: daily });
+    if (rest.length) groups.push({ key: 'When you need it', items: rest });
+  } else {
+    tabs.forEach(t => {
+      const key = MODULE_NAMES[t] || 'Admin';
+      let g = groups.find(x => x.key === key);
+      if (!g) { g = { key, items: [] }; groups.push(g); }
+      g.items.push(t);
+    });
+  }
+  document.getElementById('tab-bar').innerHTML = groups.map(g =>
+    `<div class="rail-group"><div class="rail-label">${g.key}</div>` +
+    g.items.map(t => `<button class="tab-btn" onclick="showTab('${t}')" id="tab-${t}">${TAB_LABELS[t]}</button>`).join('') +
+    `</div>`
   ).join('');
-  const homeBtn = document.getElementById('home-btn');
-  if (homeBtn) homeBtn.style.display = tabs.includes('warehouse_home') ? 'inline-block' : 'none';
+  buildBottomBar(tabs);
 }
+
+// ── Touch bottom bar ────────────────────────────────────────────────────
+// Only the screens used constantly through a shift. Everything else lives in
+// the pop-out panel — one extra tap, and it keeps the bar readable at a glance.
+const BOTTOM_TABS = [
+  ['pack_list', 'Pack List', 'clipboard-list'],
+  ['scan', 'Scan Bag', 'scan-line'],
+  ['amenities_inventory', 'Amenities', 'spray-can'],
+  ['orders', 'Orders', 'package']
+];
+function buildBottomBar(tabs) {
+  const bar = document.getElementById('bottom-bar');
+  if (!bar) return;
+  const items = BOTTOM_TABS.filter(([id]) => tabs.includes(id));
+  bar.innerHTML = items.map(([id, label, icon]) =>
+    `<button class="bb-btn" id="bb-${id}" onclick="showTab('${id}')"><i data-lucide="${icon}"></i><span>${label}</span></button>`
+  ).join('');
+  bar.style.display = items.length ? '' : 'none';
+  if (window.lucide) window.lucide.createIcons();
+}
+function toggleNav() { document.getElementById('app').classList.toggle('nav-open'); }
+function closeNav() { document.getElementById('app').classList.remove('nav-open'); }
 const MODULE_NAMES = {
-  warehouse_home: 'PackListCentral',
-  scan: 'LinenCentral',
-  overdue: 'LinenCentral',
-  status: 'LinenCentral',
-  homes: 'LinenCentral',
-  log: 'LinenCentral',
-  cleaners: 'LinenCentral',
-  settings: 'SandersCentral',
-  loaner_scan: 'LoanerCentral',
-  loaner_status: 'LoanerCentral',
-  loaner_log: 'LoanerCentral',
-  supply_scan: 'SupplyCentral',
-  inventory_count: 'InventoryCentral',
-  po_request: 'POCentral',
-  amenities_inventory: 'HousekeepingSupplyCentral',
-  cleaning_inventory: 'HousekeepingSupplyCentral',
-  orders: 'OrdersCentral',
-  forecast: 'ForecastCentral',
-  store: 'StoreCentral',
-  pack_list: 'PackListCentral',
-  daily_tasks: 'PackListCentral',
-  warehouse_dashboard: 'PackListCentral',
-  admin_dashboard: 'PackListCentral',
-  bundles_needed: 'PackListCentral',
-  pack_flags: 'PackListCentral',
-  pack_emergency: 'PackListCentral',
-  pack_productivity: 'PackListCentral'
+  warehouse_home: 'Pack list',
+  scan: 'Linen',
+  overdue: 'Linen',
+  status: 'Linen',
+  homes: 'Linen',
+  log: 'Linen',
+  cleaners: 'Linen',
+  settings: 'Admin',
+  loaner_scan: 'Loaners',
+  loaner_status: 'Loaners',
+  loaner_log: 'Loaners',
+  supply_scan: 'Maintenance supply',
+  inventory_count: 'Inventory',
+  po_request: 'Purchasing',
+  amenities_inventory: 'Housekeeping',
+  cleaning_inventory: 'Housekeeping',
+  orders: 'Orders',
+  forecast: 'Forecast',
+  store: 'Store',
+  pack_list: 'Pack list',
+  daily_tasks: 'Pack list',
+  warehouse_dashboard: 'Pack list',
+  admin_dashboard: 'Pack list',
+  bundles_needed: 'Pack list',
+  pack_flags: 'Pack list',
+  pack_emergency: 'Pack list',
+  pack_productivity: 'Pack list'
 };
 function showTab(t) {
   currentTab = t;
+  closeNav(); // a selection always dismisses the pop-out panel
   closeCameraScan(); // stop any active camera stream — navigating away should never leave it running
   const myGen = ++_tabGeneration;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.bb-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('bb-' + t)?.classList.add('active');
   const el = document.getElementById('tab-' + t);
   if (el) el.classList.add('active');
   // Update topbar module name
-  const moduleName = MODULE_NAMES[t] || 'SandersCentral';
+  const moduleName = MODULE_NAMES[t] || 'Admin';
   const logoEl = document.getElementById('topbar-logo');
-  if (logoEl) logoEl.innerHTML = '<span>Sanders</span>Central <span style="font-weight:400;color:var(--gray-400);font-size:13px">· ' + moduleName + '</span>';
+  if (logoEl) logoEl.innerHTML = '<img src="/sbr-icon-192.png" alt=""><div><span class="tl-brand">Sanders Beach Rentals</span><span class="tl-name">Operations <em>· ' + moduleName + '</em></span></div>';
   const fns = {
     warehouse_home: renderWarehouseHome,
     scan: renderScan, overdue: renderOverdue, status: renderStatus, homes: renderHomes,
@@ -807,13 +883,14 @@ function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 // screen and miss something else that needed doing.
 async function renderWarehouseHome(gen) {
   const today = await getServerToday();
-  const [week, shortages, bundles, goals, shiftNotes, dailyLog] = await Promise.all([
+  const [week, shortages, bundles, goals, shiftNotes, dailyLog, inv] = await Promise.all([
     fetch('/api/pack-list/week').then(r => r.json()),
     fetch('/api/pack-list/shortages').then(r => r.json()),
     fetch('/api/pack-list/bundles?days=5').then(r => r.json()),
     fetch('/api/warehouse-goals').then(r => r.json()),
     fetch('/api/warehouse-notes').then(r => r.json()),
-    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json())
+    fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json()),
+    fetch('/api/inventory').then(r => r.json())
   ]);
   if (_stale(gen)) return;
 
@@ -827,6 +904,15 @@ async function renderWarehouseHome(gen) {
   const bKing = bundles.missed.king_bundles_needed + bundles.days.reduce((s,d)=>s+d.king_bundles_needed,0);
   const bQueen = bundles.missed.queen_bundles_needed + bundles.days.reduce((s,d)=>s+d.queen_bundles_needed,0);
   const bTwin = bundles.missed.twin_bundles_needed + bundles.days.reduce((s,d)=>s+d.twin_bundles_needed,0);
+  const bQueenSleeper = bundles.missed.queen_sleeper_needed + bundles.days.reduce((s,d)=>s+d.queen_sleeper_needed,0);
+  const bTwinSleeper = bundles.missed.twin_sleeper_needed + bundles.days.reduce((s,d)=>s+d.twin_sleeper_needed,0);
+  const bBundlesTotal = bKing + bQueen + bTwin + bQueenSleeper + bTwinSleeper;
+  // Bags 24h+ past pickup, straight from linen tracking — the same rule the
+  // Overdue tab uses, so the two screens can never disagree.
+  const _now = new Date();
+  const lateBags = inv.filter(b => b.status === 'out' && b.picked_up_at && (_now - new Date(b.picked_up_at)) / 3600000 >= 24).length;
+  // Packed and staged but nobody has collected it yet — drives the 11:30 nudge.
+  const stagedNotPickedUp = inv.filter(b => b.status === 'staged').length;
   // Ready-to-go amenity boxes vs. what the next 5 days actually need — the
   // two numbers used to live on separate screens with nothing comparing
   // them, so a real shortfall could go unnoticed until someone was mid-pack.
@@ -846,52 +932,112 @@ async function renderWarehouseHome(gen) {
   const checklistTotal = taskList.length + standingList.length + (goals.onetime_tasks || []).length;
   const checklistRemaining = checklistTotal - checklistDone;
 
-  const tile = (icon, label, value, sub, colorVar, onclick) => `
-    <div style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:14px 16px;cursor:pointer;transition:transform 0.1s" onclick="${onclick}" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'">
-      <div style="font-size:24px;margin-bottom:4px">${icon}</div>
-      <div style="font-family:var(--font-serif);font-size:28px;font-weight:600;color:${colorVar};line-height:1.1">${value}</div>
-      <div style="font-size:13px;font-weight:600;margin-top:4px">${label}</div>
-      ${sub ? `<div style="font-size:11px;color:var(--gray-400);margin-top:1px">${sub}</div>` : ''}
+  const isAdminView = userRoles.includes('admin') || userRoles.includes('manager');
+
+  // Two deliberately different weights: something wrong reads loud, something
+  // fine recedes. Equal billing for everything is what made this hard to scan.
+  const tile = (label, value, sub, colorVar, onclick) => {
+    const alert = colorVar === 'var(--coral-dark)';
+    return alert ? `
+    <div style="background:#fff;border:1px solid var(--gray-200);border-top:2px solid var(--coral);border-radius:var(--radius);box-shadow:var(--shadow);padding:1.5rem 1.375rem;cursor:pointer;text-align:center" onclick="${onclick}" onmouseenter="this.style.boxShadow='0 2px 4px rgba(58,78,93,0.06),0 8px 24px rgba(58,78,93,0.09)'" onmouseleave="this.style.boxShadow='var(--shadow)'">
+      <div style="font-size:9.5px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--coral-dark);margin-bottom:14px">${label}</div>
+      <div style="font-family:var(--font-display);font-variant-numeric:lining-nums;font-size:56px;font-weight:500;line-height:0.9;color:var(--coral-dark)">${value}</div>
+      ${sub ? `<div style="font-size:12px;font-weight:400;line-height:1.6;color:var(--gray-700);margin-top:12px;text-wrap:pretty">${sub}</div>` : ''}
+    </div>` : `
+    <div style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:var(--radius);padding:1.5rem 1.375rem;cursor:pointer;text-align:center" onclick="${onclick}" onmouseenter="this.style.borderColor='var(--driftwood)'" onmouseleave="this.style.borderColor='var(--gray-200)'">
+      <div style="font-size:9.5px;font-weight:500;letter-spacing:0.16em;text-transform:uppercase;color:var(--gray-400);margin-bottom:14px">${label}</div>
+      <div style="font-family:var(--font-display);font-variant-numeric:lining-nums;font-size:34px;font-weight:400;line-height:0.9;color:var(--gray-400)">${value}</div>
+      ${sub ? `<div style="font-size:12px;font-weight:300;line-height:1.6;color:var(--gray-400);margin-top:12px;text-wrap:pretty">${sub}</div>` : ''}
+    </div>`;
+  };
+
+  const planItem = (label, value, sub, first) => `
+    <div style="padding:0 1.5rem;text-align:center;${first ? '' : 'border-left:1px solid var(--gray-200)'}">
+      <div style="font-family:var(--font-display);font-variant-numeric:lining-nums;font-size:26px;font-weight:500;line-height:1;color:var(--teal-dark)">${value}</div>
+      <div style="font-size:10px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;line-height:1.5;color:var(--gray-400);margin-top:8px">${label}</div>
+      ${sub ? `<div style="font-size:11.5px;font-weight:300;line-height:1.6;color:var(--gray-700);margin-top:7px;text-wrap:pretty">${sub}</div>` : ''}
     </div>`;
 
-  const quickLink = (icon, label, tabId) => `
-    <div style="background:var(--gray-50);border-radius:8px;padding:10px 8px;text-align:center;cursor:pointer" onclick="showTab('${tabId}')">
-      <div style="font-size:20px;margin-bottom:2px">${icon}</div>
-      <div style="font-size:11px;font-weight:600;color:var(--gray-700)">${label}</div>
-    </div>`;
+  const quickLink = (label, tabId) => `
+    <button onclick="showTab('${tabId}')" style="background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius-sm);padding:12px 14px;text-align:left;cursor:pointer;font-family:var(--font);font-size:11px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;color:var(--teal-dark);transition:border-color 0.2s,background 0.2s" onmouseenter="this.style.borderColor='var(--teal-mid)';this.style.background='var(--gray-50)'" onmouseleave="this.style.borderColor='var(--gray-200)';this.style.background='#fff'">${label}</button>`;
 
   const html = `
-    <div style="margin-bottom:0.85rem">
-      <div style="font-family:var(--font-serif);font-size:21px;font-weight:600">Today's Priorities</div>
-      <div style="font-size:12px;color:var(--gray-400)">Tap any tile to jump straight to that task</div>
+    <div style="margin-bottom:1.75rem;max-width:46rem">
+      <div style="font-family:var(--font-display);font-size:42px;font-weight:500;line-height:1.15;color:var(--teal-dark)">Daily priorities</div>
+      <div style="width:56px;height:1px;background:var(--teal-mid);margin-top:16px"></div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:0.85rem">
-      ${tile('🧺', 'Bags to Pack Today', bagsToPackToday, `${todayDay.properties.length} propert${todayDay.properties.length===1?'y':'ies'} today`, bagsToPackToday > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
-      ${tile('📋', 'Missed Pack Items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
-      ${tile('🧺', 'Bundles Needed (5 day)', `${bTowelBags} towel bags`, `${bKing} King · ${bQueen} Queen · ${bTwin} Twin sheet sets`, 'var(--teal)', "showTab('bundles_needed')")}
-      ${tile('📦', 'Amenity Boxes Ready', boxesReady, boxesShort > 0 ? `${boxesShort} short of 5-day need (${boxesNeeded5Day})` : `Covers 5-day need (${boxesNeeded5Day})`, boxesShort > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
-      ${tile('⚠️', 'Packed Bag Short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('pack_list')")}
-      ${tile('📝', 'Daily Checklist', checklistRemaining, checklistTotal ? `${checklistDone}/${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal)', "showTab('daily_tasks')")}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:2.5rem">
+      ${tile('Late bags', lateBags, lateBags > 0 ? '24 hours or more past pickup' : 'Nothing past 24 hours', lateBags > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('overdue')")}
+      ${tile('Missed pack items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
+      ${tile('Packed bag short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
+      ${tile('Daily checklist', checklistRemaining, checklistTotal ? `${checklistDone} of ${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('daily_tasks')")}
     </div>
-    <div class="card" style="margin-bottom:0.85rem;padding:14px 16px">
-      <div class="card-title" style="margin-bottom:6px">📝 Notes for Next Shift</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="text" id="shift-note-input" placeholder="Leave something for whoever's on next..." style="flex:1">
-        <button class="btn btn-primary btn-sm" onclick="addShiftNote()">+ Add</button>
+    <div style="border-top:1px solid var(--gray-200);border-bottom:1px solid var(--gray-200);padding:1.25rem 0 1.5rem;margin-bottom:2rem">
+      <div style="font-family:var(--font-display);font-size:28px;font-weight:500;line-height:1.15;color:var(--teal-dark);margin-bottom:20px">Planning · next five days</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1.25rem 0;cursor:pointer" onclick="showTab('bundles_needed')">
+        ${planItem('Towel bags', bTowelBags, 'Across the next five days', true)}
+        ${planItem('Bundles', bBundlesTotal, `${bKing} king · ${bQueen} queen · ${bTwin} twin · ${bQueenSleeper} queen sleeper · ${bTwinSleeper} twin sleeper`)}
+        ${planItem('Amenity boxes ready', boxesReady, boxesShort > 0 ? `${boxesShort} short of the need of ${boxesNeeded5Day}` : `Covers the need of ${boxesNeeded5Day}`)}
       </div>
-      ${shiftNotes.length ? shiftNotes.map(n => `<div class="row" style="padding:4px 0"><div class="row-main"><div class="row-title" style="font-size:13px">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">✓ Done</button></div>`).join('') : '<div class="empty" style="padding:4px 0">No notes right now.</div>'}
     </div>
-    <div style="font-size:12px;font-weight:600;color:var(--gray-400);margin-bottom:8px">MORE TABS</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(95px,1fr));gap:8px">
-      ${quickLink('⚠️', 'Flag Issue', 'pack_flags')}
-      ${quickLink('📷', 'Scan Bag', 'scan')}
-      ${quickLink('🚨', 'Overdue', 'overdue')}
-      ${quickLink('📦', 'Who Has What', 'status')}
-      ${quickLink('🏠', 'By Home', 'homes')}
-      ${quickLink('🧴', 'Amenities', 'amenities_inventory')}
-      ${quickLink('📬', 'Orders', 'orders')}
-    </div>`;
+    <div class="card" style="margin-bottom:2rem">
+      <div class="card-title">Notes for the next shift</div>
+      <div style="display:flex;gap:10px;margin-bottom:14px">
+        <input type="text" id="shift-note-input" placeholder="Leave something for whoever is on next…" style="flex:1;margin-bottom:0">
+        <button class="btn btn-primary" onclick="addShiftNote()">Add</button>
+      </div>
+      ${shiftNotes.length ? shiftNotes.map(n => `<div class="row"><div class="row-main"><div class="row-title">${n.note_text}</div><div class="row-sub">${n.staff_name} · ${n.created_at}</div></div><button class="btn btn-ghost btn-sm" onclick="resolveShiftNote(${n.id})">Done</button></div>`).join('') : '<div class="empty" style="padding:1rem 0;text-align:left">No notes right now.</div>'}
+    </div>
+    ${isAdminView ? `
+    <div style="border-top:1px solid var(--gray-200);padding-top:1.25rem">
+      <div style="font-size:9.5px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--gray-400);margin-bottom:12px">Elsewhere</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        ${quickLink('Flag issue', 'pack_flags')}
+        ${quickLink('Scan bag', 'scan')}
+        ${quickLink('Overdue', 'overdue')}
+        ${quickLink('Who has what', 'status')}
+        ${quickLink('By home', 'homes')}
+        ${quickLink('Amenities', 'amenities_inventory')}
+        ${quickLink('Orders', 'orders')}
+      </div>
+    </div>` : ''}`;
   document.getElementById('main-content').innerHTML = html;
+  maybeShowStagedPickupNudge(stagedNotPickedUp, today);
+}
+
+// ── 11:30 staged-pickup nudge ─────────────────────────────────────────────
+// At or after 11:30am, anything packed for today that is still sitting staged
+// has most likely been forgotten. This is a nudge on top of the existing email,
+// never a replacement for it. Dismissed once, it stays gone for the rest of the day.
+function maybeShowStagedPickupNudge(stagedCount, today) {
+  if (!stagedCount) return;
+  const now = new Date();
+  if (now.getHours() * 60 + now.getMinutes() < 11 * 60 + 30) return;
+  if (sessionStorage.getItem('staged-nudge-dismissed') === today) return;
+  if (document.getElementById('staged-nudge')) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'staged-nudge';
+  wrap.className = 'modal-overlay';
+  wrap.dataset.day = today;
+  wrap.innerHTML = `
+    <div class="modal-box" style="max-width:460px">
+      <div style="font-size:13px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--coral-dark);margin-bottom:14px">Still waiting on pickup</div>
+      <h3 style="margin-bottom:14px">${stagedCount} bag${stagedCount === 1 ? '' : 's'} packed for today ${stagedCount === 1 ? 'has' : 'have'} not been collected.</h3>
+      <p style="font-size:13px;font-weight:300;line-height:1.7;color:var(--gray-700);text-wrap:pretty">It is past 11:30. These are staged and ready, but no cleaner has scanned them out yet — worth a call before the afternoon turn.</p>
+      <div class="modal-actions" style="margin-top:1.5rem">
+        <button class="btn btn-ghost" onclick="dismissStagedNudge()">Dismiss</button>
+        <button class="btn btn-primary" onclick="dismissStagedNudge();showTab('status')">See who has what</button>
+      </div>
+    </div>`;
+  wrap.addEventListener('click', e => { if (e.target === wrap) dismissStagedNudge(); });
+  document.body.appendChild(wrap);
+}
+function dismissStagedNudge() {
+  const el = document.getElementById('staged-nudge');
+  if (!el) return;
+  sessionStorage.setItem('staged-nudge-dismissed', el.dataset.day || '');
+  el.remove();
 }
 
 // ── Scan Tab ───────────────────────────────────────────────────────────────────
@@ -1004,7 +1150,7 @@ async function renderOverdue(gen) {
   let html = '';
   if (skipped.length) {
     html += `<div class="card" style="background:var(--coral-light);border-color:var(--coral-dark)">
-      <div class="card-title" style="color:var(--coral-dark)">⚠️ Checked in without a pickup scan (${skipped.length})</div>
+      <div class="card-title" style="color:var(--coral-dark)">Checked in without a pickup scan (${skipped.length})</div>
       <div class="row-sub" style="margin-bottom:8px">These bags went straight from staged to returned — the cleaner never scanned pickup. Worth a quick reminder to them.</div>
       ${skipped.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.home_name || '—'} <span class="tag">${s.bag_id}</span></div><div class="row-sub">${s.cleaner_name || 'Unknown cleaner'} · checked in ${s.timestamp}${s.staff_name ? ' · by ' + s.staff_name : ''}</div></div></div>`).join('')}
     </div>`;
@@ -1016,7 +1162,7 @@ async function renderOverdue(gen) {
     return;
   }
   if (needsReview.length) {
-    html += `<div style="background:var(--coral-light);border:0.5px solid var(--coral-dark);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">⚠️</div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${needsReview.length} bag${needsReview.length!==1?'s':''} need review</div><div style="font-size:12px;color:var(--coral-dark)">Marked "out" but no pickup time recorded — can't tell if overdue</div></div></div>`;
+    html += `<div style="background:var(--coral-light);border:0.5px solid var(--coral-dark);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px"></div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${needsReview.length} bag${needsReview.length!==1?'s':''} need review</div><div style="font-size:12px;color:var(--coral-dark)">Marked "out" but no pickup time recorded — can't tell if overdue</div></div></div>`;
     html += `<div class="card"><div style="font-size:14px;font-weight:600;margin-bottom:8px">Needs review</div>`;
     needsReview.forEach(b => { html += `<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">With ${b.cleaner_name||'unknown cleaner'} · no pickup time on file</div></div><span class="badge badge-out">Check manually</span></div>`; });
     html += `</div>`;
@@ -1024,9 +1170,9 @@ async function renderOverdue(gen) {
   if (!overdue.length) { document.getElementById('main-content').innerHTML = html; return; }
   const byCleaner = {};
   overdue.forEach(b => { if (!byCleaner[b.cleaner_name]) byCleaner[b.cleaner_name]=[]; byCleaner[b.cleaner_name].push(b); });
-  html += `<div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px">🚨</div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div><div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours</div></div></div>`;
+  html += `<div style="background:var(--coral-light);border:0.5px solid var(--coral);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px"><div style="font-size:28px"></div><div><div style="font-size:15px;font-weight:500;color:var(--coral-dark)">${overdue.length} bag${overdue.length!==1?'s':''} overdue</div><div style="font-size:12px;color:var(--coral-dark)">Out for more than 24 hours</div></div></div>`;
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
-    html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600;color:var(--coral-dark)">⚠ ${name}</div><span class="badge badge-out">${bags.length} overdue</span></div>`;
+    html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600;color:var(--coral-dark)">${name}</div><span class="badge badge-out">${bags.length} overdue</span></div>`;
     bags.forEach(b => { const out=new Date(b.picked_up_at); const hours=Math.floor((now-out)/3600000); const days=Math.floor(hours/24); const timeStr=days>0?`${days}d ${hours%24}hr`:`${hours}hr`; const since=out.toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); html+=`<div class="row"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div><div class="row-sub">Picked up ${since} · <strong style="color:var(--coral-dark)">${timeStr} ago</strong></div></div><span class="badge badge-out">Overdue</span></div>`; });
     html += `</div>`;
   });
@@ -1056,7 +1202,7 @@ async function renderStatus(gen) {
   // Out bags section
   Object.entries(byCleaner).sort().forEach(([name, bags]) => {
     html += `<div class="card" data-section="out"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">${name}</div><span class="badge badge-count">${bags.length} bag${bags.length!==1?'s':''}</span></div>`;
-    bags.forEach(b => { const since=b.picked_up_at?new Date(b.picked_up_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Picked up ${since}</div>`:'<div class="row-sub" style="color:var(--amber)">⚠️ No pickup time recorded — can\'t tell if overdue</div>'}</div><span class="badge badge-out">Out</span></div>`; });
+    bags.forEach(b => { const since=b.picked_up_at?new Date(b.picked_up_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''; html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()} ${name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div>${since?`<div class="row-sub">Picked up ${since}</div>`:'<div class="row-sub" style="color:var(--amber)">No pickup time recorded — can\'t tell if overdue</div>'}</div><span class="badge badge-out">Out</span></div>`; });
     html += `</div>`;
   });
   if (inWarehouse.length) { html+=`<div class="card" data-section="in"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div style="font-size:14px;font-weight:600">At warehouse</div><span class="badge badge-in">${inWarehouse.length} bags</span></div>`; inWarehouse.forEach(b=>{html+=`<div class="row" data-search="${b.id.toLowerCase()} ${b.home_name.toLowerCase()}"><div class="row-main"><div class="row-title">${b.home_name} <span class="tag">${b.id}</span></div></div><span class="badge badge-in">In</span></div>`;}); html+=`</div>`; }
@@ -1101,15 +1247,15 @@ async function renderHomes(gen) {
     const totalItems = bags.length + loaners.length + storeLoans.length;
     html+=`<div class="card home-card" data-home="${name.toLowerCase()}"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div><div style="font-size:14px;font-weight:600">${name}</div><div style="font-size:11px;color:var(--gray-400)">${code||'—'} · ${totalItems} item${totalItems!==1?'s':''} tracked</div></div><div style="display:flex;gap:6px;flex-wrap:wrap">${out.length?`<span class="badge badge-out">${out.length} bag${out.length!==1?'s':''} out</span>`:''}${staged.length?`<span class="badge badge-warn">${staged.length} staged</span>`:''}${loaners.length?`<span class="badge badge-out">${loaners.length} loaner${loaners.length!==1?'s':''}</span>`:''}${storeLoans.length?`<span class="badge badge-out">${storeLoans.length} store loan${storeLoans.length!==1?'s':''}</span>`:''}</div></div>`;
     if (bags.length) {
-      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🧺 Linens</div>`;
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">Linens</div>`;
       bags.forEach(b=>{const since=b.checked_out?new Date(b.checked_out).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${b.id}</span><span style="flex:1;color:var(--gray-400)">${b.status==='out'?'→ '+b.cleaner_name+(since?' ('+since+')':''):b.status==='staged'?'⏳ Staged, awaiting pickup':'At warehouse'}</span><span class="badge ${b.status==='out'?'badge-out':b.status==='staged'?'badge-warn':'badge-in'}" style="font-size:10px">${b.status==='out'?'Out':b.status==='staged'?'Staged':'In'}</span></div>`;});
     }
     if (loaners.length) {
-      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🔧 Loaner items</div>`;
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">Loaner items</div>`;
       loaners.forEach(l=>{const who=l.checked_out_by||l.staff_name;html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span class="tag">${l.id}</span><span style="flex:1;color:var(--gray-400)">${l.name}${who?' · '+who:''}</span><span class="badge badge-out" style="font-size:10px">Out</span></div>`;});
     }
     if (storeLoans.length) {
-      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">🛍️ Store loans</div>`;
+      html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.04em;margin:8px 0 4px">Store loans</div>`;
       storeLoans.forEach(sl=>{const overdue=sl.expected_return_date && sl.expected_return_date<new Date().toISOString().slice(0,10);html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span style="flex:1;color:var(--gray-400)">${sl.item_name} · ${sl.performed_by||'—'}${sl.expected_return_date?' · due '+sl.expected_return_date:''}</span><span class="badge ${overdue?'badge-out':'badge-warn'}" style="font-size:10px">${overdue?'Overdue':'On loan'}</span></div>`;});
     }
     if (!bags.length && !loaners.length && !storeLoans.length) {
@@ -1119,7 +1265,7 @@ async function renderHomes(gen) {
   });
   html+=`</div>`;
   if (unmatchedStoreLoans.length) {
-    html += `<div class="card" style="border-color:var(--amber)"><div class="card-title" style="color:var(--amber)">⚠️ Store loans with an unrecognized address</div><p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">These don't exactly match any home on file — likely a typo in the property address when checked out.</p>`;
+    html += `<div class="card" style="border-color:var(--amber)"><div class="card-title" style="color:var(--amber)">Store loans with an unrecognized address</div><p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">These don't exactly match any home on file — likely a typo in the property address when checked out.</p>`;
     unmatchedStoreLoans.forEach(sl=>{html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span style="flex:1;color:var(--gray-400)">${sl.item_name} · "${sl.property_address}" · ${sl.performed_by||'—'}</span></div>`;});
     html += `</div>`;
   }
@@ -1135,7 +1281,7 @@ async function renderLog(gen) {
   let html = `<div class="card" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">From (optional)</label><input type="date" id="log-export-start"></div>
     <div><label style="font-size:11px;color:var(--gray-400);display:block;margin-bottom:4px">To (optional)</label><input type="date" id="log-export-end"></div>
-    <button class="btn btn-primary" onclick="exportActivityCSV()">📥 Export CSV</button>
+    <button class="btn btn-primary" onclick="exportActivityCSV()">Export CSV</button>
     <div style="font-size:11px;color:var(--gray-400);width:100%">This screen only shows linen bag & loaner activity (${log.length} most recent). The CSV export covers <strong>everything</strong> — bags, loaners, supplies, HK supplies, StoreCentral, orders, POs, inventory counts, and every admin action (adding/editing homes, cleaners, staff, catalog items, PIN changes, settings toggles) — for the date range you pick (or all-time if left blank).</div>
   </div>`;
   if (!log.length) { html += '<div class="empty">No activity yet</div>'; document.getElementById('main-content').innerHTML = html; return; }
@@ -1169,7 +1315,7 @@ async function printPickupQR() {
     .steps{flex:1;text-align:left;font-size:14px;color:#333;line-height:1.8}
     .steps strong{display:block;margin-bottom:6px;font-size:15px}
   </style></head><body>
-    <h1>📱 Scan to Pick Up Your Bags</h1>
+    <h1>Scan to Pick Up Your Bags</h1>
     <h2>Escanee para Recoger sus Bolsas</h2>
     <p>Sanders Beach Rentals · SandersCentral</p>
     <img src="${data.qr_code}">
@@ -1200,8 +1346,8 @@ async function renderCleaners(gen) {
   const pickupUrl = window.location.origin + '/pickup';
   let html = `<div class="section-header"><h2>Cleaners</h2></div>
   <div class="card" style="background:var(--teal-light);border-color:var(--teal-mid)">
-    <div style="font-size:13px;color:var(--teal-dark)">📱 <strong>Cleaner pickup URL:</strong> <a href="${pickupUrl}" style="color:var(--teal-dark)">${pickupUrl}</a><br><span style="font-size:11px;opacity:0.8">Post this QR code at the warehouse for cleaners to scan with their phone.</span></div>
-    <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="printPickupQR()">🖨️ Print Wall QR Poster</button>
+    <div style="font-size:13px;color:var(--teal-dark)"><strong>Cleaner pickup URL:</strong> <a href="${pickupUrl}" style="color:var(--teal-dark)">${pickupUrl}</a><br><span style="font-size:11px;opacity:0.8">Post this QR code at the warehouse for cleaners to scan with their phone.</span></div>
+    <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="printPickupQR()">Print Wall QR Poster</button>
   </div>
   <div class="card"><div class="card-title">Add cleaner</div>
     <div class="form-row"><div><label>Full name</label><input type="text" id="new-cleaner" placeholder="e.g. Sandra B." /></div><div><label>Email (for overdue alerts)</label><input type="email" id="new-cleaner-email" placeholder="cleaner@email.com" /></div></div>
@@ -1217,8 +1363,8 @@ async function renderCleaners(gen) {
           <div class="row-title" style="font-size:14px">${c.name}</div>
           <div class="row-sub" style="margin-top:4px">${c.bags_out} bag${c.bags_out!==1?'s':''} out/staged</div>
           <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">
-            <div style="font-size:11px;color:var(--gray-400)">📧 ${c.email||'<em>No email</em>'}</div>
-            ${c.phone?`<div style="font-size:11px;color:var(--gray-400)">📞 ${c.phone}</div>`:''}
+            <div style="font-size:11px;color:var(--gray-400)">${c.email||'<em>No email</em>'}</div>
+            ${c.phone?`<div style="font-size:11px;color:var(--gray-400)">${c.phone}</div>`:''}
           </div>
           <div style="margin-top:8px;display:flex;align-items:center;gap:8px;background:var(--gray-50);padding:6px 10px;border-radius:var(--radius-sm);width:fit-content">
             <span style="font-size:11px;color:var(--gray-400)">PIN:</span>
@@ -1288,7 +1434,7 @@ async function bulkImportCleanerEmails() {
     const data = await res.json();
     if (data.error) { msg.style.color='var(--coral-dark)'; msg.textContent = data.error; return; }
     let text = `✓ Updated ${data.updated.length}: ${data.updated.join(', ')}`;
-    if (data.unmatched.length) text += ` — ⚠️ No match found for: ${data.unmatched.join(', ')}`;
+    if (data.unmatched.length) text += ` — No match found for: ${data.unmatched.join(', ')}`;
     msg.style.color = data.unmatched.length ? 'var(--amber)' : 'var(--teal)';
     msg.textContent = text;
     renderCleaners();
@@ -1353,9 +1499,9 @@ async function renderSettings(gen) {
     <div id="staff-list-area"><button class="btn btn-ghost btn-sm" onclick="loadStaffList()">Load Staff List</button></div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="showAddStaffModal()">+ Add Staff Member</button>
-      <button class="btn btn-ghost btn-sm" onclick="seedStaffMembers()">🔄 Reset to Master List</button>
-      <button class="btn btn-ghost btn-sm" id="toggle-pins-btn" onclick="togglePinsVisible()">👁️ Show PINs</button>
-      <button class="btn btn-ghost btn-sm" onclick="syncKnownEmails()">📧 Sync Inspector Emails</button>
+      <button class="btn btn-ghost btn-sm" onclick="seedStaffMembers()">Reset to Master List</button>
+      <button class="btn btn-ghost btn-sm" id="toggle-pins-btn" onclick="togglePinsVisible()">Show PINs</button>
+      <button class="btn btn-ghost btn-sm" onclick="syncKnownEmails()">Sync Inspector Emails</button>
     </div>
     <div id="seed-staff-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
     <div id="sync-emails-msg" style="font-size:12px;color:var(--teal);margin-top:4px;min-height:18px"></div>
@@ -1365,7 +1511,7 @@ async function renderSettings(gen) {
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Overdue linen bag alerts always notify Cassie (housekeeping manager). This controls whether the <strong>cleaner themselves</strong> also gets emailed — keep this off during testing so cleaners don't get confused by test alerts.</p>
     <div style="display:flex;align-items:center;gap:12px">
       <button class="btn ${cleanerEmailSetting.enabled?'btn-primary':'btn-ghost'}" id="cleaner-email-toggle-btn" onclick="toggleCleanerEmails()">
-        ${cleanerEmailSetting.enabled ? '✅ ON — Cleaners WILL receive overdue emails' : '🔒 OFF — Cleaners will NOT receive overdue emails'}
+        ${cleanerEmailSetting.enabled ? 'ON — Cleaners WILL receive overdue emails' : 'OFF — Cleaners will NOT receive overdue emails'}
       </button>
     </div>
     <div id="cleaner-email-toggle-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
@@ -1375,7 +1521,7 @@ async function renderSettings(gen) {
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Shows warehouse staff a task on their Pack List dashboard on the chosen day, reminding them to run an inventory count. It clears itself automatically once a count is actually submitted that day — no email involved.</p>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <button class="btn ${invReminderSetting.enabled?'btn-primary':'btn-ghost'}" id="inv-reminder-toggle-btn" onclick="toggleInventoryReminder()">
-        ${invReminderSetting.enabled ? '✅ ON' : '🔒 OFF'}
+        ${invReminderSetting.enabled ? 'ON' : 'OFF'}
       </button>
       <select id="inv-reminder-day" onchange="setInventoryReminderDay(this.value)" style="width:auto">
         ${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d,i)=>`<option value="${i}" ${invReminderSetting.day==i?'selected':''}>${d}</option>`).join('')}
@@ -1399,7 +1545,7 @@ async function renderSettings(gen) {
     <div id="pl-assign-drop" ondragover="fcDragOver(event,'pl-assign-drop')" ondragleave="fcDragLeave('pl-assign-drop')" ondrop="fcDrop(event,'pl-assign-file','pl-assign-drop','pl-assign-name')"
       style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
       onclick="document.getElementById('pl-assign-file').click()">
-      <div style="font-size:24px;margin-bottom:6px">📄</div>
+      <div style="font-size:24px;margin-bottom:6px"></div>
       <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
       <div id="pl-assign-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
     </div>
@@ -1431,8 +1577,8 @@ async function renderSettings(gen) {
     <div class="card"><div class="card-title">Print QR codes in bulk</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Every item's QR code is permanent — it never changes, so reprinting a lost or damaged sticker is exactly the same as printing it the first time. New items you add automatically show up here too, no need to come back for a new batch.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('supply')">🖨️ Print All SupplyCentral QR Codes</button>
-      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('hk')">🖨️ Print All Housekeeping Supply QR Codes</button>
+      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('supply')">Print All SupplyCentral QR Codes</button>
+      <button class="btn btn-primary btn-sm" onclick="printAllQRCodes('hk')">Print All Housekeeping Supply QR Codes</button>
     </div>
     <div id="qr-bulk-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
@@ -1442,14 +1588,14 @@ async function renderSettings(gen) {
     <label>Print for one home</label>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
       <select id="bag-qr-home-sel" style="flex:1;min-width:200px">${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select>
-      <button class="btn btn-primary btn-sm" onclick="printBagQRCodes(document.getElementById('bag-qr-home-sel').value)">🖨️ Print This Home's Labels</button>
+      <button class="btn btn-primary btn-sm" onclick="printBagQRCodes(document.getElementById('bag-qr-home-sel').value)">Print This Home's Labels</button>
     </div>
     <div style="margin-top:10px">
-      <button class="btn btn-ghost btn-sm" onclick="printBagQRCodes(null)">🖨️ Print ALL Bag Labels (every home)</button>
+      <button class="btn btn-ghost btn-sm" onclick="printBagQRCodes(null)">Print ALL Bag Labels (every home)</button>
     </div>
     <div id="bag-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
-  html += `<div class="card"><div class="card-title">🖨️ Print perforated business cards (Avery 5390)</div>
+  html += `<div class="card"><div class="card-title">Print perforated business cards (Avery 5390)</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Front: QR code + bag ID + home name, same as above. Back: just the home name, large and easy to read, for the perforated 2.25" x 3.5" name badge insert sheets that slide into bag tag holders.</p>
     <p style="font-size:12px;color:var(--coral-dark);margin-bottom:10px"><strong>First time using this:</strong> print just one test sheet on a scrap sheet of plain paper for both Front and Back before running actual cardstock — the exact margins are a best estimate since Avery doesn't publish precise numbers for this product, and it's much cheaper to catch a small offset on paper than on 400 real inserts.</p>
     <label>Print for one home</label>
@@ -1469,7 +1615,7 @@ async function renderSettings(gen) {
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
     <div class="card"><div class="card-title">Print loaner QR labels</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the item ID directly into the Scan Item field in LoanerCentral. Good for labeling all 24 loaner items or replacing a lost/damaged label.</p>
-    <button class="btn btn-primary btn-sm" onclick="printLoanerQRCodes()">🖨️ Print All Loaner Item Labels</button>
+    <button class="btn btn-primary btn-sm" onclick="printLoanerQRCodes()">Print All Loaner Item Labels</button>
     <div id="loaner-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Warehouse Days Off</h2></div>
@@ -1601,7 +1747,7 @@ async function printAllQRCodes(kind) {
     win.document.write(`<html><head><title>${label} QR Codes</title><style>body{font-family:sans-serif;text-align:center;padding:20px}</style></head><body><h2>${label} — QR Codes (${withQR.length})</h2>${cards}<script>window.onload=()=>window.print()<\/script></body></html>`);
     win.document.close();
     msg.style.color = 'var(--teal)';
-    msg.textContent = missing.length ? `Opened print view for ${withQR.length} items. ⚠️ ${missing.length} item(s) have no QR code yet — probably added before this feature existed. Edit and re-save them to generate one.` : `Opened print view for ${withQR.length} items.`;
+    msg.textContent = missing.length ? `Opened print view for ${withQR.length} items. ${missing.length} item(s) have no QR code yet — probably added before this feature existed. Edit and re-save them to generate one.` : `Opened print view for ${withQR.length} items.`;
   } catch (e) {
     msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the QR codes — please try again.';
   }
@@ -1764,7 +1910,7 @@ async function renderLoanerScan(gen) {
   document.getElementById('main-content').innerHTML = `
     <div class="card"><div class="card-title">Session mode</div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'var(--gold)':''};border-color:${loanerScanState.mode==='out'?'var(--gold)':''}" onclick="setLoanerMode('out')">Checking out</button>
+        <button class="btn ${loanerScanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1;background:${loanerScanState.mode==='out'?'var(--amber)':''};border-color:${loanerScanState.mode==='out'?'var(--amber)':''}" onclick="setLoanerMode('out')">Checking out</button>
         <button class="btn ${loanerScanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setLoanerMode('in')">Checking in</button>
       </div>
       <div id="loaner-home-row" style="${loanerScanState.mode==='out'?'':'display:none'}">
@@ -1774,7 +1920,7 @@ async function renderLoanerScan(gen) {
       <label>Scan loaner item tag</label>
       <div style="display:flex;gap:8px;align-items:flex-start">
         <input type="text" id="loaner-scan-input" placeholder="Scan or type item ID..." autocomplete="off" autocapitalize="characters" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')processLoanerScan()" style="flex:1" />
-        <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('loaner-scan-input','processLoanerScan')">📷 Camera</button>
+        <button class="btn btn-ghost" style="white-space:nowrap" onclick="openCameraScan('loaner-scan-input','processLoanerScan')">Camera</button>
       </div>
       <div style="font-size:12px;color:var(--gray-400);margin-top:4px;margin-bottom:10px">Scanner auto-submits · or press Enter after typing · or tap Camera to use your phone</div>
     </div>
@@ -1838,13 +1984,13 @@ async function renderSupplyScan(gen) {
   const catFilter = `<select id="supply-cat-filter" onchange="renderSupplyCards()" style="margin-bottom:12px"><option value="">All categories</option>${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>`;
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">🧰 SupplyCentral</div>
+      <div style="font-size:15px;font-weight:600">SupplyCentral</div>
       ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddSupplyModal()">+ Add Item</button>`:''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="st-inventory" onclick="supplySubtab('inventory')">Inventory</button>
       <button class="subtab" id="st-log" onclick="supplySubtab('log')">Activity Log</button>
-      <button class="subtab" id="st-lowstock" onclick="supplySubtab('lowstock')">⚠️ Low Stock</button>
+      <button class="subtab" id="st-lowstock" onclick="supplySubtab('lowstock')">Low Stock</button>
     </div>
     <div id="sv-inventory">${catFilter}<div id="supply-cards" class="supply-grid"></div></div>
     <div id="sv-log" style="display:none"><div id="supply-log-table"></div></div>
@@ -1879,9 +2025,9 @@ function renderSupplyCards() {
       <div class="supply-unit">${item.unit}</div>
       <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions">
-        <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">📤 Take</button>
-        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showSupplyQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})">✏️</button>`:''}
+        <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')">Take</button>
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">Restock</button>
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showSupplyQR(${item.id})"></button><button class="btn btn-ghost" onclick="showEditSupplyModal(${item.id})"></button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1891,14 +2037,14 @@ function renderLowStockCards() {
   const low = _supplies.filter(s=>s.quantity<=s.low_stock_threshold);
   const grid = document.getElementById('supply-lowstock-cards');
   if (!grid) return;
-  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">All items are well stocked!</div>'; return; }
   grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
     <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
     <div class="supply-cat">${item.category}</div>
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
-    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">📥 Restock</button></div>
+    <div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')">Restock</button></div>
   </div>`).join('');
 }
 
@@ -1910,7 +2056,7 @@ async function loadSupplyLog() {
   if (!rows.length) { el.innerHTML='<div class="empty">No transactions yet</div>'; return; }
   el.innerHTML = `<div class="card" style="padding:0.75rem 1.25rem">` + rows.map(r=>{
     const isOut=r.action==='take';
-    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'📤 Took':'📥 Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
+    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'Took':'Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
   }).join('') + '</div>';
 }
 
@@ -1961,7 +2107,7 @@ function showSupplyTxModal(supplyId, action) {
   const item = _supplies.find(s=>s.id===supplyId); if(!item)return;
   document.getElementById('tx-supply-id').value = supplyId;
   document.getElementById('tx-action').value = action;
-  document.getElementById('tx-modal-title').textContent = action==='take'?'📤 Take Supplies':'📥 Restock Supplies';
+  document.getElementById('tx-modal-title').textContent = action==='take'?'Take Supplies':'Restock Supplies';
   document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
   document.getElementById('tx-qty').value = 1;
   document.getElementById('tx-notes').value = '';
@@ -2007,11 +2153,11 @@ async function submitSupplyTx() {
   if (target === 'hk') {
     const itemName = _hkSupplies.find(s=>s.id==supplyId)?.name||'Item';
     await loadHKSupplies(); renderHKCards();
-    if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+    if (data.alert_sent) alert(`Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
   } else {
     const itemName = _supplies.find(s=>s.id==supplyId)?.name||'Item';
     await loadSupplies(); renderSupplyCards();
-    if (data.alert_sent) alert(`✅ Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
+    if (data.alert_sent) alert(`Done! Note: ${itemName} is now low stock — an email alert has been sent to accounting.`);
   }
 }
 
@@ -2048,18 +2194,18 @@ async function renderInventoryCount(gen) {
       }).join('') + '</div>';
   }
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📋 InventoryCentral</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">InventoryCentral</div>
     <div class="card">
       <div class="card-title">Start new count</div>
       <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Select which areas to count, then scan each item and enter the quantity you physically find.</p>
       <label style="margin-bottom:8px">Areas to count</label>
       <div id="count-area-loaners" class="count-area-card selected" onclick="toggleCountArea('loaners')">
         <input type="checkbox" checked id="chk-loaners">
-        <div><div style="font-size:14px;font-weight:600">📦 Loaner items</div><div style="font-size:12px;color:var(--gray-400)">Scan each item to confirm it's physically present</div></div>
+        <div><div style="font-size:14px;font-weight:600">Loaner items</div><div style="font-size:12px;color:var(--gray-400)">Scan each item to confirm it's physically present</div></div>
       </div>
       <div id="count-area-supplies" class="count-area-card selected" onclick="toggleCountArea('supplies')">
         <input type="checkbox" checked id="chk-supplies">
-        <div><div style="font-size:14px;font-weight:600">🧰 Supplies</div><div style="font-size:12px;color:var(--gray-400)">Scan item QR, enter quantity on shelf</div></div>
+        <div><div style="font-size:14px;font-weight:600">Supplies</div><div style="font-size:12px;color:var(--gray-400)">Scan item QR, enter quantity on shelf</div></div>
       </div>
       <div style="margin-top:1rem"><button class="btn btn-primary btn-full" onclick="startCount()">Begin count</button></div>
     </div>
@@ -2114,9 +2260,9 @@ function renderCountInProgress() {
       </div>
     </div>`;
   }
-  const countTitle = _countReturnTarget === 'amenities_inventory' ? '📋 Amenities Count — Count in progress'
-    : _countReturnTarget === 'store' ? '📋 Store Count — Count in progress'
-    : '📋 InventoryCentral — Count in progress';
+  const countTitle = _countReturnTarget === 'amenities_inventory' ? 'Amenities Count — Count in progress'
+    : _countReturnTarget === 'store' ? 'Store Count — Count in progress'
+    : 'InventoryCentral — Count in progress';
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">${countTitle}</div>
@@ -2129,8 +2275,8 @@ function renderCountInProgress() {
         <label style="margin-bottom:4px">Quick scan — scan a QR code to jump to that item</label>
         <input type="text" id="count-scan-input" placeholder="Scan QR code here..." autocomplete="off" autocapitalize="off" onkeydown="if(event.key==='Enter')processCountScan()" style="margin-bottom:0">
       </div>` : ''}`;
-  if (loanerItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px">📦 Loaner Items</div>`; html += loanerItems.map(itemRow).join(''); }
-  if (supplyItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px">🧰 Supplies</div>`; html += supplyItems.map(itemRow).join(''); }
+  if (loanerItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px">Loaner Items</div>`; html += loanerItems.map(itemRow).join(''); }
+  if (supplyItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px">Supplies</div>`; html += supplyItems.map(itemRow).join(''); }
   html += `<div style="display:flex;gap:8px;margin-top:1.25rem"><button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button><button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button></div></div>`;
   document.getElementById('main-content').innerHTML = html;
   document.getElementById('count-scan-input')?.focus();
@@ -2241,8 +2387,8 @@ function renderCountReport(data) {
   const overs = v.filter(x=>x.diff>0);
   let html = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
-      <div style="font-size:15px;font-weight:600">📋 Count Report — ${data.started_at}${data.performed_by?` <span style="font-size:12px;color:var(--gray-400);font-weight:400">by ${data.performed_by}</span>`:''}</div>
-      <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})">📧 Email to accounting</button>
+      <div style="font-size:15px;font-weight:600">Count Report — ${data.started_at}${data.performed_by?` <span style="font-size:12px;color:var(--gray-400);font-weight:400">by ${data.performed_by}</span>`:''}</div>
+      <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})">Email to accounting</button>
     </div>
     <div class="report-stat-grid">
       <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)"><div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div></div>
@@ -2251,7 +2397,7 @@ function renderCountReport(data) {
       <div class="report-stat" style="background:var(--amber-light)"><div class="rnum" style="color:var(--amber)">${overs.length}</div><div class="rlbl" style="color:var(--amber)">Over count</div></div>
     </div>`;
   if (v.length) {
-    html += `<div class="card"><div class="card-title" style="color:var(--coral-dark)">⚠️ Variances (${v.length})</div>`;
+    html += `<div class="card"><div class="card-title" style="color:var(--coral-dark)">Variances (${v.length})</div>`;
     v.forEach(item => {
       const isShort = item.diff<0||item.counted==='Missing'; const isOver = item.diff>0;
       let detail = '';
@@ -2261,7 +2407,7 @@ function renderCountReport(data) {
     });
     html += '</div>';
   } else {
-    html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:15px;font-weight:600;color: var(--green-dark)">Perfect count — no variances!</div></div>`;
+    html += `<div class="card" style="text-align:center;padding:2rem"><div style="font-size:32px;margin-bottom:8px"></div><div style="font-size:15px;font-weight:600;color: var(--green-dark)">Perfect count — no variances!</div></div>`;
   }
   html += `<div class="card"><div class="card-title">Full count detail</div>`;
   (data.items || []).forEach(item => {
@@ -2293,7 +2439,7 @@ async function viewPastCount(countId, returnTarget) {
 async function emailCountReport(countId) {
   const res = await fetch(`/api/inventory-counts/${countId}/email`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin}) });
   const data = await res.json();
-  if (data.success) alert('✅ Report emailed to accounting!');
+  if (data.success) alert('Report emailed to accounting!');
   else alert('Email sent (check server logs if not received — SMTP setup required).');
 }
 
@@ -2333,8 +2479,8 @@ let _hkBucket = null; // 'Amenities' | 'Cleaning Supplies' — set by whichever 
 let _hkAutoOpenCount = false; // set by the Wednesday dashboard task to jump straight to the Count subtab
 let _hkAutoOpenLowStock = false; // set by dashboard links to jump straight to the Low Stock subtab
 
-async function renderAmenitiesInventory(gen) { _hkBucket = 'Amenities'; await renderHKSupplyShared(gen, '🧴 Amenities Inventory'); }
-async function renderCleaningInventory(gen) { _hkBucket = 'Cleaning Supplies'; await renderHKSupplyShared(gen, '🧽 Cleaning Supplies Inventory'); }
+async function renderAmenitiesInventory(gen) { _hkBucket = 'Amenities'; await renderHKSupplyShared(gen, 'Amenities Inventory'); }
+async function renderCleaningInventory(gen) { _hkBucket = 'Cleaning Supplies'; await renderHKSupplyShared(gen, 'Cleaning Supplies Inventory'); }
 
 async function renderHKSupplyShared(gen, title) {
   await loadHKSupplies();
@@ -2348,17 +2494,17 @@ async function renderHKSupplyShared(gen, title) {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
       <div style="font-size:15px;font-weight:600">${title}</div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="openFlagLowStockModal()">🚩 Flag Low Stock</button>
+        <button class="btn btn-ghost btn-sm" onclick="openFlagLowStockModal()">Flag Low Stock</button>
         ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="showAddHKModal()">+ Add Item</button>`:''}
       </div>
     </div>
-    ${_hkBucket === 'Amenities' ? `<div class="card" style="background:var(--green-light);border-color:var(--green);margin-bottom:1rem"><div style="font-size:13px;color:var(--green-dark)">📦 When counting, include both full, unopened boxes <strong>and</strong> opened/partial boxes in your total.</div></div>` : ''}
+    ${_hkBucket === 'Amenities' ? `<div class="card" style="background:var(--green-light);border-color:var(--green);margin-bottom:1rem"><div style="font-size:13px;color:var(--green-dark)">When counting, include both full, unopened boxes <strong>and</strong> opened/partial boxes in your total.</div></div>` : ''}
     <div class="subtab-bar">
       <button class="subtab active" id="hkt-inventory" onclick="hkSubtab('inventory')">Inventory</button>
       <button class="subtab" id="hkt-log" onclick="hkSubtab('log')">Activity Log</button>
-      <button class="subtab" id="hkt-lowstock" onclick="hkSubtab('lowstock')">⚠️ Low Stock</button>
-      ${showStoreSubtab ? `<button class="subtab" id="hkt-store" onclick="hkSubtab('store')">🏪 SBR Store</button>` : ''}
-      ${showCountSubtab ? `<button class="subtab" id="hkt-count" onclick="hkSubtab('count')">📋 Count</button>` : ''}
+      <button class="subtab" id="hkt-lowstock" onclick="hkSubtab('lowstock')">Low Stock</button>
+      ${showStoreSubtab ? `<button class="subtab" id="hkt-store" onclick="hkSubtab('store')">SBR Store</button>` : ''}
+      ${showCountSubtab ? `<button class="subtab" id="hkt-count" onclick="hkSubtab('count')">Count</button>` : ''}
     </div>
     <div id="hkv-inventory">${catFilter}<div id="hk-cards" class="supply-grid"></div></div>
     <div id="hkv-log" style="display:none"><div id="hk-log-table"></div></div>
@@ -2366,9 +2512,9 @@ async function renderHKSupplyShared(gen, title) {
     ${showStoreSubtab ? `<div id="hkv-store" style="display:none">
       <div class="subtab-bar">
         <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
-        <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
+        <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">Active Loans</button>
         <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
-        <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">📋 Count</button>
+        <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">Count</button>
         ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
       </div>
       <div id="store-body"></div>
@@ -2446,9 +2592,9 @@ function renderHKCards() {
       <div class="supply-unit">${item.unit}</div>
       <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions">
-        ${_hkBucket !== 'Amenities' ? `<button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">📤 Take</button>
-        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button>` : ''}
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})">🔲</button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})">✏️</button>`:''}
+        ${_hkBucket !== 'Amenities' ? `<button class="btn btn-danger" onclick="showHKTxModal(${item.id},'take')">Take</button>
+        <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">Restock</button>` : ''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost" onclick="showHKQR(${item.id})"></button><button class="btn btn-ghost" onclick="showEditHKModal(${item.id})"></button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -2458,14 +2604,14 @@ function renderHKLowStockCards() {
   const low = _hkSupplies.filter(s=>s.bucket === _hkBucket && s.quantity<=s.low_stock_threshold);
   const grid = document.getElementById('hk-lowstock-cards');
   if (!grid) return;
-  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">✅ All items are well stocked!</div>'; return; }
+  if (!low.length) { grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2rem;color: var(--green-dark);font-weight:600">All items are well stocked!</div>'; return; }
   grid.innerHTML = low.map(item=>`<div class="supply-card low-stock">
     <div class="supply-card-top"><div class="supply-name">${item.name}</div><span class="badge badge-out" style="font-size:10px">LOW</span></div>
     <div class="supply-cat">${item.category}</div>
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-threshold">Threshold: ${item.low_stock_threshold}</div>
-    ${_hkBucket !== 'Amenities' ? `<div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">📥 Restock</button></div>` : ''}
+    ${_hkBucket !== 'Amenities' ? `<div class="supply-actions"><button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="showHKTxModal(${item.id},'restock')">Restock</button></div>` : ''}
   </div>`).join('');
 }
 
@@ -2477,7 +2623,7 @@ async function loadHKLog() {
   if (!rows.length) { el.innerHTML='<div class="empty">No transactions yet</div>'; return; }
   el.innerHTML = `<div class="card" style="padding:0.75rem 1.25rem">` + rows.map(r=>{
     const isOut=r.action==='take';
-    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'📤 Took':'📥 Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
+    return `<div class="row"><div class="row-main"><div class="row-title"><span class="badge ${isOut?'badge-out':'badge-in'}" style="margin-right:6px">${isOut?'Took':'Restocked'}</span>${r.item_name}</div><div class="row-sub">${r.timestamp} · ${r.performed_by} · ${r.quantity} ${r.unit} · ${r.quantity_after} left</div></div></div>`;
   }).join('') + '</div>';
 }
 
@@ -2512,7 +2658,7 @@ function showHKTxModal(supplyId, action) {
   const item = _hkSupplies.find(s=>s.id===supplyId); if(!item)return;
   document.getElementById('tx-supply-id').value = supplyId;
   document.getElementById('tx-action').value = action;
-  document.getElementById('tx-modal-title').textContent = action==='take'?'📤 Take Supplies':'📥 Restock Supplies';
+  document.getElementById('tx-modal-title').textContent = action==='take'?'Take Supplies':'Restock Supplies';
   document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} ${item.unit} in stock`;
   document.getElementById('tx-qty').value = 1;
   document.getElementById('tx-notes').value = '';
@@ -2544,19 +2690,19 @@ async function renderOrders() {
   let moduleToggle = '';
   if (canSeeHK && canSeeMaint) {
     moduleToggle = `<div style="display:flex;gap:8px;margin-bottom:1rem">
-      <button class="btn ${_ordersModuleFilter==='housekeeping'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('housekeeping')">🧴 Housekeeping</button>
-      <button class="btn ${_ordersModuleFilter==='maintenance'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('maintenance')">🧰 Maintenance</button>
+      <button class="btn ${_ordersModuleFilter==='housekeeping'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('housekeeping')">Housekeeping</button>
+      <button class="btn ${_ordersModuleFilter==='maintenance'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setOrdersModule('maintenance')">Maintenance</button>
     </div>`;
   }
 
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📦 OrdersCentral</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">OrdersCentral</div>
     ${moduleToggle}
     <div class="subtab-bar">
       <button class="subtab ${_ordersViewMode==='pending'?'active':''}" id="ord-t-pending" onclick="ordersSubtab('pending')">⏳ Pending</button>
       <button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>
       <button class="subtab ${_ordersViewMode==='history'?'active':''}" id="ord-t-history" onclick="ordersSubtab('history')">History</button>
-      <button class="subtab ${_ordersViewMode==='discrepancies'?'active':''}" id="ord-t-discrepancies" onclick="ordersSubtab('discrepancies')">⚠️ Discrepancies</button>
+      <button class="subtab ${_ordersViewMode==='discrepancies'?'active':''}" id="ord-t-discrepancies" onclick="ordersSubtab('discrepancies')">Discrepancies</button>
     </div>
     <div id="orders-body"></div>`;
   ordersSubtab(_ordersViewMode);
@@ -2596,8 +2742,8 @@ async function renderPendingOrders() {
       </div>
       ${o.items.map(it=>`<div style="font-size:13px;padding:4px 0;color:var(--gray-700)">${it.item_name} — expecting <strong>${it.expected_units} ${it.unit_label}</strong> (${it.cases_ordered} case${it.cases_ordered!=1?'s':''} × ${it.units_per_case})</div>`).join('')}
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn btn-primary" style="flex:1" onclick="openReceiveModal(${o.id})">✅ Receive This Order</button>
-        <button class="btn btn-danger btn-sm" onclick="cancelOrder(${o.id})" title="Cancel order">🗑️</button>
+        <button class="btn btn-primary" style="flex:1" onclick="openReceiveModal(${o.id})">Receive This Order</button>
+        <button class="btn btn-danger btn-sm" onclick="cancelOrder(${o.id})" title="Cancel order"></button>
       </div>
     </div>`;
   }).join('');
@@ -2653,9 +2799,9 @@ async function submitReceiveOrder(orderId) {
   if (data.error) { alert(data.error); return; }
   document.getElementById('modal-receive-order')?.remove();
   if (data.has_discrepancy) {
-    alert("⚠️ Order received, but some quantities didn't match what was expected. This has been flagged for review.");
+    alert("Order received, but some quantities didn't match what was expected. This has been flagged for review.");
   } else {
-    alert('✅ Order received! Inventory has been updated.');
+    alert('Order received! Inventory has been updated.');
   }
   renderPendingOrders();
 }
@@ -2679,7 +2825,7 @@ async function renderPlaceOrderForm() {
       <div id="receipt-drop" ondragover="rcptDragOver(event)" ondragleave="rcptDragLeave(event)" ondrop="rcptDrop(event)"
         style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.25rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:1rem"
         onclick="document.getElementById('receipt-file').click()">
-        <div style="font-size:22px;margin-bottom:4px">🧾</div>
+        <div style="font-size:22px;margin-bottom:4px"></div>
         <div style="font-size:13px;color:var(--gray-400)">Drop a receipt or packing slip photo here, or <span style="color:var(--teal);font-weight:600">click to browse</span> — I'll fill in the items below</div>
       </div>
       <input type="file" id="receipt-file" accept="image/*,application/pdf" style="display:none" onchange="handleReceiptFile(this.files[0])">
@@ -2710,7 +2856,7 @@ function rcptDrop(e) {
 async function handleReceiptFile(file) {
   if (!file) return;
   const msg = document.getElementById('receipt-msg');
-  msg.textContent = '🧾 Reading receipt...'; msg.style.color = 'var(--gray-400)';
+  msg.textContent = 'Reading receipt...'; msg.style.color = 'var(--gray-400)';
   const formData = new FormData();
   formData.append('file', file);
   try {
@@ -2728,7 +2874,7 @@ async function handleReceiptFile(file) {
       msg.textContent = `✓ Pulled ${data.items.length} item(s) from the receipt — please double-check them below before placing the order.`;
       msg.style.color = 'var(--teal-dark)';
     } else {
-      msg.textContent = '⚠ Could not find any line items on that receipt — please enter them manually.';
+      msg.textContent = 'Could not find any line items on that receipt — please enter them manually.';
       msg.style.color = 'var(--coral-dark)';
     }
   } catch (e) {
@@ -2841,7 +2987,7 @@ async function submitPlaceOrder() {
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
 
-  document.getElementById('place-order-msg').textContent = '✅ Order placed! It will show under Pending until received.';
+  document.getElementById('place-order-msg').textContent = 'Order placed! It will show under Pending until received.';
   _placeOrderItems = [];
   document.getElementById('po-vendor').value = '';
   document.getElementById('po-order-notes').value = '';
@@ -2861,10 +3007,10 @@ async function renderOrderHistory() {
     return `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div style="font-size:14px;font-weight:600">${o.vendor || 'Order'} #${o.id}</div>
-        <span class="badge ${o.status==='Received'?(o.has_discrepancy?'badge-warn':'badge-ok'):'badge-warn'}">${o.status}${o.has_discrepancy?' ⚠️':''}</span>
+        <span class="badge ${o.status==='Received'?(o.has_discrepancy?'badge-warn':'badge-ok'):'badge-warn'}">${o.status}${o.has_discrepancy?' ':''}</span>
       </div>
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:8px">Ordered by ${o.ordered_by} · ${date}${recvDate?` · Received ${recvDate} by ${o.received_by}`:''}</div>
-      ${o.items.map(it=>`<div style="font-size:12px;padding:2px 0;color:var(--gray-700)">${it.item_name} — ${it.expected_units} ${it.unit_label} expected${it.received_units!=null?`, ${it.received_units} received`:''}${it.line_discrepancy?' <strong style="color:var(--coral-dark)">⚠ mismatch</strong>':''}${it.receive_notes?` <em style="color:var(--gray-400)">(${it.receive_notes})</em>`:''}</div>`).join('')}
+      ${o.items.map(it=>`<div style="font-size:12px;padding:2px 0;color:var(--gray-700)">${it.item_name} — ${it.expected_units} ${it.unit_label} expected${it.received_units!=null?`, ${it.received_units} received`:''}${it.line_discrepancy?' <strong style="color:var(--coral-dark)">mismatch</strong>':''}${it.receive_notes?` <em style="color:var(--gray-400)">(${it.receive_notes})</em>`:''}</div>`).join('')}
     </div>`;
   }).join('');
 }
@@ -2877,7 +3023,7 @@ async function renderDiscrepancies() {
   const orders = await fetch(`/api/orders?module=${_ordersModuleFilter}`).then(r=>r.json());
   const withDiscrepancy = orders.filter(o => o.has_discrepancy);
   if (!withDiscrepancy.length) {
-    body.innerHTML = '<div class="empty">✅ No discrepancies — everything has matched so far.</div>';
+    body.innerHTML = '<div class="empty">No discrepancies — everything has matched so far.</div>';
     return;
   }
   body.innerHTML = withDiscrepancy.map(o => {
@@ -2916,14 +3062,14 @@ async function renderStore(gen) {
   if (_stale(gen)) return;
   document.getElementById('main-content').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-      <div style="font-size:15px;font-weight:600">🏪 StoreCentral</div>
+      <div style="font-size:15px;font-weight:600">StoreCentral</div>
       ${userRoles.includes('admin') ? `<button class="btn btn-primary btn-sm" onclick="showAddStoreItemModal()">+ Add Item</button>` : ''}
     </div>
     <div class="subtab-bar">
       <button class="subtab active" id="st-t-inventory" onclick="storeSubtab('inventory')">Inventory</button>
-      <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">📤 Active Loans</button>
+      <button class="subtab" id="st-t-loans" onclick="storeSubtab('loans')">Active Loans</button>
       <button class="subtab" id="st-t-log" onclick="storeSubtab('log')">History</button>
-      <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">📋 Count</button>
+      <button class="subtab" id="st-t-count" onclick="storeSubtab('count')">Count</button>
     </div>
     <div id="store-body"></div>`;
   storeSubtab('inventory');
@@ -3005,8 +3151,8 @@ function renderStoreCards() {
       ${item.price ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">$${parseFloat(item.price).toFixed(2)} each</div>` : ''}
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
-        <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color: var(--green-dark)" onclick="showStoreRestockModal(${item.id})">📥 Restock</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})">✏️</button>`:''}
+        <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color: var(--green-dark)" onclick="showStoreRestockModal(${item.id})">Restock</button>
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})"></button>`:''}
       </div>
     </div>`).join('');
 }
@@ -3015,7 +3161,7 @@ function showStoreRestockModal(itemId) {
   const item = _storeItems.find(i=>i.id===itemId); if(!item)return;
   document.getElementById('tx-supply-id').value = itemId;
   document.getElementById('tx-action').value = 'restock';
-  document.getElementById('tx-modal-title').textContent = '📥 Restock Store Item';
+  document.getElementById('tx-modal-title').textContent = 'Restock Store Item';
   document.getElementById('tx-item-info').textContent = `${item.name} — currently ${item.quantity} in stock`;
   document.getElementById('tx-qty').value = 1;
   document.getElementById('tx-notes').value = '';
@@ -3054,8 +3200,8 @@ async function showStoreCheckoutModal(itemId) {
 
     <label style="margin-top:0.75rem">Type</label>
     <div style="display:flex;gap:8px;margin-top:4px">
-      <button class="btn btn-primary" id="co-type-loan" onclick="setCheckoutType('loan')" style="flex:1">📤 On Loan</button>
-      <button class="btn btn-ghost" id="co-type-sold" onclick="setCheckoutType('sold_out')" style="flex:1">💰 Sold Out</button>
+      <button class="btn btn-primary" id="co-type-loan" onclick="setCheckoutType('loan')" style="flex:1">On Loan</button>
+      <button class="btn btn-ghost" id="co-type-sold" onclick="setCheckoutType('sold_out')" style="flex:1">Sold Out</button>
     </div>
 
     <div id="co-return-date-row" style="margin-top:0.75rem">
@@ -3112,9 +3258,9 @@ async function submitStoreCheckout(itemId) {
     if (data.error) { alert(data.error); btn.textContent='Confirm Checkout'; btn.disabled=false; return; }
     document.getElementById('modal-store-checkout')?.remove();
     if (_checkoutType === 'sold_out') {
-      alert('✅ Checked out as sold out. Accounting has been notified by email.');
+      alert('Checked out as sold out. Accounting has been notified by email.');
     } else {
-      alert(`✅ Checked out on loan. Expected return: ${returnDate}`);
+      alert(`Checked out on loan. Expected return: ${returnDate}`);
     }
     const storeRes = await fetch('/api/store/items');
     _storeItems = await storeRes.json();
@@ -3140,13 +3286,13 @@ async function renderActiveLoans() {
     return `<div class="card" style="${overdue?'border-color:var(--coral);border-width:1.5px':''}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div style="font-size:14px;font-weight:600">${loan.item_name}</div>
-        ${overdue ? '<span class="badge badge-out">⚠️ Overdue</span>' : '<span class="badge badge-warn">On Loan</span>'}
+        ${overdue ? '<span class="badge badge-out">Overdue</span>' : '<span class="badge badge-warn">On Loan</span>'}
       </div>
-      <div style="font-size:12px;color:var(--gray-700);margin-bottom:2px">📍 ${loan.property_address}</div>
+      <div style="font-size:12px;color:var(--gray-700);margin-bottom:2px">${loan.property_address}</div>
       <div style="font-size:12px;color:var(--gray-400);margin-bottom:2px">Qty: ${loan.quantity} · Out by: ${loan.performed_by}</div>
       <div style="font-size:12px;color:${overdue?'var(--coral-dark)':'var(--gray-400)'}">Return by: ${loan.expected_return_date || 'not set'}</div>
       ${loan.notes ? `<div style="font-size:11px;color:var(--gray-400);margin-top:4px;font-style:italic">${loan.notes}</div>` : ''}
-      <button class="btn btn-primary btn-sm btn-full" style="margin-top:10px" onclick="returnLoanItem(${loan.id}, '${loan.item_name.replace(/'/g,"\\'")}')">✅ Mark Returned</button>
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:10px" onclick="returnLoanItem(${loan.id}, '${loan.item_name.replace(/'/g,"\\'")}')">Mark Returned</button>
     </div>`;
   }).join('');
 }
@@ -3159,7 +3305,7 @@ async function returnLoanItem(txId, itemName) {
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
-  alert('✅ Item marked as returned. Inventory updated.');
+  alert('Item marked as returned. Inventory updated.');
   const storeRes = await fetch('/api/store/items');
   _storeItems = await storeRes.json();
   renderActiveLoans();
@@ -3178,7 +3324,7 @@ async function renderStoreLog() {
     return `<div class="row">
       <div class="row-main">
         <div class="row-title">
-          <span class="badge ${isSold?'badge-out':'badge-warn'}" style="margin-right:6px">${isSold?'💰 Sold Out':'📤 Loan'}</span>
+          <span class="badge ${isSold?'badge-out':'badge-warn'}" style="margin-right:6px">${isSold?'Sold Out':'Loan'}</span>
           ${tx.item_name}${isReturned?' <span style="color: var(--green-dark);font-size:11px">✓ Returned</span>':''}
         </div>
         <div class="row-sub">${tx.timestamp} · ${tx.performed_by} · qty ${tx.quantity} · ${tx.property_address}${tx.price&&isSold?` · $${(parseFloat(tx.price)*tx.quantity).toFixed(2)}`:''}</div>
@@ -3250,12 +3396,12 @@ async function saveStoreItem(itemId) {
 
 async function renderForecast() {
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">🔮 ForecastCentral</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">ForecastCentral</div>
     <div id="forecast-status-area"></div>
     <div class="subtab-bar">
-      <button class="subtab active" id="fct-run" onclick="forecastSubtab('run')">📊 Run Forecast</button>
-      <button class="subtab" id="fct-boxes" onclick="forecastSubtab('boxes')">📦 Box Packing</button>
-      <button class="subtab" id="fct-upload" onclick="forecastSubtab('upload')">📁 Upload Data</button>
+      <button class="subtab active" id="fct-run" onclick="forecastSubtab('run')">Run Forecast</button>
+      <button class="subtab" id="fct-boxes" onclick="forecastSubtab('boxes')">Box Packing</button>
+      <button class="subtab" id="fct-upload" onclick="forecastSubtab('upload')">Upload Data</button>
     </div>
     <div id="forecast-body"></div>`;
   await loadForecastStatus();
@@ -3272,14 +3418,14 @@ async function loadForecastStatus() {
         <div class="card" style="padding:0.875rem;${hasPackList?'border-color:var(--teal)':'border-color:var(--coral)'}">
           <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:4px">Pack List</div>
           <div style="font-size:14px;font-weight:600;color:${hasPackList?'var(--teal-dark)':'var(--coral-dark)'}">
-            ${hasPackList ? `✓ ${s.pack_list_count} properties loaded` : '⚠️ Not loaded'}
+            ${hasPackList ? `✓ ${s.pack_list_count} properties loaded` : 'Not loaded'}
           </div>
           ${hasPackList && s.pack_list_updated ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">Updated ${new Date(s.pack_list_updated).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>` : ''}
         </div>
         <div class="card" style="padding:0.875rem;${hasReservations?'border-color:var(--teal)':'border-color:var(--coral)'}">
           <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:4px">Reservations</div>
           <div style="font-size:14px;font-weight:600;color:${hasReservations?'var(--teal-dark)':'var(--coral-dark)'}">
-            ${hasReservations ? `✓ ${s.reservation_count} reservations loaded` : '⚠️ Not loaded'}
+            ${hasReservations ? `✓ ${s.reservation_count} reservations loaded` : 'Not loaded'}
           </div>
           ${hasReservations && s.date_range ? `<div style="font-size:11px;color:var(--gray-400);margin-top:2px">${s.date_range}</div>` : ''}
         </div>
@@ -3388,8 +3534,8 @@ function renderForecastResults(data, from, to) {
   if (shortfalls.length) {
     html += `<div class="card" style="border-color:var(--coral);border-width:1.5px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
-        <div class="card-title" style="margin-bottom:0;color:var(--coral-dark)">⚠️ Items to Order (${shortfalls.length})</div>
-        ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+        <div class="card-title" style="margin-bottom:0;color:var(--coral-dark)">Items to Order (${shortfalls.length})</div>
+        ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" onclick="emailSarahForecast('${from||''}','${to||''}')">Email Sarah</button>`:''}
       </div>`;
     html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--gray-400)">
@@ -3411,10 +3557,10 @@ function renderForecastResults(data, from, to) {
     html += `</table></div></div>`;
   } else {
     html += `<div class="card" style="border-color:var(--teal);text-align:center;padding:1.5rem">
-      <div style="font-size:32px;margin-bottom:8px">✅</div>
+      <div style="font-size:32px;margin-bottom:8px"></div>
       <div style="font-size:15px;font-weight:600;color:var(--teal-dark)">All items sufficiently stocked!</div>
       <div style="font-size:13px;color:var(--gray-400);margin-top:4px">Current inventory covers all ${data.reservation_count} upcoming reservations.</div>
-      ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="emailSarahForecast('${from||''}','${to||''}')">📧 Email Sarah</button>`:''}
+      ${userRoles.includes('admin')?`<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="emailSarahForecast('${from||''}','${to||''}')">Email Sarah</button>`:''}
     </div>`;
   }
 
@@ -3444,7 +3590,7 @@ function renderForecastResults(data, from, to) {
 
   if (data.properties_unmatched && data.properties_unmatched.length) {
     html += `<div class="card" style="margin-top:1rem;border-color:var(--amber)">
-      <div class="card-title" style="color:var(--amber)">⚠️ Properties in reservations with no pack list match (${data.properties_unmatched.length})</div>
+      <div class="card-title" style="color:var(--amber)">Properties in reservations with no pack list match (${data.properties_unmatched.length})</div>
       ${data.properties_unmatched.map(p=>`<div style="font-size:12px;color:var(--gray-700);padding:2px 0">${p}</div>`).join('')}
       <div style="font-size:11px;color:var(--gray-400);margin-top:8px">These properties were excluded from the forecast. Upload an updated pack list to include them.</div>
     </div>`;
@@ -3464,13 +3610,13 @@ async function emailSarahForecast(from, to) {
     const data = await res.json();
     if (data.email_sent) {
       btn.textContent = '✓ Sent!';
-      setTimeout(() => { btn.textContent = '📧 Email Sarah'; btn.disabled = false; }, 3000);
+      setTimeout(() => { btn.textContent = 'Email Sarah'; btn.disabled = false; }, 3000);
     } else {
       alert('Email failed to send — check Railway logs.');
-      btn.textContent = '📧 Email Sarah'; btn.disabled = false;
+      btn.textContent = 'Email Sarah'; btn.disabled = false;
     }
   } catch(e) {
-    alert('Connection error.'); btn.textContent = '📧 Email Sarah'; btn.disabled = false;
+    alert('Connection error.'); btn.textContent = 'Email Sarah'; btn.disabled = false;
   }
 }
 
@@ -3484,7 +3630,7 @@ function renderForecastUpload() {
       <div id="fc-packlist-drop" ondragover="fcDragOver(event,'fc-packlist-drop')" ondragleave="fcDragLeave('fc-packlist-drop')" ondrop="fcDrop(event,'fc-packlist-file','fc-packlist-drop','fc-packlist-name')"
         style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
         onclick="document.getElementById('fc-packlist-file').click()">
-        <div style="font-size:24px;margin-bottom:6px">📄</div>
+        <div style="font-size:24px;margin-bottom:6px"></div>
         <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
         <div id="fc-packlist-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
       </div>
@@ -3498,7 +3644,7 @@ function renderForecastUpload() {
       <div id="fc-res-drop" ondragover="fcDragOver(event,'fc-res-drop')" ondragleave="fcDragLeave('fc-res-drop')" ondrop="fcDrop(event,'fc-res-file','fc-res-drop','fc-res-name')"
         style="border:2px dashed var(--gray-200);border-radius:var(--radius);padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s;margin-bottom:10px"
         onclick="document.getElementById('fc-res-file').click()">
-        <div style="font-size:24px;margin-bottom:6px">📅</div>
+        <div style="font-size:24px;margin-bottom:6px"></div>
         <div style="font-size:13px;color:var(--gray-400)">Drag & drop your CSV here, or <span style="color:var(--teal);font-weight:600">click to browse</span></div>
         <div id="fc-res-name" style="font-size:12px;color:var(--teal-dark);margin-top:6px;font-weight:600"></div>
       </div>
@@ -3600,13 +3746,13 @@ async function renderBoxPacking() {
 
         ${data.bottleneck && shortfall > 0 ? `
         <div style="background:var(--amber-light);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:1rem">
-          <div style="font-size:13px;font-weight:600;color:var(--amber)">⚠️ Bottleneck: ${data.bottleneck}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--amber)">Bottleneck: ${data.bottleneck}</div>
           <div style="font-size:12px;color:var(--amber);margin-top:2px">This item is limiting how many boxes you can pack. Order more to unlock capacity.</div>
         </div>` : ''}
 
         ${data.can_pack >= data.boxes_needed ? `
         <div style="background:var(--green-light);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:1rem">
-          <div style="font-size:13px;font-weight:600;color: var(--green-dark)">✅ You have enough supplies to pack all ${data.boxes_needed} boxes needed!</div>
+          <div style="font-size:13px;font-weight:600;color: var(--green-dark)">You have enough supplies to pack all ${data.boxes_needed} boxes needed!</div>
         </div>` : ''}
       </div>
 
@@ -3624,7 +3770,7 @@ async function renderBoxPacking() {
             </tr>
             ${data.ingredients.map(ing => `
             <tr style="${ing.is_bottleneck ? 'background:var(--amber-light)' : ''}">
-              <td style="padding:8px 0;border-bottom:0.5px solid var(--gray-100);font-weight:${ing.is_bottleneck ? '700' : '500'}">${ing.item}${ing.is_bottleneck ? ' ⚠️' : ''}</td>
+              <td style="padding:8px 0;border-bottom:0.5px solid var(--gray-100);font-weight:${ing.is_bottleneck ? '700' : '500'}">${ing.item}${ing.is_bottleneck ? ' ' : ''}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.per_box}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.needed_total}</td>
               <td style="padding:8px;border-bottom:0.5px solid var(--gray-100);text-align:center">${ing.in_stock}</td>
@@ -3701,7 +3847,7 @@ function triggerPackCelebration(dateLabel) {
   canvas.width = window.innerWidth; canvas.height = window.innerHeight;
   document.body.appendChild(canvas);
   const ctx = canvas.getContext('2d');
-  const colors = ['#C79A3F', '#AE5330', '#5A6E78', '#E4CD97', '#8A6423', '#F3EFE6'];
+  const colors = ['#89BBBE', '#B4553A', '#8A6A2F', '#3A4E5D', '#CBBEAF', '#F6EAE5'];
   const particles = [];
   const bursts = [
     { x: canvas.width * 0.25, y: canvas.height * 0.35 },
@@ -3724,8 +3870,8 @@ function triggerPackCelebration(dateLabel) {
   });
 
   const msg = document.createElement('div');
-  msg.textContent = `🎉 All packed for ${dateLabel}! 🎉`;
-  msg.style.cssText = 'position:fixed;top:20%;left:50%;transform:translate(-50%,-50%);font-family:var(--font-serif);font-size:22px;font-weight:600;color:var(--teal-dark);background:white;padding:14px 24px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:10000;pointer-events:none;opacity:0;transition:opacity 0.3s;';
+  msg.textContent = `All packed for ${dateLabel}!`;
+  msg.style.cssText = 'position:fixed;top:20%;left:50%;transform:translate(-50%,-50%);font-family:var(--font-display);font-size:22px;font-weight:600;color:var(--teal-dark);background:white;padding:14px 24px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:10000;pointer-events:none;opacity:0;transition:opacity 0.3s;';
   document.body.appendChild(msg);
   requestAnimationFrame(() => { msg.style.opacity = '1'; });
 
@@ -3901,7 +4047,7 @@ function bundlesDayRow(d, isMissed) {
     <div class="row-main">
       <div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div>
       <div class="row-sub">${d.properties_counted} propert${d.properties_counted===1?'y':'ies'} · ${d.towel_bags_needed} towel bag${d.towel_bags_needed!==1?'s':''} · ${d.king_bundles_needed}K · ${d.queen_bundles_needed}Q · ${d.twin_bundles_needed}T · ${d.queen_sleeper_needed} Q-sleeper · ${d.twin_sleeper_needed} T-sleeper · ${d.amenity_boxes_needed} amenity box${d.amenity_boxes_needed!==1?'es':''}
-      ${d.missing_formula.length ? `<br><span style="color:var(--coral-dark)">⚠️ ${d.missing_formula.length} not counted — no packing formula on file</span>` : ''}</div>
+      ${d.missing_formula.length ? `<br><span style="color:var(--coral-dark)">${d.missing_formula.length} not counted — no packing formula on file</span>` : ''}</div>
     </div>
   </div>`;
 }
@@ -3919,20 +4065,20 @@ function renderBundlesBody(data) {
 
   const rangeLabel = _bundlesDays === 7 ? 'Week' : _bundlesDays === 14 ? '2 Weeks' : _bundlesDays === 30 ? 'Month' : `${_bundlesDays} days`;
   let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
-      <div style="font-weight:600;font-size:14px;margin-right:auto">🧺 Bundles Needed — by day, in pickup order</div>
+      <div style="font-weight:600;font-size:14px;margin-right:auto">Bundles Needed — by day, in pickup order</div>
       <button class="btn ${_bundlesDays===5?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(5)">5 days</button>
       <button class="btn ${_bundlesDays===7?'btn-primary':'btn-ghost'} btn-sm" onclick="setBundlesDays(7)">7 days</button>
     </div>
     <div class="card">
       <div class="card-title">Total for the next ${rangeLabel} (includes anything missed)</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600;color:var(--teal)">${totalTowelBags}</div><div class="row-sub">Towel bags</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600">${totalKing}</div><div class="row-sub">King bundles</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600">${totalQueen}</div><div class="row-sub">Queen bundles</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600">${totalTwin}</div><div class="row-sub">Twin bundles</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600">${totalQueenSleeper}</div><div class="row-sub">Queen sleeper sets</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600">${totalTwinSleeper}</div><div class="row-sub">Twin sleeper sets</div></div>
-        <div style="text-align:center"><div style="font-family:var(--font-serif);font-size:32px;font-weight:600;color:var(--teal)">${totalAmenityBoxes}</div><div class="row-sub">Amenity boxes</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--teal)">${totalTowelBags}</div><div class="row-sub">Towel bags</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600">${totalKing}</div><div class="row-sub">King bundles</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600">${totalQueen}</div><div class="row-sub">Queen bundles</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600">${totalTwin}</div><div class="row-sub">Twin bundles</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600">${totalQueenSleeper}</div><div class="row-sub">Queen sleeper sets</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600">${totalTwinSleeper}</div><div class="row-sub">Twin sleeper sets</div></div>
+        <div style="text-align:center"><div style="font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--teal)">${totalAmenityBoxes}</div><div class="row-sub">Amenity boxes</div></div>
       </div>
     </div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Each row shows what to make for that specific day — missed days always show first, since those need attention now.</p>
@@ -3963,12 +4109,12 @@ async function renderBundlesNeeded(gen) {
 function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
 
 function paceCard(label, packed, needed, pct, onclickAction) {
-  const color = pct >= 90 ? 'var(--teal)' : pct >= 60 ? 'var(--gold)' : 'var(--coral-dark)';
+  const color = pct >= 90 ? 'var(--teal)' : pct >= 60 ? 'var(--amber)' : 'var(--coral-dark)';
   const clickAttrs = onclickAction ? `style="cursor:pointer" onclick="${onclickAction}"` : '';
   return `<div class="card" ${clickAttrs}>
     <div class="card-title">${label}${onclickAction ? ' <span style="font-size:11px;color:var(--gray-400);font-weight:400">tap for details</span>' : ''}</div>
     <div style="display:flex;align-items:baseline;gap:8px;margin:4px 0">
-      <div style="font-family:var(--font-serif);font-size:32px;font-weight:600;color:${color}">${packed}</div>
+      <div style="font-family:var(--font-display);font-size:32px;font-weight:600;color:${color}">${packed}</div>
       <div style="font-size:16px;color:var(--gray-400)">/ ${needed} needed</div>
     </div>
     <div style="background:var(--gray-100);border-radius:6px;height:8px;overflow:hidden">
@@ -3981,7 +4127,7 @@ function paceCard(label, packed, needed, pct, onclickAction) {
 function metricCard(label, value, isWarning, onclickAction) {
   const clickAttrs = onclickAction ? `style="text-align:center;padding:14px;cursor:pointer" onclick="${onclickAction}"` : 'style="text-align:center;padding:14px"';
   return `<div class="card" ${clickAttrs}>
-    <div style="font-family:var(--font-serif);font-size:28px;font-weight:600;${isWarning && value > 0 ? 'color:var(--coral-dark)' : ''}">${value}</div>
+    <div style="font-family:var(--font-display);font-size:28px;font-weight:600;${isWarning && value > 0 ? 'color:var(--coral-dark)' : ''}">${value}</div>
     <div class="row-sub">${label}${onclickAction ? ' →' : ''}</div>
   </div>`;
 }
@@ -3991,7 +4137,7 @@ function renderGoalsHtml(goals) {
   if (!goals) return html;
   if (goals.missed_yesterday && goals.missed_yesterday.length) {
     html += `<div class="card" style="margin-bottom:1rem;background:var(--coral-light);border-color:var(--coral)">
-      <div class="card-title" style="color:var(--coral-dark)">⚠️ Missed from yesterday (${goals.missed_yesterday.length})</div>
+      <div class="card-title" style="color:var(--coral-dark)">Missed from yesterday (${goals.missed_yesterday.length})</div>
       <div class="row-sub" style="margin-bottom:6px">These never got checked off — tap once done, or if it's no longer relevant.</div>
       ${goals.missed_yesterday.map(m => `<div onclick="toggleGoalTask('${m.task_key}','${m.log_date}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5"><span style="flex-shrink:0">⬜</span><span>${m.text}</span></div>`).join('')}
     </div>`;
@@ -4003,11 +4149,11 @@ function renderGoalsHtml(goals) {
     const taskRow = (key, text) => {
       const done = completions[key];
       return `<div onclick="toggleGoalTask('${key}')" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5;${done ? 'color:var(--gray-400);text-decoration:line-through' : ''}">
-        <span style="flex-shrink:0">${done ? '✅' : '⬜'}</span><span>${text}${done ? ` <span style="font-size:11px;text-decoration:none">(${done})</span>` : ''}</span>
+        <span style="flex-shrink:0">${done ? '' : '⬜'}</span><span>${text}${done ? ` <span style="font-size:11px;text-decoration:none">(${done})</span>` : ''}</span>
       </div>`;
     };
     html += `<div class="card" style="margin-bottom:1rem;background:var(--teal-light);border-color:var(--teal-mid)">
-      <div class="card-title" style="color:var(--teal-dark)">🎯 ${DAY_NAMES[g.day_of_week]}'s Focus</div>
+      <div class="card-title" style="color:var(--teal-dark)">${DAY_NAMES[g.day_of_week]}'s Focus</div>
       <div style="font-size:15px;font-weight:600;margin-bottom:10px">${g.primary_focus}</div>
       <div style="margin-bottom:10px">
         ${taskList.map((t, i) => taskRow(`day-${g.day_of_week}-${i}`, t)).join('')}
@@ -4022,7 +4168,7 @@ function renderGoalsHtml(goals) {
   const onetimeTasks = goals.onetime_tasks || [];
   if (onetimeTasks.length || canAddOnetime) {
     html += `<div class="card" style="margin-bottom:1rem">
-      <div class="card-title">📌 One-Time Tasks</div>
+      <div class="card-title">One-Time Tasks</div>
       ${onetimeTasks.length ? `<div style="margin-bottom:${canAddOnetime ? '10px' : '0'}">
         ${onetimeTasks.map(t => `<div onclick="resolveOnetimeTask(${t.id})" style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;cursor:pointer;font-size:13px;line-height:1.5">
           <span style="flex-shrink:0">⬜</span><span>${t.task_text} <span style="font-size:11px;color:var(--gray-400)">— added by ${t.added_by}</span></span>
@@ -4044,8 +4190,8 @@ function renderDashboardSharedHtml(data) {
   let html = renderGoalsHtml(data.goals);
   if (data.pending_count_review) {
     const pc = data.pending_count_review;
-    html += `<div style="background:var(--amber-light);border:0.5px solid #DCC079;border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewPastCount(${pc.id},currentTab)">
-      <div style="font-size:28px">🔔</div>
+    html += `<div style="background:var(--amber-light);border:0.5px solid var(--amber);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="viewPastCount(${pc.id},currentTab)">
+      <div style="font-size:28px"></div>
       <div>
         <div style="font-size:15px;font-weight:500;color:var(--amber)">Amenities count ready to review</div>
         <div style="font-size:12px;color:var(--amber)">Completed ${pc.started_at}${pc.performed_by ? ' by ' + pc.performed_by : ''} · ${pc.item_count} items · ${pc.variances} variance${pc.variances!==1?'s':''} — tap to view</div>
@@ -4074,7 +4220,7 @@ function renderDashboardSharedHtml(data) {
   html += `</div>`;
 
   html += `<div class="card" style="margin-top:1rem">
-    <div class="card-title">📦 Laundry Bins & Amenity Boxes</div>
+    <div class="card-title">Laundry Bins & Amenity Boxes</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:8px">
       ${metricCard('Ready to go now', data.amenity_box_stock, false, "showTab('daily_tasks')")}
       ${metricCard('Bins received today', data.daily_task_today.bins_received, false, "showTab('daily_tasks')")}
@@ -4084,7 +4230,7 @@ function renderDashboardSharedHtml(data) {
     <div class="row-sub">This week: ${data.daily_task_week.bins_received} bins received · ${data.daily_task_week.bins_unpacked} unpacked · ${data.daily_task_week.boxes_assembled} boxes assembled</div>
   </div>`;
   html += `<div class="card" style="margin-top:1rem">
-    <div class="card-title">📝 Notes for Next Shift</div>
+    <div class="card-title">Notes for Next Shift</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Leave something for whoever's on next — clears once someone marks it done.</p>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <input type="text" id="shift-note-input" placeholder="e.g. Running low on king sheet sets, ordered more" style="flex:1">
@@ -4198,11 +4344,11 @@ async function renderDailyTasks(gen) {
   let html = renderGoalsHtml(goals);
   html += `
     <div class="card" style="margin-bottom:1rem;text-align:center">
-      <div class="card-title">📦 Amenity Boxes Ready to Go</div>
+      <div class="card-title">Amenity Boxes Ready to Go</div>
       <div style="font-size:40px;font-weight:700;color:var(--teal)">${data.amenity_box_stock}</div>
       <div class="row-sub">Goes up when you log boxes assembled below, goes down automatically as properties get packed</div>
       <div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--gray-200);font-size:14px;font-weight:600;color:${boxesShort > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)'}">
-        ${boxesShort > 0 ? `⚠️ ${boxesShort} short of the 5-day forecast (${boxesNeeded5Day} needed)` : `✓ Covers the 5-day forecast (${boxesNeeded5Day} needed)`}
+        ${boxesShort > 0 ? `${boxesShort} short of the 5-day forecast (${boxesNeeded5Day} needed)` : `✓ Covers the 5-day forecast (${boxesNeeded5Day} needed)`}
       </div>
     </div>
     <div class="card" style="margin-bottom:1rem">
@@ -4316,7 +4462,7 @@ function showPropertyDetail(address, packDate) {
   const f = p.formula;
   let dateLine = p.pack_date ? formatDueDate(p.pack_date, p.packed) : '';
   let body = `<div style="text-align:center;margin-bottom:1rem">
-    <div style="font-family:var(--font-serif);font-size:25px;font-weight:600">${p.property_name}</div>
+    <div style="font-family:var(--font-display);font-size:25px;font-weight:600">${p.property_name}</div>
     ${dateLine}
   </div>`;
   if (f) {
@@ -4335,7 +4481,7 @@ function showPropertyDetail(address, packDate) {
       ${f.twin_sleeper ? box(f.twin_sleeper, 'Twin sleeper sets') : ''}
       ${f.amenity_boxes ? box(f.amenity_boxes, 'Amenity boxes') : ''}
     </div>`;
-    if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px">✏️ Edit formula</a></div>`;
+    if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px">Edit formula</a></div>`;
   } else {
     body += `<div class="card" style="text-align:center;color:var(--coral-dark);font-size:16px;margin-bottom:1.25rem">No packing formula on file for this property${userRoles.includes('admin') ? `<br><a href="#" onclick="closePropertyDetail();openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`;
   }
@@ -4348,7 +4494,7 @@ function showPropertyDetail(address, packDate) {
     if (p.assigned_cleaner_name) body += `<div class="row-sub" style="text-align:center;margin-bottom:10px">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>`;
     else if (p.assigned_raw) body += `<div class="row-sub" style="text-align:center;color:var(--coral-dark);margin-bottom:10px">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>`;
     body += `<button class="btn btn-primary btn-full" style="font-size:18px;padding:16px" onclick="closePropertyDetail();openPackModal('${address}','${packDate}')">✓ Mark Packed</button>
-      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${address}','${packDate}')">⚠ Flag</button>`;
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${address}','${packDate}')">Flag</button>`;
   }
   document.getElementById('property-detail-body').innerHTML = body;
   document.getElementById('modal-property-detail').style.display = 'flex';
@@ -4365,7 +4511,7 @@ function packCard(p, showDate) {
     dateLine = formatDueDate(p.pack_date, p.packed);
   }
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
-    ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">⚡ Last-minute add</div>' : ''}
+    ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px">Last-minute add</div>' : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
       <div style="cursor:pointer" onclick="showPropertyDetail('${p.address}','${p.pack_date}')">
         <div style="font-weight:600;font-size:14px">${p.property_name} <span style="font-size:11px;color:var(--gray-400);font-weight:400">tap to enlarge</span></div>
@@ -4377,7 +4523,7 @@ function packCard(p, showDate) {
           ? `<div class="badge badge-ok">✓ Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><button class="btn btn-ghost btn-sm" style="margin-top:4px" onclick="undoPack('${p.address}','${p.pack_date}')">Undo</button>`
           : `${p.assigned_cleaner_name ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : p.assigned_raw ? `<div class="row-sub" style="color:var(--coral-dark)">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>` : ''}
              <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}','${p.pack_date}')">✓ Mark packed</button>
-             <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px">⚠ Flag</button>`}
+             <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px">Flag</button>`}
       </div>
     </div>
   </div>`;
@@ -4403,7 +4549,7 @@ function renderPackListBody(invTask, shortages) {
   let html = '';
   if (shortages && shortages.length) {
     html += `<div class="card" style="background:var(--coral-light);border-color:var(--coral)">
-      <div class="card-title" style="color:var(--coral-dark)">📦 Packed Bag Short (${shortages.length})</div>
+      <div class="card-title" style="color:var(--coral-dark)">Packed Bag Short (${shortages.length})</div>
       <div class="row-sub" style="margin-bottom:8px">These bags went out missing something — top them off when the bag returns, then check it off.</div>
       ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + s.pack_date : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})">✓ Now Complete</button></div>`).join('')}
     </div>`;
@@ -4412,7 +4558,7 @@ function renderPackListBody(invTask, shortages) {
     html += `<div class="card" style="background:var(--green-light);border-color:var(--green)">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
         <div>
-          <div class="card-title" style="color:var(--green-dark);margin-bottom:2px">📋 This week's task: Inventory Count</div>
+          <div class="card-title" style="color:var(--green-dark);margin-bottom:2px">This week's task: Inventory Count</div>
           <div class="row-sub">It's ${invTask.task_day_name} — run this week's count to clear this.</div>
         </div>
         <button class="btn btn-primary" style="background:var(--green);color:var(--green-dark)" onclick="_hkAutoOpenCount=true;showTab('amenities_inventory')">Go to Amenities Inventory →</button>
@@ -4420,8 +4566,8 @@ function renderPackListBody(invTask, shortages) {
     </div>`;
   }
   if (unacked.length) {
-    html += `<div class="card" style="background:var(--amber-light);border-color:#DCC079">
-      <div class="card-title" style="color:var(--amber)">⚡ Last-minute additions</div>
+    html += `<div class="card" style="background:var(--amber-light);border-color:var(--amber)">
+      <div class="card-title" style="color:var(--amber)">Last-minute additions</div>
       ${unacked.map(p => `<div class="row"><div class="row-main"><div class="row-title">${p.property_name}</div>${formatDueDate(p.pack_date, p.packed)}<div class="row-sub">Added by ${p.emergency_added_by} · ${p.emergency_added_at}${p.emergency_notes ? ' · ' + p.emergency_notes : ''}</div></div><button class="btn btn-primary btn-sm" onclick="ackEmergency(${p.emergency_id})">Acknowledged</button></div>`).join('')}
     </div>`;
   }
@@ -4429,7 +4575,7 @@ function renderPackListBody(invTask, shortages) {
   if (wk.missed.length) {
     const missedPacked = wk.missed.filter(p => p.packed).length;
     html += `<div class="card" style="background:var(--coral-light);border-color:var(--coral)">
-      <div class="card-title" style="color:var(--coral-dark)">🚨 Missed — pack these first (${wk.missed.length - missedPacked} still needed)</div>
+      <div class="card-title" style="color:var(--coral-dark)">Missed — pack these first (${wk.missed.length - missedPacked} still needed)</div>
       <div id="pl-missed-cards"></div>
     </div>`;
   }
@@ -4708,14 +4854,14 @@ async function renderPackEmergency(gen) {
   if (_stale(gen)) return;
   document.getElementById('main-content').innerHTML = `
     <div class="card">
-      <div class="card-title">⚡ Add last-minute property</div>
+      <div class="card-title">Add last-minute property</div>
       <label>Date</label><input type="date" id="pe-date" value="${packListState.date}" onchange="packListState.date=this.value;showTab('pack_emergency')">
       <label>Property name</label><input id="pe-address" placeholder="Must match a home name exactly">
       <label>Notes for Kim &amp; April</label><input id="pe-notes" placeholder="Optional">
-      <button class="btn btn-danger" style="width:100%;margin-top:10px" onclick="submitPackEmergency()">⚡ Send alert</button>
+      <button class="btn btn-danger" style="width:100%;margin-top:10px" onclick="submitPackEmergency()">Send alert</button>
     </div>
     <div class="card"><div class="card-title">This date's adds (${rows.length})</div>
-    ${rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title">⚡ ${r.address}</div><div class="row-sub">${r.added_by} · ${r.added_at}${r.notes ? ' · ' + r.notes : ''} · Acked: ${r.acked_by.length ? r.acked_by.join(', ') : 'Pending'}</div></div></div>`).join('') : '<div class="empty">No last-minute adds for this date.</div>'}
+    ${rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title">${r.address}</div><div class="row-sub">${r.added_by} · ${r.added_at}${r.notes ? ' · ' + r.notes : ''} · Acked: ${r.acked_by.length ? r.acked_by.join(', ') : 'Pending'}</div></div></div>`).join('') : '<div class="empty">No last-minute adds for this date.</div>'}
     </div>`;
 }
 async function submitPackEmergency() {
@@ -4745,7 +4891,7 @@ async function uploadCleanerAssignments() {
     if (data.error) { msg.textContent = '✗ ' + data.error; msg.style.color = 'var(--coral-dark)'; return; }
     let parts = [`✓ ${data.matched}/${data.total_rows} matched to a cleaner.`];
     if (data.unassigned) parts.push(`${data.unassigned} row(s) don't have a cleaner assigned in Breezeway yet — nothing to do, just re-upload once they're scheduled.`);
-    if (data.unmatched.length) parts.push(`⚠ ${data.unmatched.length} row(s) have a name that didn't match any cleaner: ` + data.unmatched.map(u => `${u.address} (${u.date}): "${u.raw_assignee}"`).join(', '));
+    if (data.unmatched.length) parts.push(`${data.unmatched.length} row(s) have a name that didn't match any cleaner: ` + data.unmatched.map(u => `${u.address} (${u.date}): "${u.raw_assignee}"`).join(', '));
     msg.innerHTML = parts.join('<br>');
     msg.style.color = data.unmatched.length ? 'var(--coral-dark)' : 'var(--teal-dark)';
   } catch (e) {
@@ -4785,11 +4931,11 @@ async function checkPackFormulaMatches() {
     if (!data.unmatched_formula_count) {
       parts.push(`✓ All ${data.formula_total} formula entries match a home on file.`);
     } else {
-      parts.push(`⚠ ${data.unmatched_formula_count} of ${data.formula_total} formula entries don't match any home:<br>` +
+      parts.push(`${data.unmatched_formula_count} of ${data.formula_total} formula entries don't match any home:<br>` +
         data.unmatched_formula.map(u => `• ${u.property_name} <span style="color:var(--gray-400)">(${u.address})</span>`).join('<br>'));
     }
     if (data.homes_missing_formula_count) {
-      parts.push(`<br>⚠ ${data.homes_missing_formula_count} home(s) have no packing formula yet:<br>` +
+      parts.push(`<br>${data.homes_missing_formula_count} home(s) have no packing formula yet:<br>` +
         data.homes_missing_formula.map(h => `• ${h.name}`).join('<br>'));
     }
     msg.innerHTML = parts.join('<br><br>');
@@ -4820,7 +4966,7 @@ function renderManageFormulasList() {
     html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
   }
   html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
-  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">✏️ Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')">Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
   el.innerHTML = html;
 }
 
@@ -4929,7 +5075,7 @@ async function submitPOPreLogin() {
     const successBanner = document.createElement('div');
     successBanner.id = 'po-success-banner';
     successBanner.style.cssText = 'background:var(--teal-light);border:0.5px solid var(--teal-mid);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:1rem;text-align:center;font-size:13px;color:var(--teal-dark);font-weight:600';
-    successBanner.textContent = '✅ Request submitted! You can submit another below.';
+    successBanner.textContent = 'Request submitted! You can submit another below.';
     btn.parentNode.insertBefore(successBanner, btn.parentNode.firstChild);
     setTimeout(() => { const b = document.getElementById('po-success-banner'); if(b) b.remove(); }, 6000);
     // Reset form fields
@@ -4947,7 +5093,7 @@ async function submitPOPreLogin() {
 async function renderPORequest() {
   const catOpts = PO_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
-    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">📝 POCentral</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem">POCentral</div>
     <div class="card">
       <div class="card-title">Submit a new purchase request</div>
       <div class="form-row">
@@ -4999,9 +5145,9 @@ async function renderPORequest() {
 <option value="VRBO Renewals">VRBO Renewals</option></select>
       <label>Urgency</label>
       <select id="po-urgency">
-        <option value="Routine">📋 Routine</option>
-        <option value="At Risk">⚠️ At Risk</option>
-        <option value="Unstayable">🚨 Unstayable</option>
+        <option value="Routine">Routine</option>
+        <option value="At Risk">At Risk</option>
+        <option value="Unstayable">Unstayable</option>
       </select>
       <label>Date needed by</label>
       <input type="date" id="po-date">
@@ -5021,7 +5167,7 @@ async function submitPOFromTab() {
     const res = await fetch('/api/po-requests', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(fields) });
     const data = await res.json();
     if (data.error) { alert('Error: ' + data.error); btn.textContent='Submit Request'; btn.disabled=false; return; }
-    document.getElementById('po-tab-msg').innerHTML = '✅ Request submitted! The approvers have been notified. You can submit another request below.';
+    document.getElementById('po-tab-msg').innerHTML = 'Request submitted! The approvers have been notified. You can submit another request below.';
     ['po-name','po-email','po-vendor','po-amount','po-description','po-date'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     document.getElementById('po-category').value='';
     document.getElementById('po-urgency').value='Routine';
@@ -5040,7 +5186,7 @@ let _pinsVisible = false;
 async function togglePinsVisible() {
   _pinsVisible = !_pinsVisible;
   const btn = document.getElementById('toggle-pins-btn');
-  if (btn) btn.textContent = _pinsVisible ? '🙈 Hide PINs' : '👁️ Show PINs';
+  if (btn) btn.textContent = _pinsVisible ? 'Hide PINs' : 'Show PINs';
   loadStaffList();
 }
 
@@ -5052,7 +5198,7 @@ async function loadStaffList() {
   if (_pinsVisible) {
     const res = await fetch('/api/staff/reveal', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin}) });
     const data = await res.json();
-    if (data.error) { alert(data.error); _pinsVisible = false; const btn=document.getElementById('toggle-pins-btn'); if(btn) btn.textContent='👁️ Show PINs'; staff = await fetch('/api/staff').then(r=>r.json()); }
+    if (data.error) { alert(data.error); _pinsVisible = false; const btn=document.getElementById('toggle-pins-btn'); if(btn) btn.textContent='Show PINs'; staff = await fetch('/api/staff').then(r=>r.json()); }
     else { staff = data; }
   } else {
     staff = await fetch('/api/staff').then(r=>r.json());
@@ -5194,9 +5340,9 @@ async function seedStaffMembers() {
   const btn=event.target; btn.textContent='Resetting...'; btn.disabled=true;
   const res=await fetch('/api/seed-staff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:_currentPin})});
   const data=await res.json();
-  if(data.error){alert(data.error);btn.textContent='🔄 Reset to Master List';btn.disabled=false;return;}
+  if(data.error){alert(data.error);btn.textContent='Reset to Master List';btn.disabled=false;return;}
   document.getElementById('seed-staff-msg').textContent=`✓ ${data.inserted} staff members loaded.`;
-  btn.textContent='🔄 Reset to Master List';btn.disabled=false;
+  btn.textContent='Reset to Master List';btn.disabled=false;
   loadStaffList();
 }
 
