@@ -1882,9 +1882,13 @@ def parse_receipt():
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():
-    """Place a new order. Expects: module, ordered_by, vendor, notes, items[]
+    """Place a new order. Admin-only — everyone else can view/receive orders
+    but only Admin actually places them.
+    Expects: pin, module, ordered_by, vendor, notes, items[]
     Each item: item_name, matched_supply_id (optional), cases_ordered, units_per_case, unit_label, price (optional)"""
     data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Only Admin can place orders'}), 403
     module = data.get('module')
     if module not in ('housekeeping', 'maintenance'):
         return jsonify({'error':'module must be housekeeping or maintenance'}), 400
