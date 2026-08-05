@@ -2077,7 +2077,7 @@ def run_breezeway_sync():
         result['errors'].append(f'auth failed: {e}')
         return result
 
- def background_breezeway_loop():
+def background_breezeway_loop():
     """Runs the full Breezeway sync on a fixed interval, forever, same
     pattern as the existing background_overdue_loop."""
     while True:
