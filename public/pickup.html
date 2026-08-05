@@ -57,7 +57,6 @@
   .topbar-logo-img { height: 38px; width: auto; object-fit: contain; }
   .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
   .cleaner-greeting { font-family: var(--font-display); font-size: 22px; font-weight: 500; color: var(--teal-dark); text-align: center; padding: 6px 4px 16px; text-wrap: pretty; word-break: break-word; }
-  .cleaner-greeting .wave { font-size: 20px; }
   .cleaner-greeting span#cleaner-name-display { color: var(--teal); font-style: italic; }
   .topbar-btn { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--coral-dark); background: none; border: none; cursor: pointer; padding: 6px 8px; font-family: var(--font); white-space: nowrap; }
   .content { padding: 1.25rem; max-width: 520px; margin: 0 auto; }
@@ -156,7 +155,7 @@
     </div>
   </div>
   <div class="content">
-    <div class="cleaner-greeting"><span class="wave">👋</span> <span id="cleaner-name-display">Cleaner</span></div>
+    <div class="cleaner-greeting"><span id="cleaner-name-display">Cleaner</span></div>
     <div id="wrong-bag-area"></div>
     <div id="all-done-area"></div>
     <div class="scan-box">
@@ -389,7 +388,7 @@ async function loadStagedBags() {
 
 async function loadBagsOut() {
   try {
-    const r = await fetch(`/api/cleaner/${_cleaner.id}/bags-out`);
+    const r = await fetch(`/api/cleaner/${_cleaner.id}/out-bags`);
     _bagsOut = await r.json();
     renderBagsOutList();
   } catch(e) {
