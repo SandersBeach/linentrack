@@ -1954,7 +1954,7 @@ def sync_breezeway_properties(token):
             skipped_inactive += 1
             continue
         pid = p.get('id') or p.get('property_id')
-        address = p.get('address1') or p.get('address') or p.get('name') or ''
+        address = (p.get('address1') or p.get('address') or p.get('name') or '').lower()
         name = p.get('name') or p.get('property_name') or address
         if not pid or not address:
             continue
@@ -2027,6 +2027,7 @@ def sync_breezeway_cleaner_assignments(token):
 
     cur2 = conn.cursor()
     now = now_central()
+    cur2.execute("DELETE FROM pack_cleaner_assignments WHERE assignment_date BETWEEN %s AND %s", (today_dt.isoformat(), window_end.isoformat()))
     count = 0
     errors = []
     for prop in properties:
