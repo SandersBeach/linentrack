@@ -824,16 +824,92 @@ def get_homes():
 
 @app.route('/api/homes', methods=['POST'])
 def add_home():
+    """Create a home. Optionally also creates its initial bag tags and its
+    packing formula in the same step, so a new property doesn't need three
+    separate trips through Settings to be fully set up. Both are optional —
+    a bare name+code still works exactly as before."""
     data=request.json or {}; name=data.get('name','').strip(); code=data.get('code','').strip().upper()
     if not name or not code: return jsonify({'error':'Name and code required'}),400
+
+    try:
+        tag_count = int(data.get('tag_count') or 0)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Tag count must be a number'}), 400
+    if tag_count < 0 or tag_count > 100:
+        return jsonify({'error': 'Tag count must be between 0 and 100'}), 400
+
     conn=get_db(); cur=conn.cursor()
     try:
-        cur.execute('INSERT INTO homes (name,code) VALUES (%s,%s)',(name,code))
-        conn.commit(); cur.close(); conn.close()
-        log_audit('Homes', 'Added home', code, resolve_performer(data), name)
-        return jsonify({'success':True})
+        cur.execute('INSERT INTO homes (name,code) VALUES (%s,%s) RETURNING id',(name,code))
+        home_id = cur.fetchone()[0]
     except psycopg2.errors.UniqueViolation:
         conn.rollback(); cur.close(); conn.close(); return jsonify({'error':'Home already exists'}),409
+
+    created_bags = []
+    for n in range(1, tag_count + 1):
+        bag_id = f'{code}-{n}'
+        cur.execute("INSERT INTO bags (id,home_id,status) VALUES (%s,%s,'in') ON CONFLICT (id) DO NOTHING", (bag_id, home_id))
+        created_bags.append(bag_id)
+
+    formula_fields = ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')
+    formula_given = any(k in data for k in formula_fields)
+    if formula_given:
+        fields = {}
+        for k in formula_fields:
+            try: fields[k] = int(data.get(k, 0) or 0)
+            except (TypeError, ValueError): fields[k] = 0
+        ts = now_central()
+        cur.execute("""
+            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,updated_at)
+            VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,%(ts)s)
+            ON CONFLICT (address) DO UPDATE SET
+                property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
+                twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
+                mats=EXCLUDED.mats, pool=EXCLUDED.pool, queen_sleeper=EXCLUDED.queen_sleeper,
+                twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes, updated_at=EXCLUDED.updated_at
+        """, {'address': name.lower().strip(), 'property_name': name, 'ts': ts, **fields})
+
+    conn.commit(); cur.close(); conn.close()
+    detail = name
+    if created_bags: detail += f' — {len(created_bags)} bag tag(s) created'
+    if formula_given: detail += ' — packing formula set'
+    log_audit('Homes', 'Added home', code, resolve_performer(data), detail)
+    return jsonify({'success':True, 'bags_created': len(created_bags), 'formula_set': formula_given})
+
+@app.route('/api/homes/five-plus-bedroom-list', methods=['GET'])
+def get_five_plus_bedroom_list():
+    """The raw 5+ bedroom property list, for the Add Home form to
+    auto-suggest 15 tags instead of 10 as someone types a matching name."""
+    return jsonify(sorted(_FIVE_PLUS_BEDROOM_HOMES))
+
+@app.route('/api/homes/tag-count-audit', methods=['GET'])
+def tag_count_audit():
+    """Compares every home's actual registered bag count against its
+    expected minimum (15 for the 5+ bedroom list, 10 otherwise). Surfaces
+    any home sitting ABOVE its minimum — almost always leftover bags from
+    before this minimum existed, never trimmed automatically since the
+    system only ever adds missing tags, not removes extra ones — as well as
+    any home still BELOW its minimum (would get topped up on next print)."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT h.id, h.name, h.code, COUNT(b.id) AS bag_count
+        FROM homes h LEFT JOIN bags b ON b.home_id = h.id
+        GROUP BY h.id, h.name, h.code
+        ORDER BY h.code
+    """)
+    rows = cur.fetchall(); cur.close(); conn.close()
+    mismatches = []
+    expected_total = actual_total = 0
+    for r in rows:
+        expected = _min_bags_for_home(r['name'])
+        actual = r['bag_count']
+        expected_total += expected
+        actual_total += actual
+        if actual != expected:
+            mismatches.append({'name': r['name'], 'code': r['code'], 'actual': actual, 'expected': expected, 'delta': actual - expected})
+    mismatches.sort(key=lambda m: -m['delta'])
+    return jsonify({'homes_total': len(rows), 'expected_total': expected_total, 'actual_total': actual_total,
+                    'surplus_total': actual_total - expected_total, 'mismatches': mismatches})
 
 @app.route('/api/homes/<int:hid>', methods=['DELETE'])
 def delete_home(hid):
