@@ -911,6 +911,73 @@ def tag_count_audit():
     return jsonify({'homes_total': len(rows), 'expected_total': expected_total, 'actual_total': actual_total,
                     'surplus_total': actual_total - expected_total, 'mismatches': mismatches})
 
+@app.route('/api/homes/fix-tag-counts', methods=['POST'])
+def fix_tag_counts():
+    """One-click bulk correction across every home, instead of fixing tag
+    counts one property at a time.
+
+    Shortfalls: tops up exactly like the print-time top-up (safe, additive).
+
+    Surplus: removes bag records down to the minimum, but ONLY bags that are
+    both status='in' (sitting in the warehouse, not currently staged or out
+    with a cleaner) AND have never appeared in the transactions log (i.e.
+    truly never used — almost always a leftover from before the 10/15
+    minimum existed, not a bag anyone's actually relied on). Prefers
+    removing the highest-numbered {code}-N bags first. If a home's surplus
+    can't be fully resolved this way (its extra bags have real history or
+    are currently in use), it's left alone and reported so nothing gets
+    deleted out from under a bag someone might be counting on."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name, code FROM homes")
+    homes = cur.fetchall()
+    cur.close(); conn.close()
+
+    topped_up, removed, could_not_fully_fix = [], [], []
+
+    for h in homes:
+        target = _min_bags_for_home(h['name'])
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, status FROM bags WHERE home_id=%s", (h['id'],))
+        bags = cur.fetchall()
+        current = len(bags)
+        cur.close(); conn.close()
+
+        if current < target:
+            created = _ensure_min_bag_count(h['id'], h['code'], h['name'])
+            if created:
+                topped_up.append({'name': h['name'], 'code': h['code'], 'created_ids': created})
+
+        elif current > target:
+            surplus_needed = current - target
+            removable_ids = [b['id'] for b in bags if b['status'] == 'in']
+            conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if removable_ids:
+                cur.execute("SELECT DISTINCT bag_id FROM transactions WHERE bag_id = ANY(%s)", (removable_ids,))
+                ever_used = {r['bag_id'] for r in cur.fetchall()}
+            else:
+                ever_used = set()
+            never_used = sorted((bid for bid in removable_ids if bid not in ever_used), reverse=True)
+            to_remove = never_used[:surplus_needed]
+            for bid in to_remove:
+                cur.execute("DELETE FROM bags WHERE id=%s", (bid,))
+            if to_remove:
+                conn.commit()
+                removed.append({'name': h['name'], 'code': h['code'], 'removed_ids': to_remove})
+                log_audit('Homes', f'Removed {len(to_remove)} unused surplus bag(s) — bulk tag count fix', h['code'],
+                          resolve_performer(data), ', '.join(to_remove))
+            cur.close(); conn.close()
+            if len(to_remove) < surplus_needed:
+                could_not_fully_fix.append({
+                    'name': h['name'], 'code': h['code'], 'still_over_by': surplus_needed - len(to_remove),
+                    'reason': 'remaining surplus bags either have transaction history or are currently staged/out — left alone'
+                })
+
+    return jsonify({'topped_up': topped_up, 'removed': removed, 'could_not_fully_fix': could_not_fully_fix})
+
 @app.route('/api/homes/<int:hid>', methods=['DELETE'])
 def delete_home(hid):
     data=request.json or {}
@@ -989,27 +1056,28 @@ def _ensure_min_bag_count(home_id, home_code, home_name):
     5+ bedroom properties, 10 for everything else). Only ever adds missing
     bags — never removes or renames existing ones. New IDs use {code}-{n},
     skipping any ID already taken so a custom-named existing bag is never
-    touched or duplicated."""
+    touched or duplicated. Returns the list of newly created bag IDs."""
     target = _min_bags_for_home(home_name)
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM bags WHERE home_id=%s", (home_id,))
     current = cur.fetchone()[0]
     if current >= target:
-        cur.close(); conn.close(); return
+        cur.close(); conn.close(); return []
     needed = target - current
-    created = 0
+    created_ids = []
     n = 1
-    while created < needed and n <= target + 50:
+    while len(created_ids) < needed and n <= target + 50:
         candidate = f"{home_code}-{n}"
         cur.execute("SELECT 1 FROM bags WHERE id=%s", (candidate,))
         if not cur.fetchone():
             cur.execute("INSERT INTO bags (id,home_id,status) VALUES (%s,%s,'in')", (candidate, home_id))
-            created += 1
+            created_ids.append(candidate)
         n += 1
-    if created:
+    if created_ids:
         conn.commit()
-        log_audit('Homes', f'Auto-created {created} bag(s) — minimum of {target} for this home size', home_code, 'System')
+        log_audit('Homes', f'Auto-created {len(created_ids)} bag(s) — minimum of {target} for this home size', home_code, 'System')
     cur.close(); conn.close()
+    return created_ids
 
 @app.route('/api/homes/five-plus-bedroom-check', methods=['GET'])
 def check_five_plus_bedroom_matches():
