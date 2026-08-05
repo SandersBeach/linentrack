@@ -2076,6 +2076,18 @@ def run_breezeway_sync():
     except Exception as e:
         result['errors'].append(f'auth failed: {e}')
         return result
+
+ def background_breezeway_loop():
+    """Runs the full Breezeway sync on a fixed interval, forever, same
+    pattern as the existing background_overdue_loop."""
+    while True:
+        try:
+            result = run_breezeway_sync()
+            print(f"[Breezeway Sync] {result['properties']} properties, {result['reservations']} reservations, "
+                  f"{result['assignments']} assignments, errors: {result['errors']}", flush=True)
+        except Exception as e:
+            print(f"[Breezeway Sync] Unexpected failure: {e}", flush=True)
+        time.sleep(BREEZEWAY_SYNC_INTERVAL_SECONDS)       
     try:
         result['properties'] = sync_breezeway_properties(token)
     except Exception as e:
