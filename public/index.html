@@ -1923,7 +1923,29 @@ async function renderSettings(gen) {
   if (_stale(gen)) return;
   let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
-    <div class="card"><div class="card-title">Add home</div><div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div><button class="btn btn-primary" onclick="addHome()">Add home</button></div>
+    <div class="card"><div class="card-title">Add home</div>
+    <div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" oninput="suggestNewHomeTagCount()" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div>
+    <label>Number of bag tags to create</label>
+    <input type="number" id="new-home-tag-count" min="0" max="100" value="10">
+    <div id="new-home-tag-hint" style="font-size:11px;color:var(--gray-400);margin-top:-8px;margin-bottom:12px">Defaults to 10 — set to 15 if this is one of the larger (5+ bedroom) properties. Creates {code}-1 through {code}-N.</div>
+    <div style="border-top:1px solid var(--gray-100);margin-top:4px;padding-top:12px">
+      <label style="margin-bottom:8px">Packing formula (optional — can also be added later)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label>King sets</label><input type="number" id="nh-king" value="0" min="0"></div>
+        <div><label>Queen sets</label><input type="number" id="nh-queen" value="0" min="0"></div>
+        <div><label>Twin sets</label><input type="number" id="nh-twin" value="0" min="0"></div>
+        <div><label>Bath towels</label><input type="number" id="nh-towels" value="0" min="0"></div>
+        <div><label>Hand towels</label><input type="number" id="nh-hand" value="0" min="0"></div>
+        <div><label>Wash cloths</label><input type="number" id="nh-wash" value="0" min="0"></div>
+        <div><label>Bath mats</label><input type="number" id="nh-mats" value="0" min="0"></div>
+        <div><label>Pool towels</label><input type="number" id="nh-pool" value="0" min="0"></div>
+        <div><label>Queen sleeper sets</label><input type="number" id="nh-queen_sleeper" value="0" min="0"></div>
+        <div><label>Twin sleeper sets</label><input type="number" id="nh-twin_sleeper" value="0" min="0"></div>
+        <div><label>Amenity boxes</label><input type="number" id="nh-amenity_boxes" value="1" min="0"></div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="addHome()">Add home</button>
+    </div>
     <div class="card"><div class="card-title">Add bag to home</div><div class="form-row"><div><label>Home</label><select id="bag-home-sel"><option value="">Select home...</option>${homes.map(h=>`<option value="${h.id}">${h.name} (${h.code})</option>`).join('')}</select></div><div><label>Bag ID</label><input type="text" id="new-bag-id" placeholder="e.g. HOME-21-A" /></div></div><button class="btn btn-primary" onclick="addBag()">Add bag</button><div id="bag-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
     <div class="card"><div class="card-title">All homes</div>`;
   homes.forEach(h=>{html+=`<div class="row"><div class="row-main"><div class="row-title">${h.name} <span class="tag">${h.code}</span></div><div class="row-sub">${h.bag_count} bags total · ${h.out_count} out</div></div>${h.bag_count===0?`<button class="btn btn-danger btn-sm" onclick="deleteHome(${h.id},'${h.name.replace(/'/g,"\\'")}')">Remove</button>`:''}</div>`;});
@@ -2030,6 +2052,9 @@ async function renderSettings(gen) {
       <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Every home is topped up to a minimum tag count before printing — 15 for the listed 5+ bedroom properties, 10 for everything else. Check that the 5+ bedroom list matches your actual home names before printing at scale, since a small naming mismatch (e.g. "Drive" vs "Dr") would silently give that property the 10-tag minimum instead of 15.</p>
       <button class="btn btn-ghost btn-sm" onclick="checkFivePlusBedroomMatches()">Check 5+ Bedroom List Against Homes</button>
       <div id="five-plus-check-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="runTagCountAudit()">Tag Count Audit — Why is my total off?</button>
+      <div id="tag-audit-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+      <div id="tag-audit-table"></div>
     </div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
@@ -2279,7 +2304,38 @@ async function savePins() {
   await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined,staff_name:_currentStaffName})});
   document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
-async function addHome() { const name=document.getElementById('new-home-name')?.value?.trim(); const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase(); if(!name||!code){notify('Name and code are required');return;} const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,code,staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){notify(d.error);return;} renderSettings(); }
+let _fivePlusBedroomNames = null;
+async function suggestNewHomeTagCount() {
+  if (!_fivePlusBedroomNames) {
+    try { _fivePlusBedroomNames = await fetch('/api/homes/five-plus-bedroom-list').then(r => r.json()); }
+    catch (e) { _fivePlusBedroomNames = []; }
+  }
+  const name = (document.getElementById('new-home-name')?.value || '').trim().toLowerCase();
+  const match = name && _fivePlusBedroomNames.includes(name);
+  const input = document.getElementById('new-home-tag-count');
+  const hint = document.getElementById('new-home-tag-hint');
+  if (match) {
+    input.value = 15;
+    hint.innerHTML = '<strong style="color:var(--amber)">This matches the 5+ bedroom list — defaulted to 15.</strong> Adjust if needed.';
+  } else if (hint) {
+    hint.textContent = 'Defaults to 10 — set to 15 if this is one of the larger (5+ bedroom) properties. Creates {code}-1 through {code}-N.';
+  }
+}
+async function addHome() {
+  const name=document.getElementById('new-home-name')?.value?.trim();
+  const code=document.getElementById('new-home-code')?.value?.trim().toUpperCase();
+  if(!name||!code){notify('Name and code are required');return;}
+  const tag_count = document.getElementById('new-home-tag-count')?.value || 0;
+  const body = { name, code, tag_count, staff_name: _currentStaffName };
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => {
+    body[f] = document.getElementById('nh-'+f)?.value || 0;
+  });
+  const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok){notify(d.error);return;}
+  notify(`${name} added${d.bags_created?` with ${d.bags_created} bag tag(s)`:''}${d.formula_set?' and packing formula set':''}.`, 'ok');
+  renderSettings();
+}
 async function deleteHome(id,name) { if(!await confirmModal(`Remove ${name}?`,{confirmLabel:'Remove',danger:true}))return; const r=await fetch('/api/homes/'+id,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){notify(d.error);return;} renderSettings(); }
 async function addBag() { const home_id=document.getElementById('bag-home-sel')?.value; const bag_id=document.getElementById('new-bag-id')?.value?.trim().toUpperCase(); if(!home_id||!bag_id){notify('Select a home and enter a bag ID');return;} const r=await fetch('/api/bags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bag_id,home_id:parseInt(home_id),staff_name:_currentStaffName})}); const d=await r.json(); if(!r.ok){notify(d.error);return;} document.getElementById('bag-msg').textContent=`Bag ${d.id} added`; document.getElementById('new-bag-id').value=''; setTimeout(()=>{if(document.getElementById('bag-msg'))document.getElementById('bag-msg').textContent='';},2000); renderSettings(); }
 
@@ -5578,6 +5634,29 @@ async function checkFivePlusBedroomMatches() {
     }
   } catch (e) {
     msg.textContent = 'Check failed — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function runTagCountAudit() {
+  const msg = document.getElementById('tag-audit-msg');
+  const table = document.getElementById('tag-audit-table');
+  msg.textContent = 'Checking...'; msg.style.color = 'var(--gray-400)'; table.innerHTML = '';
+  try {
+    const data = await fetch('/api/homes/tag-count-audit').then(r => r.json());
+    const surplusNote = data.surplus_total > 0
+      ? `<strong style="color:var(--coral-dark)">+${data.surplus_total} more tags than expected</strong> — almost always leftover bags from before the 10/15 minimums were set up. This system only ever adds missing tags, it never removes extra ones automatically.`
+      : data.surplus_total < 0
+      ? `${Math.abs(data.surplus_total)} short of the expected total — these will get topped up automatically the next time cards are printed for those homes.`
+      : `<strong style="color:var(--teal-dark)">Matches exactly.</strong>`;
+    msg.innerHTML = `Across ${data.homes_total} homes: expected ${data.expected_total} tags, actually have ${data.actual_total}. ${surplusNote}`;
+    msg.style.color = data.surplus_total === 0 ? 'var(--teal-dark)' : 'var(--coral-dark)';
+    if (data.mismatches.length) {
+      table.innerHTML = `<div class="card" style="margin-top:10px;padding:0.5rem 1.25rem">` +
+        data.mismatches.map(m => `<div class="row"><div class="row-main"><div class="row-title">${m.name} <span class="tag">${m.code}</span></div><div class="row-sub">Has ${m.actual} · expected ${m.expected}</div></div><span class="badge ${m.delta>0?'badge-warn':'badge-out'}">${m.delta>0?'+':''}${m.delta}</span></div>`).join('') +
+        `</div>`;
+    }
+  } catch (e) {
+    msg.textContent = 'Audit failed — please try again.'; msg.style.color = 'var(--coral-dark)';
   }
 }
 
