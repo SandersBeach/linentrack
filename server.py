@@ -875,41 +875,55 @@ def bags_qr_sheet():
     result = [{'id': r['id'], 'home_name': r['home_name'], 'qr_code': make_bag_qr(r['id'])} for r in rows]
     return jsonify(result)
 
-# ── Bedroom estimate + minimum bag count for large homes ────────────────────
-# Bedroom count isn't tracked anywhere directly. Estimated from the packing
-# formula's bed-set totals instead (king + queen + twin), since every real
-# bedroom gets exactly one set. Sleeper sofas (queen_sleeper/twin_sleeper)
-# are intentionally excluded — those are almost always a living-room
-# pull-out, not a separate bedroom.
-_LARGE_HOME_BEDROOM_THRESHOLD = 5
-_MIN_BAGS_FOR_LARGE_HOME = 15
+# ── Minimum bag/tag count per home, tiered by bedroom count ─────────────────
+# Every home gets topped up to a minimum number of bag tags: 15 for the
+# larger (5+ bedroom) properties, 10 for everything else. The 5+ bedroom
+# list below is the actual property list Kristin pulled directly from the
+# PM system (bed/bath counts), not an estimate — safer than guessing from
+# packing-formula bed sets, which can miss things like a bonus-room sleeper
+# that does count as a bedroom in the real listing.
+_MIN_BAGS_LARGE_HOME = 15
+_MIN_BAGS_SMALL_HOME = 10
+_FIVE_PLUS_BEDROOM_HOMES = {
+    a.lower().strip() for a in [
+        # 7 bedroom
+        "209 Western Lake Drive", "90 Flatwood Street", "25 Rain Lily Lane",
+        # 6 bedroom
+        "255 Garfield Street", "349 Needlerush Drive", "22 Flatwood Street",
+        "73 Holly Street", "73 Pond Cypress Circle", "157 Sunflower Street",
+        "43 Sand Hill Circle", "80 Scrub Oak Circle", "254 Spartina Circle",
+        # 5 bedroom
+        "271 Red Cedar Way", "99 Pond Cypress Way", "21 Chanel Court",
+        "672 Western Lake Drive", "263 Magnolia Street", "51 Mistflower Lane",
+        "176 Red Cedar Way", "397 Needlerush Drive", "35 Suzanne Drive",
+        "109 Dandelion Drive", "428 Red Cedar Way", "728 Western Lake Drive",
+        "70 Scrub Oak Circle", "410 Pine Needle Way", "433 Pine Needle Way",
+        "31 Bluejack Street", "260 Needlerush Drive", "53 Muhly Circle",
+        "1217 Western Lake Drive", "19 Muhly Circle", "93 Needlerush Drive",
+        "5 Pond Cypress Way", "262 Garfield Street", "442 East Royal Fern Way",
+        "202 East Royal Fern Way",
+    ]
+}
 
-def _estimated_bedrooms(property_name):
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT king, queen, twin FROM pack_list_formula WHERE address=%s",
-                (property_name.lower().strip(),))
-    row = cur.fetchone(); cur.close(); conn.close()
-    if not row:
-        return 0
-    return (row['king'] or 0) + (row['queen'] or 0) + (row['twin'] or 0)
+def _min_bags_for_home(home_name):
+    return _MIN_BAGS_LARGE_HOME if home_name.lower().strip() in _FIVE_PLUS_BEDROOM_HOMES else _MIN_BAGS_SMALL_HOME
 
 def _ensure_min_bag_count(home_id, home_code, home_name):
-    """Homes with 5+ estimated bedrooms need at least 15 bag tags on hand.
-    If the home has fewer bag records than that, creates the missing ones —
-    never removes or reduces existing bags, and does nothing for homes under
-    the threshold. New IDs use {code}-{n}, skipping any ID already taken so
-    a custom-named existing bag is never touched or duplicated."""
-    if _estimated_bedrooms(home_name) < _LARGE_HOME_BEDROOM_THRESHOLD:
-        return
+    """Tops every home up to its minimum bag/tag count (15 for the listed
+    5+ bedroom properties, 10 for everything else). Only ever adds missing
+    bags — never removes or renames existing ones. New IDs use {code}-{n},
+    skipping any ID already taken so a custom-named existing bag is never
+    touched or duplicated."""
+    target = _min_bags_for_home(home_name)
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM bags WHERE home_id=%s", (home_id,))
     current = cur.fetchone()[0]
-    if current >= _MIN_BAGS_FOR_LARGE_HOME:
+    if current >= target:
         cur.close(); conn.close(); return
-    needed = _MIN_BAGS_FOR_LARGE_HOME - current
+    needed = target - current
     created = 0
     n = 1
-    while created < needed and n <= _MIN_BAGS_FOR_LARGE_HOME + 50:
+    while created < needed and n <= target + 50:
         candidate = f"{home_code}-{n}"
         cur.execute("SELECT 1 FROM bags WHERE id=%s", (candidate,))
         if not cur.fetchone():
@@ -918,8 +932,20 @@ def _ensure_min_bag_count(home_id, home_code, home_name):
         n += 1
     if created:
         conn.commit()
-        log_audit('Homes', f'Auto-created {created} bag(s) — 5+ bedroom minimum of 15', home_code, 'System')
+        log_audit('Homes', f'Auto-created {created} bag(s) — minimum of {target} for this home size', home_code, 'System')
     cur.close(); conn.close()
+
+@app.route('/api/homes/five-plus-bedroom-check', methods=['GET'])
+def check_five_plus_bedroom_matches():
+    """Admin diagnostic: flags any name on the 5+ bedroom list that doesn't
+    exactly match a home on file — a typo or naming mismatch here means that
+    property would silently get the 10-tag minimum instead of 15."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name FROM homes")
+    home_names = {h['name'].lower().strip() for h in cur.fetchall()}
+    cur.close(); conn.close()
+    unmatched = sorted(a for a in _FIVE_PLUS_BEDROOM_HOMES if a not in home_names)
+    return jsonify({'total_listed': len(_FIVE_PLUS_BEDROOM_HOMES), 'unmatched_count': len(unmatched), 'unmatched': unmatched})
 
 # ── Bag tag business cards (Avery 5390 name badge insert refills) ──────────
 # Card is 3.5in wide x 2.25in tall (landscape), 8 per letter sheet, 2 columns
@@ -957,9 +983,9 @@ def bags_qr_cards_pdf():
     print (the home name already IS the property address for this business,
     so it only prints once).
 
-    Any home with an estimated 5+ bedrooms (from its packing formula's bed
-    sets) is topped up to at least 15 bag records before printing, so large
-    homes always get enough tags even if fewer bags were ever registered.
+    Every home is topped up to its minimum bag/tag count before printing —
+    15 for the listed 5+ bedroom properties, 10 for everything else — so
+    no home comes up short on tags even if fewer bags were ever registered.
 
     Two separate files (?side=front / ?side=back) rather than relying on an
     auto-duplex printer setting, since that's more broadly compatible with
