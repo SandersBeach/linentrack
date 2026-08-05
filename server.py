@@ -4874,5 +4874,6 @@ def background_overdue_loop():
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=background_overdue_loop, daemon=True).start()
+    threading.Thread(target=background_breezeway_loop, daemon=True).start()
     port=int(os.environ.get('PORT',3000))
     app.run(host='0.0.0.0', port=port, debug=False)
