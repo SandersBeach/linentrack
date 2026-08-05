@@ -1888,7 +1888,7 @@ def parse_receipt():
         return jsonify({'error': 'Could not read that receipt clearly — please enter the items manually.'}), 422
     return jsonify({'success': True, 'vendor': parsed.get('vendor'), 'items': parsed.get('items', [])})
 
-    BREEZEWAY_CLIENT_ID = os.environ.get('BREEZEWAY_CLIENT_ID', '')
+BREEZEWAY_CLIENT_ID = os.environ.get('BREEZEWAY_CLIENT_ID', '')
 BREEZEWAY_CLIENT_SECRET = os.environ.get('BREEZEWAY_CLIENT_SECRET', '')
 BREEZEWAY_BASE = 'https://api.breezeway.io/public'
 BREEZEWAY_SYNC_INTERVAL_SECONDS = 4 * 60 * 60  # every 4 hours
