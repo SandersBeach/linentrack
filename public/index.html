@@ -2026,6 +2026,11 @@ async function renderSettings(gen) {
       <button class="btn btn-ghost btn-sm" onclick="openBagCardsPDF(null,'back')">Back — ALL homes</button>
     </div>
     <p style="font-size:11px;color:var(--gray-400);margin-top:10px">Print every "Front" sheet first. Then flip the <em>entire printed stack</em> over as one block — like turning a book cover, left edge to right — and feed it back into the printer before printing "Back." Don't flip sheets one at a time, or the backs will end up matched to the wrong front.</p>
+    <div style="border-top:1px solid var(--gray-100);margin-top:12px;padding-top:12px">
+      <p style="font-size:12px;color:var(--gray-700);margin-bottom:8px">Every home is topped up to a minimum tag count before printing — 15 for the listed 5+ bedroom properties, 10 for everything else. Check that the 5+ bedroom list matches your actual home names before printing at scale, since a small naming mismatch (e.g. "Drive" vs "Dr") would silently give that property the 10-tag minimum instead of 15.</p>
+      <button class="btn btn-ghost btn-sm" onclick="checkFivePlusBedroomMatches()">Check 5+ Bedroom List Against Homes</button>
+      <div id="five-plus-check-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+    </div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
     <div class="card"><div class="card-title">Print loaner QR labels</div>
@@ -5552,6 +5557,25 @@ async function checkPackFormulaMatches() {
     }
     msg.innerHTML = parts.join('<br><br>');
     msg.style.color = (data.unmatched_formula_count || data.homes_missing_formula_count) ? 'var(--coral-dark)' : 'var(--teal-dark)';
+  } catch (e) {
+    msg.textContent = 'Check failed — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function checkFivePlusBedroomMatches() {
+  const msg = document.getElementById('five-plus-check-msg');
+  msg.textContent = 'Checking...'; msg.style.color = 'var(--gray-400)';
+  try {
+    const res = await fetch('/api/homes/five-plus-bedroom-check');
+    const data = await res.json();
+    if (!data.unmatched_count) {
+      msg.innerHTML = `<i class="ic" data-lucide="check"></i> All ${data.total_listed} properties on the 5+ bedroom list match a home on file.`;
+      msg.style.color = 'var(--teal-dark)';
+    } else {
+      msg.innerHTML = `<i class="ic" data-lucide="triangle-alert"></i> ${data.unmatched_count} of ${data.total_listed} don't match any home on file — these would get the 10-tag minimum instead of 15 until fixed:<br>` +
+        data.unmatched.map(a => `• ${a}`).join('<br>');
+      msg.style.color = 'var(--coral-dark)';
+    }
   } catch (e) {
     msg.textContent = 'Check failed — please try again.'; msg.style.color = 'var(--coral-dark)';
   }
