@@ -283,6 +283,12 @@ def init_db():
             area TEXT,
             uploaded_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS breezeway_properties (
+            breezeway_property_id INTEGER PRIMARY KEY,
+            address TEXT NOT NULL,
+            property_name TEXT,
+            imported_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY, value TEXT
         );
@@ -1825,6 +1831,8 @@ def parse_receipt():
     order in by hand. Requires ANTHROPIC_API_KEY set as a Railway env var —
     this runs server-side (unlike a browser-only call, which would have no
     key and no way to reach the API once deployed)."""
+    if not is_admin_pin(str(request.form.get('pin', ''))):
+        return jsonify({'error': 'Only Admin can place orders'}), 403
     if not ANTHROPIC_API_KEY:
         return jsonify({'error': "Receipt scanning isn't set up yet — an admin needs to add an ANTHROPIC_API_KEY environment variable in Railway."}), 503
     if 'file' not in request.files:
@@ -1879,6 +1887,279 @@ def parse_receipt():
         print(f'[Receipt parse] Could not parse model response: {e} | raw={result}', flush=True)
         return jsonify({'error': 'Could not read that receipt clearly — please enter the items manually.'}), 422
     return jsonify({'success': True, 'vendor': parsed.get('vendor'), 'items': parsed.get('items', [])})
+
+    BREEZEWAY_CLIENT_ID = os.environ.get('BREEZEWAY_CLIENT_ID', '')
+BREEZEWAY_CLIENT_SECRET = os.environ.get('BREEZEWAY_CLIENT_SECRET', '')
+BREEZEWAY_BASE = 'https://api.breezeway.io/public'
+BREEZEWAY_SYNC_INTERVAL_SECONDS = 4 * 60 * 60  # every 4 hours
+
+def get_breezeway_token():
+    """Get a fresh access token. Breezeway access tokens last 24 hours, but
+    since this syncs at most every few hours, we just request a brand-new
+    token each sync run rather than tracking/refreshing one — far simpler,
+    and nowhere near the auth endpoint's 1-request-per-minute limit."""
+    if not BREEZEWAY_CLIENT_ID or not BREEZEWAY_CLIENT_SECRET:
+        raise RuntimeError('BREEZEWAY_CLIENT_ID / BREEZEWAY_CLIENT_SECRET not set in Railway variables')
+    payload = json.dumps({'client_id': BREEZEWAY_CLIENT_ID, 'client_secret': BREEZEWAY_CLIENT_SECRET}).encode()
+    req = urllib.request.Request(
+        f'{BREEZEWAY_BASE}/auth/v1/', data=payload,
+        headers={'accept': 'application/json', 'content-type': 'application/json'}, method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode())
+    return data['access_token']
+
+def breezeway_get(path, token, params=None):
+    """GET helper against the Breezeway API — handles the JWT header and
+    query-string building. `path` is relative, e.g. '/inventory/v1/property'."""
+    url = f'{BREEZEWAY_BASE}{path}'
+    if params:
+        qs = '&'.join(f'{k}={urllib.parse.quote(str(v))}' for k, v in params.items() if v is not None)
+        if qs: url += '?' + qs
+    req = urllib.request.Request(url, headers={'Authorization': f'JWT {token}', 'accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+def _bw_extract_list(raw):
+    """Breezeway list endpoints wrap results in a key like 'results' rather
+    than returning a bare array — handle either shape."""
+    if isinstance(raw, list): return raw
+    if isinstance(raw, dict):
+        for key in ('results', 'data', 'properties', 'reservations', 'tasks'):
+            if key in raw and isinstance(raw[key], list):
+                return raw[key]
+    return []
+
+def sync_breezeway_properties(token):
+    """Pulls the full property list, keeps only active properties (skips
+    inactive/former ones), and fully replaces breezeway_properties each run
+    so nothing stale lingers from a property that's since gone inactive."""
+    all_items = []
+    page = 1
+    while True:
+        raw = breezeway_get('/inventory/v1/property', token, {'limit': 200, 'page': page})
+        items = _bw_extract_list(raw)
+        if not items: break
+        all_items.extend(items)
+        page += 1
+        if page > 10: break  # safety valve
+
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM breezeway_properties")
+    now = now_central()
+    count = 0
+    skipped_inactive = 0
+    for p in all_items:
+        if (p.get('status') or '').lower() != 'active':
+            skipped_inactive += 1
+            continue
+        pid = p.get('id') or p.get('property_id')
+        address = p.get('address1') or p.get('address') or p.get('name') or ''
+        name = p.get('name') or p.get('property_name') or address
+        if not pid or not address:
+            continue
+        cur.execute("""
+            INSERT INTO breezeway_properties (breezeway_property_id, address, property_name, imported_at)
+            VALUES (%s,%s,%s,%s)
+        """, (int(pid), address.strip(), name.strip(), now))
+        count += 1
+    conn.commit(); cur.close(); conn.close()
+    print(f"[Breezeway Sync] {count} active properties kept, {skipped_inactive} inactive skipped", flush=True)
+    return count
+
+def sync_breezeway_reservations(token):
+    """Pulls upcoming reservations (Breezeway defaults to checkout_date >=
+    today when no filter is given) and replaces forecast_reservations —
+    same full-replace pattern the manual CSV upload already used."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT breezeway_property_id, address FROM breezeway_properties")
+    addr_by_id = {r['breezeway_property_id']: r['address'] for r in cur.fetchall()}
+
+    all_items = []
+    page = 1
+    while True:
+        raw = breezeway_get('/inventory/v1/reservation', token, {'limit': 100, 'page': page})
+        items = _bw_extract_list(raw)
+        if not items: break
+        all_items.extend(items)
+        page += 1
+        if page > 20: break
+
+    cur2 = conn.cursor()
+    cur2.execute("DELETE FROM forecast_reservations")
+    now = now_central()
+    count = 0
+    for r in all_items:
+        pid = r.get('property_id') or r.get('home_id')
+        address = addr_by_id.get(int(pid)) if pid else None
+        if not address:
+            continue
+        arrive = r.get('checkin_date') or r.get('arrival_date') or ''
+        depart = r.get('checkout_date') or r.get('departure_date') or ''
+        if not arrive or not depart:
+            continue
+        def to_mdy(d):
+            try: return datetime.strptime(d[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
+            except Exception: return d
+        cur2.execute("""
+            INSERT INTO forecast_reservations (lease_id, arrive, depart, unit_address, area, uploaded_at)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """, (str(r.get('id') or r.get('reservation_id') or ''), to_mdy(arrive), to_mdy(depart), address, '', now))
+        count += 1
+    conn.commit(); cur.close(); cur2.close(); conn.close()
+    return count
+
+def sync_breezeway_cleaner_assignments(token):
+    """Pulls housekeeping tasks per property for the next 10 days, resolves
+    each task's assignee to a real cleaner via the existing alias/matching
+    system, and upserts into pack_cleaner_assignments."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT breezeway_property_id, address FROM breezeway_properties")
+    properties = cur.fetchall()
+    cur.execute("SELECT id,name FROM cleaners WHERE active=1")
+    cleaners = cur.fetchall()
+    cur.execute("SELECT breezeway_name,cleaner_name FROM cleaner_name_aliases")
+    aliases = {r['breezeway_name'].lower(): r['cleaner_name'] for r in cur.fetchall()}
+
+    today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
+    window_end = today_dt + timedelta(days=10)
+    date_range = f'{today_dt.isoformat()},{window_end.isoformat()}'
+
+    cur2 = conn.cursor()
+    now = now_central()
+    count = 0
+    errors = []
+    for prop in properties:
+        try:
+            raw = breezeway_get('/inventory/v1/task/', token, {
+                'home_id': prop['breezeway_property_id'],
+                'type_department': 'housekeeping',
+                'scheduled_date': date_range,
+                'limit': 50,
+            })
+            tasks = _bw_extract_list(raw)
+        except Exception as e:
+            errors.append(f"property {prop['breezeway_property_id']}: {e}")
+            continue
+        for t in tasks:
+            scheduled = t.get('scheduled_date') or t.get('date') or ''
+            if not scheduled:
+                continue
+            date_str = scheduled[:10]
+            assignees = t.get('assignments') or []
+            raw_names = []
+            for a in (assignees if isinstance(assignees, list) else [assignees]):
+                if isinstance(a, dict):
+                    raw_names.append(a.get('name') or a.get('full_name') or '')
+                elif isinstance(a, str):
+                    raw_names.append(a)
+            raw_assignee = '; '.join(n for n in raw_names if n)
+            cleaner = match_cleaner_name(raw_assignee, cleaners, aliases)
+            cur2.execute("""
+                INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (address,assignment_date) DO UPDATE SET
+                    cleaner_id=EXCLUDED.cleaner_id, cleaner_name=EXCLUDED.cleaner_name,
+                    raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at
+            """, (prop['address'], date_str, cleaner['id'] if cleaner else None,
+                  cleaner['name'] if cleaner else None, raw_assignee, now))
+            count += 1
+    conn.commit(); cur.close(); cur2.close(); conn.close()
+    return count, errors
+
+def run_breezeway_sync():
+    """The full sync: token → properties → reservations → cleaner assignments."""
+    result = {'properties': 0, 'reservations': 0, 'assignments': 0, 'errors': []}
+    try:
+        token = get_breezeway_token()
+    except Exception as e:
+        result['errors'].append(f'auth failed: {e}')
+        return result
+    try:
+        result['properties'] = sync_breezeway_properties(token)
+    except Exception as e:
+        result['errors'].append(f'property sync failed: {e}')
+    try:
+        result['reservations'] = sync_breezeway_reservations(token)
+    except Exception as e:
+        result['errors'].append(f'reservation sync failed: {e}')
+    try:
+        result['assignments'], task_errors = sync_breezeway_cleaner_assignments(token)
+        result['errors'].extend(task_errors)
+    except Exception as e:
+        result['errors'].append(f'assignment sync failed: {e}')
+    log_audit('Breezeway', 'Ran sync', '', 'System',
+              f"{result['properties']} properties, {result['reservations']} reservations, {result['assignments']} assignments, {len(result['errors'])} errors")
+    return result
+
+@app.route('/api/breezeway/sync-now', methods=['GET', 'POST'])
+def breezeway_sync_now():
+    """Admin-only manual trigger — works as a simple link (GET) or a proper
+    POST — runs the full sync immediately instead of waiting on a schedule."""
+    pin = request.args.get('pin') or (request.json or {}).get('pin', '')
+    if not is_admin_pin(str(pin)):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    return jsonify(run_breezeway_sync())
+
+@app.route('/api/breezeway/debug-raw', methods=['GET'])
+def breezeway_debug_raw():
+    """Admin-only diagnostic: shows the ACTUAL raw JSON Breezeway returns."""
+    if not is_admin_pin(str(request.args.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    try:
+        token = get_breezeway_token()
+    except Exception as e:
+        return jsonify({'error': f'auth failed: {e}'}), 500
+    out = {}
+    try:
+        out['property_sample'] = breezeway_get('/inventory/v1/property', token, {'limit': 1})
+    except Exception as e:
+        out['property_sample_error'] = str(e)
+    try:
+        out['reservation_sample'] = breezeway_get('/inventory/v1/reservation', token, {'limit': 1})
+    except Exception as e:
+        out['reservation_sample_error'] = str(e)
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT breezeway_property_id FROM breezeway_properties LIMIT 1")
+    row = cur.fetchone(); cur.close(); conn.close()
+    if row:
+        try:
+            out['task_sample'] = breezeway_get('/inventory/v1/task/', token, {'home_id': row['breezeway_property_id'], 'limit': 1})
+        except Exception as e:
+            out['task_sample_error'] = str(e)
+    return jsonify(out)
+
+@app.route('/api/breezeway/properties', methods=['GET'])
+def list_breezeway_properties():
+    """View the current Breezeway property_id → address mapping."""
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT breezeway_property_id, address, property_name, imported_at FROM breezeway_properties ORDER BY address")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/breezeway/assignments', methods=['GET'])
+def list_breezeway_assignments():
+    """View the current synced cleaner assignments."""
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT address, assignment_date, cleaner_name, raw_assignee, updated_at
+            FROM pack_cleaner_assignments
+            ORDER BY assignment_date, address
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():
