@@ -2055,6 +2055,9 @@ async function renderSettings(gen) {
       <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="runTagCountAudit()">Tag Count Audit — Why is my total off?</button>
       <div id="tag-audit-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
       <div id="tag-audit-table"></div>
+      <button class="btn btn-danger btn-sm" style="margin-top:12px" onclick="fixAllTagCounts()"><i class="ic" data-lucide="wrench"></i> Fix All Tag Counts Now</button>
+      <p style="font-size:11px;color:var(--gray-400);margin-top:6px">Adjusts every home in one go — tops up any home below its minimum, and removes surplus tags <strong>only</strong> if they're sitting unused in the warehouse (never staged, never picked up, never with a cleaner). Anything with real history is left alone. Shows you exactly which bag IDs were added or removed so you can update the physical tags to match.</p>
+      <div id="fix-tag-counts-result"></div>
     </div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
@@ -5657,6 +5660,54 @@ async function runTagCountAudit() {
     }
   } catch (e) {
     msg.textContent = 'Audit failed — please try again.'; msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function fixAllTagCounts() {
+  const resultEl = document.getElementById('fix-tag-counts-result');
+  resultEl.innerHTML = '';
+  let audit;
+  try {
+    audit = await fetch('/api/homes/tag-count-audit').then(r => r.json());
+  } catch (e) { notify('Could not check current tag counts — please try again.'); return; }
+
+  const shortfalls = audit.mismatches.filter(m => m.delta < 0);
+  const surpluses = audit.mismatches.filter(m => m.delta > 0);
+  if (!shortfalls.length && !surpluses.length) { notify('Every home already matches its expected tag count — nothing to fix.', 'ok'); return; }
+
+  const summary = `This will add tags to ${shortfalls.length} home(s) below their minimum, and attempt to remove surplus tags from ${surpluses.length} home(s) above their minimum — but only bags that have never been used (never staged, never picked up). Any surplus bag with real history stays untouched. Continue?`;
+  if (!await confirmModal(summary, { title: 'Fix all tag counts now?', confirmLabel: 'Fix Tag Counts', danger: true })) return;
+
+  resultEl.innerHTML = '<div class="row-sub">Working...</div>';
+  try {
+    const res = await fetch('/api/homes/fix-tag-counts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: _currentPin })
+    });
+    const data = await res.json();
+    if (data.error) { notify(data.error); resultEl.innerHTML = ''; return; }
+
+    let html = '';
+    if (data.topped_up.length) {
+      html += `<div class="card" style="margin-top:10px"><div class="card-title" style="color:var(--teal-dark)"><i class="ic" data-lucide="check"></i> Topped up (${data.topped_up.length} home${data.topped_up.length!==1?'s':''})</div>`;
+      data.topped_up.forEach(t => { html += `<div class="row"><div class="row-main"><div class="row-title">${t.name} <span class="tag">${t.code}</span></div><div class="row-sub">+${t.created_ids.length}: ${t.created_ids.join(', ')}</div></div></div>`; });
+      html += `</div>`;
+    }
+    if (data.removed.length) {
+      html += `<div class="card" style="margin-top:10px"><div class="card-title" style="color:var(--coral-dark)"><i class="ic" data-lucide="trash-2"></i> Removed (${data.removed.length} home${data.removed.length!==1?'s':''}) — pull these physical tags</div>`;
+      data.removed.forEach(t => { html += `<div class="row"><div class="row-main"><div class="row-title">${t.name} <span class="tag">${t.code}</span></div><div class="row-sub">−${t.removed_ids.length}: ${t.removed_ids.join(', ')}</div></div></div>`; });
+      html += `</div>`;
+    }
+    if (data.could_not_fully_fix.length) {
+      html += `<div class="card" style="margin-top:10px;border-color:var(--amber)"><div class="card-title" style="color:var(--amber)"><i class="ic" data-lucide="triangle-alert"></i> Left alone — needs a manual look (${data.could_not_fully_fix.length})</div>`;
+      data.could_not_fully_fix.forEach(t => { html += `<div class="row"><div class="row-main"><div class="row-title">${t.name} <span class="tag">${t.code}</span></div><div class="row-sub">Still ${t.still_over_by} over — ${t.reason}</div></div></div>`; });
+      html += `</div>`;
+    }
+    resultEl.innerHTML = html || '<div class="empty">Nothing needed fixing.</div>';
+    notify('Tag counts fixed. Review the results below.', 'ok');
+    runTagCountAudit();
+  } catch (e) {
+    resultEl.innerHTML = ''; notify('Fix failed — please try again.');
   }
 }
 
