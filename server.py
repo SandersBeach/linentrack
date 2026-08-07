@@ -2522,16 +2522,19 @@ def breezeway_webhook_receive(secret):
         return jsonify({'error': 'forbidden'}), 403
     try:
         payload = request.json or {}
+        print(f"[Breezeway Webhook RAW] {json.dumps(payload)[:1500]}", flush=True)
         task = payload.get('task') if isinstance(payload.get('task'), dict) else payload
         task_id = str(task.get('id') or task.get('task_id') or '').strip()
         dept_raw = task.get('type_department') or task.get('department') or ''
         dept = (dept_raw.get('code') if isinstance(dept_raw, dict) else dept_raw).lower()
         if dept and dept != 'housekeeping':
+            print(f"[Breezeway Webhook RAW] filtered out — dept={dept!r} task_id={task_id!r}", flush=True)
             return jsonify({'success': True, 'skipped': 'not housekeeping'}), 200
         home_id = task.get('home_id') or task.get('property_id')
         scheduled = task.get('scheduled_date') or task.get('date') or ''
         date_str = scheduled[:10] if scheduled else None
         if not home_id or not date_str:
+            print(f"[Breezeway Webhook RAW] filtered out — missing home_id/date. home_id={home_id!r} scheduled={scheduled!r}", flush=True)
             return jsonify({'success': True, 'skipped': 'missing home_id/date'}), 200
 
         assignees = task.get('assignments') or task.get('assignees') or []
