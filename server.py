@@ -299,6 +299,13 @@ def init_db():
             property_name TEXT,
             imported_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS pack_missing_clean_acks (
+            address TEXT NOT NULL,
+            next_arrival_date TEXT NOT NULL,
+            acked_by TEXT NOT NULL,
+            acked_at TEXT NOT NULL,
+            PRIMARY KEY (address, next_arrival_date)
+        );
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY, value TEXT
         );
@@ -4302,30 +4309,135 @@ def api_today():
     timezone whenever a device is set to something else."""
     return jsonify({'date': today_central()})
 
+def compute_pack_schedule(window_start, window_end):
+    """Single source of truth for pack scheduling: pack_date = scheduled
+    clean date minus 1 day, NOT checkout date directly. For each address,
+    finds every (checkout, next_arrival) pair and looks for a clean
+    scheduled between them.
+    Returns (schedule, issues):
+      schedule: dict of pack_date -> [{address, checkout_date, clean_date,
+                cleaner_name, assigned}]
+      issues: [{address, checkout_date, next_arrival_date, days_until_arrival}]
+              for turnovers with an arrival within 2 days and no clean found.
+              Checkouts with no next arrival yet are never flagged — no
+              urgency without a deadline."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("""
+        SELECT unit_address,
+               TO_DATE(arrive,'MM/DD/YYYY') AS arrive_d,
+               TO_DATE(depart,'MM/DD/YYYY') AS depart_d
+        FROM forecast_reservations
+        WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s
+           OR TO_DATE(arrive,'MM/DD/YYYY') BETWEEN %s AND %s
+        ORDER BY unit_address, arrive_d
+    """, (window_start, window_end, window_start, window_end))
+    by_address = {}
+    for r in cur.fetchall():
+        by_address.setdefault(r['unit_address'].lower().strip(), []).append(r)
+
+    cur.execute("SELECT address, assignment_date, cleaner_name, cleaner_id FROM pack_cleaner_assignments")
+    cleans_by_address = {}
+    for r in cur.fetchall():
+        cleans_by_address.setdefault(r['address'].lower().strip(), []).append(r)
+
+    cur.execute("SELECT address, next_arrival_date FROM pack_missing_clean_acks")
+    acked = {(r['address'], r['next_arrival_date']) for r in cur.fetchall()}
+    cur.close(); conn.close()
+
+    today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
+    schedule = {}
+    issues = []
+
+    for address, stays in by_address.items():
+        checkouts = sorted(set(s['depart_d'] for s in stays))
+        arrivals = sorted(set(s['arrive_d'] for s in stays))
+        cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
+
+        for checkout in checkouts:
+            next_arrival = next((a for a in arrivals if a > checkout), None)
+
+            match = None
+            for c in cleans:
+                c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
+                if c_date >= checkout and (next_arrival is None or c_date <= next_arrival):
+                    match = c
+                    break
+
+            if match:
+                c_date = datetime.strptime(match['assignment_date'], '%Y-%m-%d').date()
+                pack_date = (c_date - timedelta(days=1)).isoformat()
+                schedule.setdefault(pack_date, []).append({
+                    'address': address,
+                    'checkout_date': checkout.isoformat(),
+                    'clean_date': match['assignment_date'],
+                    'cleaner_id': match['cleaner_id'],
+                    'cleaner_name': match['cleaner_name'] if match['cleaner_id'] else None,
+                    'assigned': bool(match['cleaner_id']),
+                })
+            elif next_arrival:
+                days_until = (next_arrival - today_dt).days
+                if days_until <= 2 and (address, next_arrival.isoformat()) not in acked:
+                    issues.append({
+                        'address': address,
+                        'checkout_date': checkout.isoformat(),
+                        'next_arrival_date': next_arrival.isoformat(),
+                        'days_until_arrival': days_until,
+                    })
+
+    return schedule, issues
+
+@app.route('/api/pack-list/missing-cleans', methods=['GET'])
+def get_missing_clean_issues():
+    """Admin review queue: checkouts with an arrival coming within 2 days
+    and no clean scheduled at all."""
+    today_str = today_central()
+    today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
+    window_end = today_dt + timedelta(days=14)
+    _, issues = compute_pack_schedule(today_dt.isoformat(), window_end.isoformat())
+    return jsonify(sorted(issues, key=lambda i: i['days_until_arrival']))
+
+@app.route('/api/pack-list/missing-cleans/ack', methods=['POST'])
+def ack_missing_clean_issue():
+    """Admin-only: mark a missing-clean issue as reviewed so it stops
+    reappearing. Auto-clears itself if a real clean later gets scheduled
+    for that turnover — this only silences the nag, it doesn't fix
+    anything in Breezeway."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    address = (data.get('address') or '').strip().lower()
+    next_arrival_date = (data.get('next_arrival_date') or '').strip()
+    if not address or not next_arrival_date:
+        return jsonify({'error': 'address and next_arrival_date are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO pack_missing_clean_acks (address, next_arrival_date, acked_by, acked_at)
+        VALUES (%s,%s,%s,%s)
+        ON CONFLICT (address, next_arrival_date) DO UPDATE SET acked_by=EXCLUDED.acked_by, acked_at=EXCLUDED.acked_at
+    """, (address, next_arrival_date, resolve_performer(data), now_central()))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Acknowledged missing clean', address, resolve_performer(data), f'next arrival {next_arrival_date}')
+    return jsonify({'success': True})
+
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
-    """Daily (or future-dated) pack list: every property with a reservation
-    CHECKING OUT that day, plus any last-minute adds, matched to its real
-    linen formula and today's packed/staged status. Deliberately anchored to
-    checkout/departure date, not check-in — packing happens after the
-    outgoing guest leaves and the home gets cleaned, which is a different
-    date than arrival whenever a home sits empty a night or more between
-    guests. (ForecastCentral's own amenity-box forecasting is intentionally
-    unaffected by this — it stays anchored to check-in date, since that's
-    forward-looking prep for who's arriving, not a record of a turnover.)"""
+    """Daily pack list. Pack date comes from compute_pack_schedule — clean
+    day minus 1, not checkout date directly. See that function for the
+    full explanation of how a checkout gets matched to its clean."""
     date_str = (request.args.get('date') or today_central()).strip()
+    schedule, _ = compute_pack_schedule(date_str, date_str)
+    entries = schedule.get(date_str, [])
+
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    cur.execute("""SELECT DISTINCT unit_address FROM forecast_reservations
-                   WHERE TO_DATE(depart,'MM/DD/YYYY') = %s::date""", (date_str,))
-    addrs = set(r['unit_address'].lower().strip() for r in cur.fetchall())
-
     cur.execute("SELECT * FROM pack_emergency_adds WHERE pack_date=%s ORDER BY id DESC", (date_str,))
     emerg_rows = cur.fetchall()
     emerg_map = {}
+    addrs_extra = set()
     for e in emerg_rows:
         key = e['address'].lower().strip()
-        addrs.add(key)
+        addrs_extra.add(key)
         emerg_map[key] = e
 
     cur.execute("SELECT * FROM pack_list_formula")
@@ -4333,20 +4445,16 @@ def get_pack_list():
 
     cur.execute("SELECT * FROM pack_list_status WHERE pack_date=%s", (date_str,))
     statuses = {s['address']: s for s in cur.fetchall()}
+    cur.close(); conn.close()
 
-    cur.execute("SELECT * FROM pack_cleaner_assignments WHERE assignment_date=%s", (date_str,))
-    assignments = {a['address']: a for a in cur.fetchall()}
-
-    properties = []
-    for addr in sorted(addrs):
+    def build(addr, entry):
         f = formulas.get(addr)
         if not f:
             fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
             if fuzzy_addr:
                 f = formulas.get(fuzzy_addr)
         st = statuses.get(addr)
-        asn = assignments.get(addr)
-        properties.append({
+        return {
             'address': addr,
             'property_name': f['property_name'] if f else emerg_map.get(addr, {}).get('address', addr),
             'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')} if f else None,
@@ -4357,11 +4465,19 @@ def get_pack_list():
             'packed_at': st['packed_at'] if st else None,
             'cleaner_name': st['cleaner_name'] if st else None,
             'staged_bags': (st['staged_bag_ids'] or '').split(',') if st and st['staged_bag_ids'] else [],
-            'assigned_cleaner_id': asn['cleaner_id'] if asn else None,
-            'assigned_cleaner_name': asn['cleaner_name'] if asn else None,
-            'assigned_raw': asn['raw_assignee'] if asn and not asn['cleaner_id'] else None,
-        })
-    cur.close(); conn.close()
+            'assigned_cleaner_name': entry.get('cleaner_name') if entry else None,
+            'assigned_cleaner_id': entry.get('cleaner_id') if entry else None,
+            'assigned': entry.get('assigned', False) if entry else False,
+        }
+
+    seen = set()
+    properties = []
+    for entry in entries:
+        properties.append(build(entry['address'], entry))
+        seen.add(entry['address'])
+    for addr in addrs_extra - seen:
+        properties.append(build(addr, None))
+
     return jsonify({'date': date_str, 'properties': properties})
 
 def _build_warehouse_dashboard_data(week_start_weekday=0):
@@ -4377,11 +4493,8 @@ def _build_warehouse_dashboard_data(week_start_weekday=0):
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
-                   FROM forecast_reservations
-                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
-                (week_start_dt.isoformat(), week_end_dt.isoformat()))
-    needed_pairs = {(r['unit_address'].lower().strip(), r['pack_date']) for r in cur.fetchall()}
+    schedule, _ = compute_pack_schedule(week_start_dt.isoformat(), week_end_dt.isoformat())
+    needed_pairs = {(e['address'], d) for d, entries in schedule.items() for e in entries}
     cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
                 (week_start_dt.isoformat(), week_end_dt.isoformat()))
     needed_pairs |= {(r['address'].lower().strip(), r['pack_date']) for r in cur.fetchall()}
@@ -4789,28 +4902,19 @@ def update_warehouse_standing_notes():
 
 @app.route('/api/pack-list/bundles', methods=['GET'])
 def get_bundles_needed():
-    """How many towel bags (pre-packed in sets of 18) and sheet-set bundles
-    (king/queen/twin, one bundle per set — no batching) the warehouse needs
-    to make — broken out day by day, in pickup order, so it's simple to see
-    what's needed for today vs. tomorrow vs. later rather than one lumped
-    total. Missed days (before today, still unpacked) are grouped into their
-    own bucket at the very top, since those need attention first regardless
-    of which specific past date they're from."""
+    """How many towel bags and sheet-set bundles are needed, day by day.
+    Dates come from compute_pack_schedule (clean-based), not raw checkout
+    dates."""
     days_ahead = int(request.args.get('days', 7))
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
     window_end_dt = today_dt + timedelta(days=days_ahead - 1)
-    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())  # hard floor: nothing before this feature existed counts as "missed"
+    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())
+
+    schedule, _ = compute_pack_schedule(lookback_dt.isoformat(), window_end_dt.isoformat())
+    addr_dates = {d: set(e['address'] for e in entries) for d, entries in schedule.items()}
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
-                   FROM forecast_reservations
-                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
-                (lookback_dt.isoformat(), window_end_dt.isoformat()))
-    addr_dates = {}
-    for r in cur.fetchall():
-        addr_dates.setdefault(r['pack_date'], set()).add(r['unit_address'].lower().strip())
-
     cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
                 (lookback_dt.isoformat(), window_end_dt.isoformat()))
     for e in cur.fetchall():
@@ -4888,25 +4992,18 @@ def get_bundles_needed():
 
 @app.route('/api/pack-list/week', methods=['GET'])
 def get_pack_list_week():
-    """Rolling view: any past date that still has an unpacked property (so
-    nothing missed ever silently disappears, no matter how many days go by),
-    plus a 7-day forward window (today through +6) so staff can work ahead.
-    Built in a handful of batched queries across the whole window rather than
-    one query per day."""
+    """Rolling view, clean-based scheduling. Any past date still unpacked,
+    plus 7 days forward."""
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
     window_end_dt = today_dt + timedelta(days=6)
-    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())  # hard floor: nothing before this feature existed counts as "missed"
+    lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())
+
+    schedule, _ = compute_pack_schedule(lookback_dt.isoformat(), window_end_dt.isoformat())
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    cur.execute("""SELECT DISTINCT unit_address, TO_CHAR(TO_DATE(depart,'MM/DD/YYYY'),'YYYY-MM-DD') AS pack_date
-                   FROM forecast_reservations
-                   WHERE TO_DATE(depart,'MM/DD/YYYY') BETWEEN %s AND %s""",
-                (lookback_dt.isoformat(), window_end_dt.isoformat()))
-    addr_dates = {}  # pack_date -> set(addresses)
-    for r in cur.fetchall():
-        addr_dates.setdefault(r['pack_date'], set()).add(r['unit_address'].lower().strip())
+    cur.execute("SELECT * FROM pack_list_formula")
+    formulas = {f['address']: f for f in cur.fetchall()}
 
     cur.execute("SELECT * FROM pack_emergency_adds WHERE pack_date BETWEEN %s AND %s",
                 (lookback_dt.isoformat(), window_end_dt.isoformat()))
@@ -4914,39 +5011,31 @@ def get_pack_list_week():
     emerg_ids = []
     for e in cur.fetchall():
         key = e['address'].lower().strip()
-        addr_dates.setdefault(e['pack_date'], set()).add(key)
         emerg_by_date.setdefault(e['pack_date'], {})[key] = e
         emerg_ids.append(e['id'])
+        schedule.setdefault(e['pack_date'], []).append(
+            {'address': key, 'cleaner_name': None, 'assigned': False})
     acked_by_emerg_id = {}
     if emerg_ids:
         cur.execute("SELECT emergency_id, staff_name FROM pack_emergency_acks WHERE emergency_id = ANY(%s)", (emerg_ids,))
         for a in cur.fetchall():
             acked_by_emerg_id.setdefault(a['emergency_id'], []).append(a['staff_name'])
 
-    cur.execute("SELECT * FROM pack_list_formula")
-    formulas = {f['address']: f for f in cur.fetchall()}
-
     cur.execute("SELECT * FROM pack_list_status WHERE pack_date BETWEEN %s AND %s",
                 (lookback_dt.isoformat(), window_end_dt.isoformat()))
     statuses_by_date = {}
     for s in cur.fetchall():
         statuses_by_date.setdefault(s['pack_date'], {})[s['address']] = s
-
-    cur.execute("SELECT * FROM pack_cleaner_assignments WHERE assignment_date BETWEEN %s AND %s",
-                (lookback_dt.isoformat(), window_end_dt.isoformat()))
-    assignments_by_date = {}
-    for a in cur.fetchall():
-        assignments_by_date.setdefault(a['assignment_date'], {})[a['address']] = a
     cur.close(); conn.close()
 
-    def build_property(addr, pack_date):
+    def build_property(entry, pack_date):
+        addr = entry['address']
         f = formulas.get(addr)
         if not f:
             fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
             if fuzzy_addr:
                 f = formulas.get(fuzzy_addr)
         st = statuses_by_date.get(pack_date, {}).get(addr)
-        asn = assignments_by_date.get(pack_date, {}).get(addr)
         emerg = emerg_by_date.get(pack_date, {}).get(addr)
         return {
             'address': addr,
@@ -4963,23 +5052,22 @@ def get_pack_list_week():
             'packed_at': st['packed_at'] if st else None,
             'cleaner_name': st['cleaner_name'] if st else None,
             'staged_bags': (st['staged_bag_ids'] or '').split(',') if st and st['staged_bag_ids'] else [],
-            'assigned_cleaner_id': asn['cleaner_id'] if asn else None,
-            'assigned_cleaner_name': asn['cleaner_name'] if asn else None,
-            'assigned_raw': asn['raw_assignee'] if asn and not asn['cleaner_id'] else None,
+            'assigned_cleaner_name': entry.get('cleaner_name'),
+            'assigned': entry.get('assigned', False),
             'pack_date': pack_date,
         }
 
     missed = []
-    for d in sorted(dt for dt in addr_dates if dt < today_str):
-        for addr in sorted(addr_dates[d]):
-            st = statuses_by_date.get(d, {}).get(addr)
-            if not st:  # only truly-unpacked ones count as "missed"
-                missed.append(build_property(addr, d))
+    for d in sorted(dt for dt in schedule if dt < today_str):
+        for entry in schedule[d]:
+            st = statuses_by_date.get(d, {}).get(entry['address'])
+            if not st:
+                missed.append(build_property(entry, d))
 
     days = []
     for i in range(7):
         d = (today_dt + timedelta(days=i)).isoformat()
-        props = [build_property(addr, d) for addr in sorted(addr_dates.get(d, set()))]
+        props = [build_property(e, d) for e in schedule.get(d, [])]
         days.append({'date': d, 'properties': props})
 
     return jsonify({'today': today_str, 'missed': missed, 'days': days})
