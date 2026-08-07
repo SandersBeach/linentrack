@@ -2482,13 +2482,14 @@ def breezeway_subscribe_webhook():
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode())
 
-@app.route('/api/breezeway/webhook-subscribe', methods=['POST'])
+@app.route('/api/breezeway/webhook-subscribe', methods=['GET', 'POST'])
 def breezeway_webhook_subscribe_route():
     """Admin-only — run this once after BREEZEWAY_WEBHOOK_SECRET and
     APP_BASE_URL are set in Railway, to register our webhook with Breezeway.
     Safe to re-run any time (e.g. if the URL or secret ever changes)."""
-    data = request.json or {}
-    if not is_admin_pin(str(data.get('pin', ''))):
+    data = request.json if request.is_json else {}
+    pin = request.args.get('pin') or data.get('pin', '')
+    if not is_admin_pin(str(pin)):
         return jsonify({'error': 'Admin PIN required'}), 403
     try:
         result = breezeway_subscribe_webhook()
