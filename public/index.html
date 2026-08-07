@@ -740,6 +740,13 @@
   </div>
 </div>
 
+<div id="modal-warehouse-alert" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:460px">
+    <h3><i class="ic" data-lucide="bell-ring" style="vertical-align:-3px;margin-right:6px"></i>Schedule change from Breezeway</h3>
+    <div id="wh-alert-list"></div>
+  </div>
+</div>
+
 <script>
 // ── State ──────────────────────────────────────────────────────────────────────
 // ── Auto-update detection ────────────────────────────────────────────────────
@@ -784,6 +791,58 @@ function showUpdateBanner() {
   // shift, etc). Nothing ever force-reloads and nobody loses progress.
 }
 startVersionCheck();
+
+// ── Warehouse alerts (real-time Breezeway assignment/day changes) ──────────
+// Polls while a warehouse-role user is signed in on this device and pops up
+// a modal the moment Cassie reassigns a cleaner or moves a clean day in
+// Breezeway — instead of that only showing up next time Pack List refreshes.
+let _whAlertPoll = null;
+let _whAlertQueue = [];
+
+function startWarehouseAlertPolling() {
+  if (_whAlertPoll) return;
+  checkWarehouseAlerts();
+  _whAlertPoll = setInterval(checkWarehouseAlerts, 20000); // every 20 seconds
+}
+function stopWarehouseAlertPolling() {
+  if (_whAlertPoll) { clearInterval(_whAlertPoll); _whAlertPoll = null; }
+  _whAlertQueue = [];
+  const modal = document.getElementById('modal-warehouse-alert');
+  if (modal) modal.style.display = 'none';
+}
+function checkWarehouseAlerts() {
+  fetch('/api/warehouse-alerts').then(r => r.json()).then(data => {
+    if (!Array.isArray(data) || !data.length) return;
+    const newOnes = data.filter(a => !_whAlertQueue.some(q => q.id === a.id));
+    if (newOnes.length) {
+      _whAlertQueue.push(...newOnes);
+      renderWarehouseAlertModal();
+    }
+  }).catch(() => { /* silent — try again next poll */ });
+}
+function renderWarehouseAlertModal() {
+  const modal = document.getElementById('modal-warehouse-alert');
+  const list = document.getElementById('wh-alert-list');
+  if (!modal || !list) return;
+  if (!_whAlertQueue.length) { modal.style.display = 'none'; return; }
+  list.innerHTML = _whAlertQueue.map(a => `
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${a.property_name || a.address}</div>
+        <div class="row-sub">${a.message}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="ackWarehouseAlert(${a.id})">Acknowledged</button>
+    </div>`).join('');
+  modal.style.display = 'flex';
+}
+function ackWarehouseAlert(alertId) {
+  fetch(`/api/warehouse-alerts/${alertId}/ack`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ staff_name: _currentStaffName })
+  }).catch(() => {});
+  _whAlertQueue = _whAlertQueue.filter(a => a.id !== alertId);
+  renderWarehouseAlertModal();
+}
 
 let role = null;
 let pinVal = '';
@@ -878,6 +937,7 @@ async function submitPin() {
     }
     checkPendingQrScan();
     checkPendingSupplyScan();
+    if (userRoles.includes('warehouse')) startWarehouseAlertPolling();
   } catch (e) { document.getElementById('login-err').textContent = 'Connection error'; pinVal = ''; updateDots(); }
 }
 // The sign-in greeting follows the device clock: morning before noon,
@@ -894,6 +954,7 @@ window.addEventListener('load', setLoginGreeting);
 function logout() {
   role = null; userRoles = []; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = '';
   updateDots();
+  stopWarehouseAlertPolling();
   // Close any modal window the previous person left open — otherwise it stays
   // on screen (and interactive) even after someone else logs in.
   closeCameraScan(); // stop any active camera stream, not just hide the modal
@@ -1842,6 +1903,7 @@ function renderCleanerCodesList() {
       <div class="row-main">
         <div class="row-title">${c.name}</div>
         <div class="row-sub">${c.bags_out} bag${c.bags_out !== 1 ? 's' : ''} out/staged</div>
+        <div class="row-sub">${[c.phone, c.email].filter(Boolean).join('  ·  ') || 'No contact info on file'}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;background:var(--gray-50);border:1px solid var(--gray-200);padding:8px 14px;border-radius:var(--radius-sm);flex-shrink:0">
         <span style="font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--gray-400)">PIN</span>
