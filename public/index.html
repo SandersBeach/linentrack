@@ -3529,6 +3529,7 @@ async function handleReceiptFile(file) {
   msg.textContent = 'Reading receipt...'; msg.style.color = 'var(--gray-400)';
   const formData = new FormData();
   formData.append('file', file);
+   formData.append('pin', _currentPin);
   try {
     const res = await fetch('/api/orders/parse-receipt', { method: 'POST', body: formData });
     const data = await res.json();
