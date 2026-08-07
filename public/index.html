@@ -863,7 +863,7 @@ const TABS = {
   manager: ['warehouse_dashboard', 'pack_productivity'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
-  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
   warehouse_home: 'Daily Priorities',
@@ -872,6 +872,7 @@ const TAB_LABELS = {
   loaners: 'Loaners',
   supply_scan: 'Maintenance Supply',
   inventory_count: 'Loaner & Supply Counts',
+  missing_cleans: 'Missing Cleans',
   po_request: 'Purchase Requests',
   weekly_inventory: 'Weekly Inventory',
   amenities_inventory: 'Amenities',
@@ -1223,6 +1224,7 @@ const MODULE_NAMES = {
   forecast: 'Forecast',
   store: 'Inventory Counts',
   pack_list: 'Warehouse',
+  missing_cleans: 'Warehouse',
   daily_tasks: 'Warehouse',
   warehouse_dashboard: 'Warehouse',
   admin_dashboard: 'Warehouse',
@@ -1248,6 +1250,7 @@ function showTab(t) {
     loaners: renderLoaners,
     supply_scan: renderSupplyScan,
     inventory_count: renderInventoryCount,
+    missing_cleans: renderMissingCleans,
     po_request: renderPORequest,
     weekly_inventory: renderWeeklyInventory,
     amenities_inventory: renderAmenitiesInventory,
@@ -4842,6 +4845,38 @@ async function renderBundlesNeeded(gen) {
 
 function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
 
+async function renderMissingCleans(gen) {
+  const issues = await fetch('/api/pack-list/missing-cleans').then(r => r.json());
+  if (_stale(gen)) return;
+  let html = `<div style="margin-bottom:0.85rem">
+    <div style="font-family:var(--font-serif);font-size:22px;color:var(--gray-900)">Missing Cleans</div>
+    <div class="eyebrow" style="margin-top:2px">Checkouts with an arrival coming soon and no clean scheduled yet</div>
+  </div>`;
+  if (!issues.length) {
+    html += `<div class="empty">Nothing to review right now.</div>`;
+  } else {
+    html += issues.map(i => `
+      <div class="card" style="margin-bottom:10px;background:var(--coral-light);border-color:var(--coral)">
+        <div class="row-title">${i.address}</div>
+        <div class="row-sub">Checkout: ${i.checkout_date} · Next arrival: ${i.next_arrival_date} (${i.days_until_arrival} day${i.days_until_arrival !== 1 ? 's' : ''} away)</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="ackMissingClean('${i.address}','${i.next_arrival_date}')">Reviewed — dismiss</button>
+      </div>`).join('');
+  }
+  document.getElementById('main-content').innerHTML = html;
+}
+
+async function ackMissingClean(address, nextArrivalDate) {
+  const pin = await promptModal('Admin PIN required', { placeholder: 'PIN', confirmLabel: 'Continue' });
+  if (!pin) return;
+  const res = await fetch('/api/pack-list/missing-cleans/ack', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ pin, address, next_arrival_date: nextArrivalDate, staff_name: _currentStaffName })
+  });
+  const data = await res.json();
+  if (!res.ok) { notify(data.error || 'Something went wrong', 'error'); return; }
+  showTab('missing_cleans');
+}
+
 function paceCard(label, packed, needed, pct, onclickAction) {
   const color = pct >= 90 ? 'var(--teal)' : pct >= 60 ? '#E2B04A' : 'var(--coral-dark)';
   const clickAttrs = onclickAction ? `style="cursor:pointer" onclick="${onclickAction}"` : '';
@@ -5207,8 +5242,8 @@ function showPropertyDetail(address, packDate) {
       <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePropertyDetail();openSwapCleanerModal('${address}','${packDate}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button>
       <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();undoPack('${address}','${packDate}')">Undo</button>`;
   } else {
-    if (p.assigned_cleaner_name) body += `<div class="row-sub" style="text-align:center;margin-bottom:10px">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>`;
-    else if (p.assigned_raw) body += `<div class="row-sub" style="text-align:center;color:var(--coral-dark);margin-bottom:10px">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>`;
+    if (p.assigned) body += `<div class="row-sub" style="text-align:center;margin-bottom:10px">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>`;
+    else body += `<div class="row-sub" style="text-align:center;color:var(--coral-dark);font-weight:600;margin-bottom:10px">Unassigned</div>`;
     body += `<button class="btn btn-primary btn-full" style="font-size:18px;padding:16px" onclick="closePropertyDetail();openPackModal('${address}','${packDate}')"><i class="ic" data-lucide="check"></i> Mark Packed</button>
       <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${address}','${packDate}')"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`;
   }
@@ -5237,7 +5272,7 @@ function packCard(p, showDate) {
       <div style="text-align:right">
         ${p.packed
           ? `<div class="badge badge-ok"><i class="ic" data-lucide="check"></i> Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name === 'Unassigned' ? '<strong style="color:var(--amber)">Unassigned</strong>' : p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><div style="display:flex;gap:6px;margin-top:4px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="openSwapCleanerModal('${p.address}','${p.pack_date}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button><button class="btn btn-ghost btn-sm" onclick="undoPack('${p.address}','${p.pack_date}')">Undo</button></div>`
-          : `${p.assigned_cleaner_name ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : p.assigned_raw ? `<div class="row-sub" style="color:var(--coral-dark)">Breezeway: "${p.assigned_raw}" — no match, pick manually</div>` : ''}
+          : `${p.assigned ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Unassigned</div>`}
              <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}','${p.pack_date}')"><i class="ic" data-lucide="check"></i> Mark packed</button>
              <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`}
       </div>
