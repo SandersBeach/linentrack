@@ -2331,6 +2331,7 @@ def sync_breezeway_cleaner_assignments(token):
             if not scheduled:
                 continue
             date_str = scheduled[:10]
+            task_id = str(t.get('id') or t.get('task_id') or '') or None
             assignees = t.get('assignments') or []
             raw_names = []
             for a in (assignees if isinstance(assignees, list) else [assignees]):
@@ -2341,13 +2342,13 @@ def sync_breezeway_cleaner_assignments(token):
             raw_assignee = '; '.join(n for n in raw_names if n)
             cleaner = match_cleaner_name(raw_assignee, cleaners, aliases)
             cur2.execute("""
-                INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at,breezeway_task_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (address,assignment_date) DO UPDATE SET
                     cleaner_id=EXCLUDED.cleaner_id, cleaner_name=EXCLUDED.cleaner_name,
-                    raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at
+                    raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at, breezeway_task_id=EXCLUDED.breezeway_task_id
             """, (prop['address'], date_str, cleaner['id'] if cleaner else None,
-                  cleaner['name'] if cleaner else None, raw_assignee, now))
+                  cleaner['name'] if cleaner else None, raw_assignee, now, task_id))
             count += 1
             # Same rule as the manual CSV upload — if this property was
             # already packed 'unassigned' (packed before Breezeway had
