@@ -2516,7 +2516,8 @@ def breezeway_webhook_receive(secret):
         payload = request.json or {}
         task = payload.get('task') if isinstance(payload.get('task'), dict) else payload
         task_id = str(task.get('id') or task.get('task_id') or '').strip()
-        dept = (task.get('type_department') or task.get('department') or '').lower()
+        dept_raw = task.get('type_department') or task.get('department') or ''
+        dept = (dept_raw.get('code') if isinstance(dept_raw, dict) else dept_raw).lower()
         if dept and dept != 'housekeeping':
             return jsonify({'success': True, 'skipped': 'not housekeeping'}), 200
         home_id = task.get('home_id') or task.get('property_id')
