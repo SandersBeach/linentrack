@@ -45,6 +45,17 @@ TWO_STAGE_CATEGORIES = {'FL Repairs/Service Calls'}
 def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
+def friendly_date(date_str):
+    """'2026-08-08' -> 'Saturday, August 8th' — for anything shown to a
+    person (alerts, notifications), never the raw ISO string."""
+    try:
+        d = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except Exception:
+        return date_str
+    day = d.day
+    suffix = 'th' if 11 <= day <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+    return d.strftime('%A, %B ') + f'{day}{suffix}'
+
 def get_setting(key, default=None):
     conn=get_db(); cur=conn.cursor()
     cur.execute("SELECT value FROM app_settings WHERE key=%s",(key,))
@@ -2311,6 +2322,14 @@ def sync_breezeway_cleaner_assignments(token):
 
     cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     now = now_central()
+    # Snapshot what we knew before wiping the window, keyed by Breezeway's
+    # task ID — this is the only way to tell "this task's date moved" apart
+    # from "this is just a task we've never seen," since the delete+rebuild
+    # below has no memory of its own otherwise.
+    cur2.execute("""SELECT address, assignment_date, breezeway_task_id FROM pack_cleaner_assignments
+                    WHERE assignment_date BETWEEN %s AND %s AND breezeway_task_id IS NOT NULL""",
+                 (today_dt.isoformat(), window_end.isoformat()))
+    prior_by_task_id = {r['breezeway_task_id']: r for r in cur2.fetchall()}
     cur2.execute("DELETE FROM pack_cleaner_assignments WHERE assignment_date BETWEEN %s AND %s", (today_dt.isoformat(), window_end.isoformat()))
     count = 0
     errors = []
@@ -2350,20 +2369,37 @@ def sync_breezeway_cleaner_assignments(token):
             """, (prop['address'], date_str, cleaner['id'] if cleaner else None,
                   cleaner['name'] if cleaner else None, raw_assignee, now, task_id))
             count += 1
-            # Same rule as the manual CSV upload — if this property was
-            # already packed 'unassigned' (packed before Breezeway had
-            # anyone confirmed), fill in the real cleaner now rather than
-            # leaving it unassigned until someone notices and swaps it by
-            # hand. Only moves bags still staged.
+
+            # Did this task's date actually move since we last saw it? If so,
+            # carry forward an already-packed status to the new pack day —
+            # never leave a real finished bag looking "not packed" just
+            # because the clean day shifted.
+            if task_id and task_id in prior_by_task_id:
+                prior_row = prior_by_task_id[task_id]
+                if prior_row['assignment_date'] != date_str:
+                    old_pack_date = (datetime.strptime(prior_row['assignment_date'], '%Y-%m-%d').date() - timedelta(days=1)).isoformat()
+                    new_pack_date_moved = (datetime.strptime(date_str, '%Y-%m-%d').date() - timedelta(days=1)).isoformat()
+                    cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s", (prop['address'], old_pack_date))
+                    existing_status = cur2.fetchone()
+                    if existing_status:
+                        cur2.execute("UPDATE pack_list_status SET pack_date=%s WHERE id=%s", (new_pack_date_moved, existing_status['id']))
+                        log_audit('PackListCentral', 'Moved already-packed status with clean date change (sync)', prop['address'],
+                                  'System', f"{old_pack_date} -> {new_pack_date_moved}")
+            # If this property was already packed — either left 'unassigned'
+            # or packed under a since-changed cleaner — fill in / move to the
+            # real, current cleaner now rather than waiting for someone to
+            # notice and swap it by hand. pack_date is clean date minus 1,
+            # not the clean date itself.
             if cleaner:
-                cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s AND cleaner_id IS NULL",
-                             (prop['address'], date_str))
-                unassigned_status = cur2.fetchone()
-                if unassigned_status:
-                    moved, already_gone = _reassign_pack_record_cleaner(cur2, unassigned_status, cleaner)
-                    if moved:
-                        log_audit('PackListCentral', 'Auto-assigned cleaner from Breezeway sync', prop['address'],
-                                  'System', f"Unassigned -> {cleaner['name']} — moved: {', '.join(moved)}")
+                pack_date_for_status = (datetime.strptime(date_str, '%Y-%m-%d').date() - timedelta(days=1)).isoformat()
+                cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s AND (cleaner_id IS NULL OR cleaner_id != %s)",
+                             (prop['address'], pack_date_for_status, cleaner['id']))
+                status_to_update = cur2.fetchone()
+                if status_to_update:
+                    moved, already_gone = _reassign_pack_record_cleaner(cur2, status_to_update, cleaner)
+                    if moved or status_to_update['cleaner_id'] is None:
+                        log_audit('PackListCentral', 'Reassigned cleaner from Breezeway sync', prop['address'],
+                                  'System', f"-> {cleaner['name']} — moved: {', '.join(moved) if moved else 'none staged'}")
     conn.commit(); cur.close(); cur2.close(); conn.close()
     return count, errors
 
@@ -2574,10 +2610,22 @@ def breezeway_webhook_receive(secret):
         now = now_central()
         cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         alerts = []
+        new_pack_date = (datetime.strptime(date_str, '%Y-%m-%d').date() - timedelta(days=1)).isoformat()
+
         if prior:
             if prior['assignment_date'] != date_str:
-                alerts.append(('date', f"{property_name or address}: clean day moved from {prior['assignment_date']} to {date_str} (Breezeway)"))
+                old_pack_date = (datetime.strptime(prior['assignment_date'], '%Y-%m-%d').date() - timedelta(days=1)).isoformat()
+                alerts.append(('date', f"{property_name or address}: clean day moved from {friendly_date(prior['assignment_date'])} to {friendly_date(date_str)} (Breezeway)"))
                 cur2.execute("DELETE FROM pack_cleaner_assignments WHERE address=%s AND assignment_date=%s", (prior['address'], prior['assignment_date']))
+                # Carry forward an already-packed status to the new pack day —
+                # a real finished bag should never look "not packed" again
+                # just because Breezeway moved the clean day.
+                cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s", (address, old_pack_date))
+                existing_status = cur2.fetchone()
+                if existing_status:
+                    cur2.execute("UPDATE pack_list_status SET pack_date=%s WHERE id=%s", (new_pack_date, existing_status['id']))
+                    log_audit('PackListCentral', 'Moved already-packed status with clean date change', address,
+                              'System', f"{old_pack_date} -> {new_pack_date}")
             old_name = prior['cleaner_name'] or (prior['raw_assignee'] or 'Unassigned')
             if old_name != new_cleaner_name:
                 alerts.append(('cleaner', f"{property_name or address}: cleaner changed from {old_name} to {new_cleaner_name} (Breezeway)"))
@@ -2591,18 +2639,19 @@ def breezeway_webhook_receive(secret):
         """, (address, date_str, new_cleaner['id'] if new_cleaner else None, new_cleaner['name'] if new_cleaner else None,
               raw_assignee, now, task_id or None))
 
-        # Same rule the 4-hour sync uses: if this property was already packed
-        # 'unassigned', fill in the real cleaner immediately rather than
-        # waiting for someone to notice and swap it by hand.
+        # If this property was already packed — whether it was left
+        # 'unassigned' or packed under a since-changed cleaner — move the
+        # existing record (and any staged bags) to the real, current
+        # cleaner. Uses new_pack_date, not the clean date itself.
         if new_cleaner:
-            cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s AND cleaner_id IS NULL",
-                         (address, date_str))
-            unassigned_status = cur2.fetchone()
-            if unassigned_status:
-                moved, _ = _reassign_pack_record_cleaner(cur2, unassigned_status, new_cleaner)
-                if moved:
-                    log_audit('PackListCentral', 'Auto-assigned cleaner from Breezeway webhook', address,
-                              'System', f"Unassigned -> {new_cleaner['name']} — moved: {', '.join(moved)}")
+            cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s AND (cleaner_id IS NULL OR cleaner_id != %s)",
+                         (address, new_pack_date, new_cleaner['id']))
+            status_to_update = cur2.fetchone()
+            if status_to_update:
+                moved, _ = _reassign_pack_record_cleaner(cur2, status_to_update, new_cleaner)
+                if moved or status_to_update['cleaner_id'] is None:
+                    log_audit('PackListCentral', 'Reassigned already-packed cleaner from Breezeway webhook', address,
+                              'System', f"-> {new_cleaner['name']} — moved: {', '.join(moved) if moved else 'none staged'}")
 
         for change_type, message in alerts:
             cur2.execute("""INSERT INTO warehouse_alerts (address,property_name,change_type,message,created_at)
