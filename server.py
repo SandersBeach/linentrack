@@ -2562,6 +2562,10 @@ def breezeway_webhook_receive(secret):
         if task_id:
             cur.execute("SELECT * FROM pack_cleaner_assignments WHERE breezeway_task_id=%s", (task_id,))
             prior = cur.fetchone()
+        print(f"[Breezeway Webhook DEBUG] task_id={task_id!r} home_id={home_id!r} address={address!r} "
+              f"new_date={date_str!r} prior_found={prior is not None} "
+              f"prior_date={prior['assignment_date'] if prior else None} "
+              f"prior_cleaner={prior['cleaner_name'] if prior else None}", flush=True)
 
         now = now_central()
         cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
