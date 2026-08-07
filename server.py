@@ -390,6 +390,11 @@ def init_db():
             cleaner_id INTEGER, cleaner_name TEXT, raw_assignee TEXT, updated_at TEXT NOT NULL,
             PRIMARY KEY (address, assignment_date)
         );
+        CREATE TABLE IF NOT EXISTS warehouse_alerts (
+            id SERIAL PRIMARY KEY, address TEXT NOT NULL, property_name TEXT,
+            change_type TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL,
+            seen INTEGER NOT NULL DEFAULT 0, acked_by TEXT, acked_at TEXT
+        );
         CREATE TABLE IF NOT EXISTS warehouse_checkin_sessions (
             id SERIAL PRIMARY KEY, cleaner_id INTEGER NOT NULL,
             started_at TEXT NOT NULL, expires_at TEXT NOT NULL
@@ -430,6 +435,7 @@ def init_db():
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS twin_sleeper INTEGER DEFAULT 0",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS amenity_boxes INTEGER DEFAULT 1",
         "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
+        "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS breezeway_task_id TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -2159,7 +2165,10 @@ def parse_receipt():
 BREEZEWAY_CLIENT_ID = os.environ.get('BREEZEWAY_CLIENT_ID', '')
 BREEZEWAY_CLIENT_SECRET = os.environ.get('BREEZEWAY_CLIENT_SECRET', '')
 BREEZEWAY_BASE = 'https://api.breezeway.io/public'
-BREEZEWAY_SYNC_INTERVAL_SECONDS = 4 * 60 * 60  # every 4 hours
+BREEZEWAY_SYNC_INTERVAL_SECONDS = 4 * 60 * 60  # every 4 hours — safety-net reconciliation;
+                                                 # real-time changes flow through the webhook below
+BREEZEWAY_WEBHOOK_SECRET = os.environ.get('BREEZEWAY_WEBHOOK_SECRET', '')
+APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://sbrlinens.up.railway.app')
 
 def get_breezeway_token():
     """Get a fresh access token. Breezeway access tokens last 24 hours, but
@@ -2455,6 +2464,162 @@ def list_breezeway_assignments():
         return jsonify([dict(r) for r in rows])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def breezeway_subscribe_webhook():
+    """One-time (well, idempotent — safe to re-run) call that tells Breezeway
+    to start pushing task events to our webhook endpoint, instead of us only
+    finding out about changes on the next 4-hour poll."""
+    if not BREEZEWAY_WEBHOOK_SECRET:
+        raise RuntimeError('BREEZEWAY_WEBHOOK_SECRET not set in Railway variables')
+    token = get_breezeway_token()
+    webhook_url = f"{APP_BASE_URL}/api/breezeway/webhook/{BREEZEWAY_WEBHOOK_SECRET}"
+    payload = json.dumps({'url': webhook_url, 'webhook_type': 'task'}).encode()
+    req = urllib.request.Request(
+        f'{BREEZEWAY_BASE}/webhook/v1/subscribe', data=payload,
+        headers={'Authorization': f'JWT {token}', 'accept': 'application/json', 'content-type': 'application/json'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+@app.route('/api/breezeway/webhook-subscribe', methods=['POST'])
+def breezeway_webhook_subscribe_route():
+    """Admin-only — run this once after BREEZEWAY_WEBHOOK_SECRET and
+    APP_BASE_URL are set in Railway, to register our webhook with Breezeway.
+    Safe to re-run any time (e.g. if the URL or secret ever changes)."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    try:
+        result = breezeway_subscribe_webhook()
+        log_audit('Breezeway', 'Subscribed webhook', '', resolve_performer(data), json.dumps(result)[:500])
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/breezeway/webhook/<secret>', methods=['POST'])
+def breezeway_webhook_receive(secret):
+    """Real-time push endpoint. Breezeway calls this the moment a
+    housekeeping task's assignee or scheduled date changes (task-assignment-
+    updated / task-updated events) — no waiting on the 4-hour sync. We apply
+    the single-property change immediately and, if anything actually
+    changed from what we last knew, drop a row in warehouse_alerts so the
+    warehouse dashboard can pop it up right away.
+
+    Always returns 200 (even on our own errors) so Breezeway doesn't treat a
+    hiccup on our end as a reason to retry-storm this endpoint; failures are
+    only logged server-side."""
+    if not BREEZEWAY_WEBHOOK_SECRET or secret != BREEZEWAY_WEBHOOK_SECRET:
+        return jsonify({'error': 'forbidden'}), 403
+    try:
+        payload = request.json or {}
+        task = payload.get('task') if isinstance(payload.get('task'), dict) else payload
+        task_id = str(task.get('id') or task.get('task_id') or '').strip()
+        dept = (task.get('type_department') or task.get('department') or '').lower()
+        if dept and dept != 'housekeeping':
+            return jsonify({'success': True, 'skipped': 'not housekeeping'}), 200
+        home_id = task.get('home_id') or task.get('property_id')
+        scheduled = task.get('scheduled_date') or task.get('date') or ''
+        date_str = scheduled[:10] if scheduled else None
+        if not home_id or not date_str:
+            return jsonify({'success': True, 'skipped': 'missing home_id/date'}), 200
+
+        assignees = task.get('assignments') or task.get('assignees') or []
+        raw_names = []
+        for a in (assignees if isinstance(assignees, list) else [assignees]):
+            if isinstance(a, dict):
+                raw_names.append(a.get('name') or a.get('full_name') or '')
+            elif isinstance(a, str):
+                raw_names.append(a)
+        raw_assignee = '; '.join(n for n in raw_names if n)
+
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT address, property_name FROM breezeway_properties WHERE breezeway_property_id=%s", (int(home_id),))
+        prop = cur.fetchone()
+        if not prop:
+            cur.close(); conn.close()
+            return jsonify({'success': True, 'skipped': 'unknown property'}), 200
+        address, property_name = prop['address'], prop['property_name']
+
+        cur.execute("SELECT id,name FROM cleaners WHERE active=1")
+        cleaners = cur.fetchall()
+        cur.execute("SELECT breezeway_name,cleaner_name FROM cleaner_name_aliases")
+        aliases = {r['breezeway_name'].lower(): r['cleaner_name'] for r in cur.fetchall()}
+        new_cleaner = match_cleaner_name(raw_assignee, cleaners, aliases)
+        new_cleaner_name = new_cleaner['name'] if new_cleaner else (raw_assignee or 'Unassigned')
+
+        prior = None
+        if task_id:
+            cur.execute("SELECT * FROM pack_cleaner_assignments WHERE breezeway_task_id=%s", (task_id,))
+            prior = cur.fetchone()
+
+        now = now_central()
+        cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        alerts = []
+        if prior:
+            if prior['assignment_date'] != date_str:
+                alerts.append(('date', f"{property_name or address}: clean day moved from {prior['assignment_date']} to {date_str} (Breezeway)"))
+                cur2.execute("DELETE FROM pack_cleaner_assignments WHERE address=%s AND assignment_date=%s", (prior['address'], prior['assignment_date']))
+            old_name = prior['cleaner_name'] or (prior['raw_assignee'] or 'Unassigned')
+            if old_name != new_cleaner_name:
+                alerts.append(('cleaner', f"{property_name or address}: cleaner changed from {old_name} to {new_cleaner_name} (Breezeway)"))
+
+        cur2.execute("""
+            INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at,breezeway_task_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (address,assignment_date) DO UPDATE SET
+                cleaner_id=EXCLUDED.cleaner_id, cleaner_name=EXCLUDED.cleaner_name,
+                raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at, breezeway_task_id=EXCLUDED.breezeway_task_id
+        """, (address, date_str, new_cleaner['id'] if new_cleaner else None, new_cleaner['name'] if new_cleaner else None,
+              raw_assignee, now, task_id or None))
+
+        # Same rule the 4-hour sync uses: if this property was already packed
+        # 'unassigned', fill in the real cleaner immediately rather than
+        # waiting for someone to notice and swap it by hand.
+        if new_cleaner:
+            cur2.execute("SELECT * FROM pack_list_status WHERE address=%s AND pack_date=%s AND cleaner_id IS NULL",
+                         (address, date_str))
+            unassigned_status = cur2.fetchone()
+            if unassigned_status:
+                moved, _ = _reassign_pack_record_cleaner(cur2, unassigned_status, new_cleaner)
+                if moved:
+                    log_audit('PackListCentral', 'Auto-assigned cleaner from Breezeway webhook', address,
+                              'System', f"Unassigned -> {new_cleaner['name']} — moved: {', '.join(moved)}")
+
+        for change_type, message in alerts:
+            cur2.execute("""INSERT INTO warehouse_alerts (address,property_name,change_type,message,created_at)
+                             VALUES (%s,%s,%s,%s,%s)""", (address, property_name, change_type, message, now))
+        conn.commit(); cur.close(); cur2.close(); conn.close()
+        if alerts:
+            log_audit('Breezeway', 'Real-time change via webhook', address, 'System', '; '.join(m for _, m in alerts))
+        return jsonify({'success': True, 'alerts_created': len(alerts)}), 200
+    except Exception as e:
+        print(f"[Breezeway Webhook] error: {e}", flush=True)
+        return jsonify({'error': str(e)}), 200
+
+@app.route('/api/warehouse-alerts', methods=['GET'])
+def get_warehouse_alerts():
+    """Unseen Breezeway change alerts for the warehouse pop-up. Polled from
+    the warehouse dashboard every ~20 seconds while a warehouse-role user is
+    signed in."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM warehouse_alerts WHERE seen=0 ORDER BY created_at ASC LIMIT 25")
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/warehouse-alerts/<int:alert_id>/ack', methods=['POST'])
+def ack_warehouse_alert(alert_id):
+    """Dismiss one alert. The iPad is shared between Kim and April, so this
+    is a single shared dismissal rather than a per-person ack — whoever taps
+    it clears it for the device."""
+    data = request.json or {}
+    staff_name = resolve_performer(data)
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE warehouse_alerts SET seen=1, acked_by=%s, acked_at=%s WHERE id=%s",
+                (staff_name, now_central(), alert_id))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():
