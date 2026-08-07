@@ -2530,8 +2530,9 @@ def breezeway_webhook_receive(secret):
         if dept and dept != 'housekeeping':
             print(f"[Breezeway Webhook RAW] filtered out — dept={dept!r} task_id={task_id!r}", flush=True)
             return jsonify({'success': True, 'skipped': 'not housekeeping'}), 200
-        home_id = task.get('home_id') or task.get('property_id')
-        scheduled = task.get('scheduled_date') or task.get('date') or ''
+        home_obj = task.get('home') if isinstance(task.get('home'), dict) else {}
+        home_id = task.get('home_id') or task.get('property_id') or home_obj.get('id')
+        scheduled = task.get('scheduled_date') or task.get('date') or task.get('due_date') or ''
         date_str = scheduled[:10] if scheduled else None
         if not home_id or not date_str:
             print(f"[Breezeway Webhook RAW] filtered out — missing home_id/date. home_id={home_id!r} scheduled={scheduled!r}", flush=True)
