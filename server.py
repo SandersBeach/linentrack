@@ -7,6 +7,7 @@ import pytz
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from PIL import Image as _PILImage, ImageFilter as _PILImageFilter
 
 # Sanders Beach Rentals logo (same asset used in the app's topbar), embedded
 # here so printable bag-tag cards can carry it without depending on any
@@ -17,6 +18,22 @@ _sbr_logo_bytes = base64.b64decode(_SBR_LOGO_DATA_URI.split(',', 1)[1])
 _SBR_LOGO_IMG = ImageReader(io.BytesIO(_sbr_logo_bytes))
 _SBR_LOGO_W_PX, _SBR_LOGO_H_PX = _SBR_LOGO_IMG.getSize()
 _SBR_LOGO_ASPECT = _SBR_LOGO_H_PX / _SBR_LOGO_W_PX
+
+# Bolded variant of the logo for the bag tag back — the wordmark's strokes are thin
+# in the source art and wash out at small print size, which matters here since
+# cleaners often work for multiple property management companies and need to tell
+# bags apart at a glance. Rather than faking bold on a font (this is a raster
+# logo, not text we draw), we dilate the PNG's alpha channel to thicken every
+# stroke uniformly — color and letterforms are untouched, only the weight changes.
+# Computed once at import time so it costs nothing per PDF generation.
+_sbr_logo_pil = _PILImage.open(io.BytesIO(_sbr_logo_bytes)).convert('RGBA')
+_r, _g, _b, _a = _sbr_logo_pil.split()
+_a_bold = _a.filter(_PILImageFilter.MaxFilter(9))
+_sbr_logo_bold_pil = _PILImage.merge('RGBA', (_r, _g, _b, _a_bold))
+_sbr_logo_bold_buf = io.BytesIO()
+_sbr_logo_bold_pil.save(_sbr_logo_bold_buf, format='PNG')
+_sbr_logo_bold_buf.seek(0)
+_SBR_LOGO_BOLD_IMG = ImageReader(_sbr_logo_bold_buf)
 
 app = Flask(__name__, static_folder='public', static_url_path='')
 CENTRAL = pytz.timezone('America/Chicago')
@@ -1254,11 +1271,11 @@ def bags_qr_cards_pdf():
                 # business, so it only needs to print once. Some cleaning
                 # companies work multiple property managers, so the logo up
                 # top makes clear whose bag it is at a glance.
-                logo_w = 1.7 * _CARD_IN  # bumped up from 1.3in per Kristin's request — home name/address sizing is untouched, it's still centered in whatever room is left below the logo
+                logo_w = 1.95 * _CARD_IN  # sized up further per Kristin's request (from 1.3in originally) — needs to read clearly at a glance since cleaners may work for multiple property management companies; home name/address sizing below is untouched
                 logo_h = logo_w * _SBR_LOGO_ASPECT
                 logo_x = x + (_CARD_W - logo_w) / 2
                 logo_y = y + _CARD_H - logo_h - 0.16 * _CARD_IN
-                c.drawImage(_SBR_LOGO_IMG, logo_x, logo_y, logo_w, logo_h, mask='auto')
+                c.drawImage(_SBR_LOGO_BOLD_IMG, logo_x, logo_y, logo_w, logo_h, mask='auto')  # bold variant — same color, thicker strokes so it doesn't wash out at print size
 
                 name = bag['home_name']
                 font_size = 18
