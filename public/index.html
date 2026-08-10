@@ -696,6 +696,13 @@
       <div><label>Queen sleeper sets</label><input type="number" id="af-queen_sleeper" value="0" min="0"></div>
       <div><label>Twin sleeper sets</label><input type="number" id="af-twin_sleeper" value="0" min="0"></div>
       <div><label>Amenity boxes</label><input type="number" id="af-amenity_boxes" value="1" min="0"></div>
+      <div><label>Toilet paper</label><input type="number" id="af-toilet_paper" value="0" min="0"></div>
+      <div><label>Small trash bags</label><input type="number" id="af-small_trash_bags" value="0" min="0"></div>
+      <div><label>Sham/Cond/Soap sets</label><input type="number" id="af-soap_sets" value="0" min="0"></div>
+      <div><label>Bar soap</label><input type="number" id="af-bar_soap" value="0" min="0"></div>
+      <div><label>Paper towels</label><input type="number" id="af-paper_towels" value="0" min="0"></div>
+      <div><label>Kitchen bags (cleaner)</label><input type="number" id="af-kitchen_bags_cleaner" value="2" min="0"></div>
+      <div><label>Red bag (cleaner)</label><input type="number" id="af-red_bag_cleaner" value="1" min="0"></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:1rem">
       <button class="btn btn-ghost" style="flex:1" onclick="document.getElementById('modal-add-formula').style.display='none'">Cancel</button>
@@ -2007,6 +2014,13 @@ async function renderSettings(gen) {
         <div><label>Queen sleeper sets</label><input type="number" id="nh-queen_sleeper" value="0" min="0"></div>
         <div><label>Twin sleeper sets</label><input type="number" id="nh-twin_sleeper" value="0" min="0"></div>
         <div><label>Amenity boxes</label><input type="number" id="nh-amenity_boxes" value="1" min="0"></div>
+        <div><label>Toilet paper</label><input type="number" id="nh-toilet_paper" value="0" min="0"></div>
+        <div><label>Small trash bags</label><input type="number" id="nh-small_trash_bags" value="0" min="0"></div>
+        <div><label>Sham/Cond/Soap sets</label><input type="number" id="nh-soap_sets" value="0" min="0"></div>
+        <div><label>Bar soap</label><input type="number" id="nh-bar_soap" value="0" min="0"></div>
+        <div><label>Paper towels</label><input type="number" id="nh-paper_towels" value="0" min="0"></div>
+        <div><label>Kitchen bags (cleaner)</label><input type="number" id="nh-kitchen_bags_cleaner" value="2" min="0"></div>
+        <div><label>Red bag (cleaner)</label><input type="number" id="nh-red_bag_cleaner" value="1" min="0"></div>
       </div>
     </div>
     <button class="btn btn-primary btn-full" style="margin-top:12px" onclick="addHome()">Add home</button>
@@ -2395,7 +2409,7 @@ async function addHome() {
   if(!name||!code){notify('Name and code are required');return;}
   const tag_count = document.getElementById('new-home-tag-count')?.value || 0;
   const body = { name, code, tag_count, staff_name: _currentStaffName };
-  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => {
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner'].forEach(f => {
     body[f] = document.getElementById('nh-'+f)?.value || 0;
   });
   const r=await fetch('/api/homes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -4751,6 +4765,29 @@ function closeCameraScan() {
   if (modal) modal.style.display = 'none';
 }
 
+function formulaSummaryLine(f) {
+  return `${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats`
+    + (f.pool ? ' · ' + f.pool + ' pool' : '')
+    + (f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : '')
+    + (f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : '')
+    + (f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : '')
+    + (f.toilet_paper ? ' · ' + f.toilet_paper + ' TP' : '')
+    + (f.small_trash_bags ? ' · ' + f.small_trash_bags + ' small trash bags' : '')
+    + (f.soap_sets ? ' · ' + f.soap_sets + ' soap sets' : '')
+    + (f.bar_soap ? ' · ' + f.bar_soap + ' bar soap' : '')
+    + (f.paper_towels ? ' · ' + f.paper_towels + ' paper towels' : '')
+    + (f.kitchen_bags_cleaner ? ' · ' + f.kitchen_bags_cleaner + ' kitchen bags (cleaner)' : '')
+    + (f.red_bag_cleaner ? ' · ' + f.red_bag_cleaner + ' red bag (cleaner)' : '');
+}
+function humanDate(dateStr) {
+  // '2026-08-08' -> 'Friday August 8th' — the one place raw ISO dates get
+  // turned into something a person can read at a glance.
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDate();
+  const suffix = (day >= 11 && day <= 13) ? 'th' : ({1:'st',2:'nd',3:'rd'}[day % 10] || 'th');
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long' }) + ' ' + day + suffix;
+}
 function todayISO() {
   const d = new Date();
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -4776,14 +4813,26 @@ let _packListRefreshTimer = null;
 
 let _bundlesDays = 5;
 
+const BUNDLE_SUPPLY_TILES = [
+  ['toilet_paper_needed', 'Toilet paper'],
+  ['small_trash_bags_needed', 'Small trash bags'],
+  ['soap_sets_needed', 'Sham/Cond/Soap sets'],
+  ['bar_soap_needed', 'Bar soap'],
+  ['paper_towels_needed', 'Paper towels'],
+  ['kitchen_bags_cleaner_needed', 'Kitchen bags (cleaner)'],
+  ['red_bag_cleaner_needed', 'Red bags (cleaner)'],
+];
+
 function bundlesDayRow(d, isMissed) {
   if (d.properties_counted === 0 && d.missing_formula.length === 0) {
-    return `<div class="row"><div class="row-main"><div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div><div class="row-sub">Nothing needed</div></div></div>`;
+    return `<div class="row"><div class="row-main"><div class="row-title">${d.label}</div><div class="row-sub">Nothing needed</div></div></div>`;
   }
+  const supplyLine = BUNDLE_SUPPLY_TILES.map(([key, label]) => `${d[key]} ${label}`).join(' · ');
   return `<div class="row" style="${isMissed ? 'background:#FAECE7' : ''}">
     <div class="row-main">
-      <div class="row-title">${d.label}${d.date ? ` <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span>` : ''}</div>
+      <div class="row-title">${d.label}</div>
       <div class="row-sub">${d.properties_counted} propert${d.properties_counted===1?'y':'ies'} · ${d.towel_bags_needed} towel bag${d.towel_bags_needed!==1?'s':''} · ${d.king_bundles_needed}K · ${d.queen_bundles_needed}Q · ${d.twin_bundles_needed}T · ${d.queen_sleeper_needed} Q-sleeper · ${d.twin_sleeper_needed} T-sleeper · ${d.amenity_boxes_needed} amenity box${d.amenity_boxes_needed!==1?'es':''}
+      <br><span style="color:var(--gray-700)">${supplyLine}</span>
       ${d.missing_formula.length ? `<br><span style="color:var(--coral-dark)"><i class="ic" data-lucide="triangle-alert"></i> ${d.missing_formula.length} not counted — no packing formula on file</span>` : ''}</div>
     </div>
   </div>`;
@@ -4799,6 +4848,10 @@ function renderBundlesBody(data) {
   const totalQueenSleeper = data.missed.queen_sleeper_needed + data.days.reduce((s, d) => s + d.queen_sleeper_needed, 0);
   const totalTwinSleeper = data.missed.twin_sleeper_needed + data.days.reduce((s, d) => s + d.twin_sleeper_needed, 0);
   const totalAmenityBoxes = data.missed.amenity_boxes_needed + data.days.reduce((s, d) => s + d.amenity_boxes_needed, 0);
+  const supplyTotals = {};
+  BUNDLE_SUPPLY_TILES.forEach(([key]) => {
+    supplyTotals[key] = data.missed[key] + data.days.reduce((s, d) => s + d[key], 0);
+  });
 
   const rangeLabel = _bundlesDays === 7 ? 'Week' : _bundlesDays === 14 ? '2 Weeks' : _bundlesDays === 30 ? 'Month' : `${_bundlesDays} days`;
   let html = `<div class="card" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:1rem">
@@ -4816,9 +4869,11 @@ function renderBundlesBody(data) {
         <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalQueenSleeper}</div><div class="row-sub">Queen sleeper sets</div></div>
         <div style="text-align:center"><div style="font-size:32px;font-weight:700">${totalTwinSleeper}</div><div class="row-sub">Twin sleeper sets</div></div>
         <div style="text-align:center"><div style="font-size:32px;font-weight:700;color:var(--teal)">${totalAmenityBoxes}</div><div class="row-sub">Amenity boxes</div></div>
+        ${BUNDLE_SUPPLY_TILES.map(([key, label]) => `<div style="text-align:center"><div style="font-size:32px;font-weight:700">${supplyTotals[key]}</div><div class="row-sub">${label}</div></div>`).join('')}
       </div>
     </div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Each row shows what to make for that specific day — missed days always show first, since those need attention now.</p>
+
     <div class="card">`;
   if (data.missed.properties_counted > 0 || data.missed.missing_formula.length > 0) {
     html += bundlesDayRow(data.missed, true);
@@ -4858,7 +4913,7 @@ async function renderMissingCleans(gen) {
     html += issues.map(i => `
       <div class="card" style="margin-bottom:10px;background:var(--coral-light);border-color:var(--coral)">
         <div class="row-title">${i.address}</div>
-        <div class="row-sub">Checkout: ${i.checkout_date} · Next arrival: ${i.next_arrival_date} (${i.days_until_arrival} day${i.days_until_arrival !== 1 ? 's' : ''} away)</div>
+        <div class="row-sub">Checkout: ${humanDate(i.checkout_date)} · Next arrival: ${humanDate(i.next_arrival_date)} (${i.days_until_arrival} day${i.days_until_arrival !== 1 ? 's' : ''} away)</div>
         <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="ackMissingClean('${i.address}','${i.next_arrival_date}')">Reviewed — dismiss</button>
       </div>`).join('');
   }
@@ -5230,6 +5285,13 @@ function showPropertyDetail(address, packDate) {
       ${f.queen_sleeper ? box(f.queen_sleeper, 'Queen sleeper sets') : ''}
       ${f.twin_sleeper ? box(f.twin_sleeper, 'Twin sleeper sets') : ''}
       ${f.amenity_boxes ? box(f.amenity_boxes, 'Amenity boxes') : ''}
+      ${f.toilet_paper ? box(f.toilet_paper, 'Toilet paper') : ''}
+      ${f.small_trash_bags ? box(f.small_trash_bags, 'Small trash bags') : ''}
+      ${f.soap_sets ? box(f.soap_sets, 'Sham/Cond/Soap sets') : ''}
+      ${f.bar_soap ? box(f.bar_soap, 'Bar soap') : ''}
+      ${f.paper_towels ? box(f.paper_towels, 'Paper towels') : ''}
+      ${f.kitchen_bags_cleaner ? box(f.kitchen_bags_cleaner, 'Kitchen bags (cleaner)') : ''}
+      ${f.red_bag_cleaner ? box(f.red_bag_cleaner, 'Red bag (cleaner)') : ''}
     </div>`;
     if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px"><i class="ic" data-lucide="pencil"></i> Edit formula</a></div>`;
   } else {
@@ -5267,7 +5329,7 @@ function packCard(p, showDate) {
       <div style="cursor:pointer" onclick="showPropertyDetail('${p.address}','${p.pack_date}')">
         <div class="row-title" style="font-weight:600">${p.property_name} <span class="row-hint">tap to enlarge</span></div>
         ${dateLine}
-        ${f ? `<div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
+        ${f ? `<div class="row-sub">${formulaSummaryLine(f)}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
       </div>
       <div style="text-align:right">
         ${p.packed
@@ -5302,7 +5364,7 @@ function renderPackListBody(invTask, shortages) {
     html += `<div class="card" style="background:#FAECE7;border-color:#D85A30">
       <div class="card-title" style="color:var(--coral-dark)"><i class="ic" data-lucide="package"></i> Packed Bag Short (${shortages.length})</div>
       <div class="row-sub" style="margin-bottom:8px">These bags went out missing something — top them off when the bag returns, then check it off.</div>
-      ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + s.pack_date : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})"><i class="ic" data-lucide="check"></i> Now Complete</button></div>`).join('')}
+      ${shortages.map(s => `<div class="row"><div class="row-main"><div class="row-title">${s.address}${s.pack_date ? ' — ' + humanDate(s.pack_date) : ''}</div><div class="row-sub">Short ${s.quantity_short} × ${s.item_name}${s.notes ? ' · ' + s.notes : ''} · reported by ${s.reported_by}</div></div><button class="btn btn-primary btn-sm" onclick="resolvePackShortage(${s.id})"><i class="ic" data-lucide="check"></i> Now Complete</button></div>`).join('')}
     </div>`;
   }
   if (invTask && invTask.is_task_day && !invTask.completed_today) {
@@ -5343,11 +5405,10 @@ function renderPackListBody(invTask, shortages) {
     const packed = d.properties.filter(p => p.packed).length;
     const total = d.properties.length;
     const pct = total ? Math.round(packed / total * 100) : 0;
-    const dateObj = new Date(d.date + 'T00:00:00');
-    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    const label = d.label || (i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
     return `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:${total ? '10px' : '0'}">
-        <div style="font-weight:600;font-size:15px">${label} <span style="font-weight:400;color:var(--gray-400);font-size:12px">${d.date}</span></div>
+        <div style="font-weight:600;font-size:15px">${label}</div>
         ${total ? `<span class="badge badge-count">${packed}/${total} packed</span>` : '<span class="row-sub">No checkouts scheduled</span>'}
       </div>
       ${total ? `<div style="background:var(--gray-100);border-radius:6px;height:6px;overflow:hidden;margin-bottom:10px"><div style="height:100%;background:var(--teal);width:${pct}%"></div></div>` : ''}
@@ -5531,7 +5592,7 @@ let _allFormulas = [];
 function openAddFormulaModal(propertyName) {
   document.getElementById('af-modal-title').textContent = 'Add packing formula';
   document.getElementById('af-property-name').value = propertyName || '';
-  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => document.getElementById('af-'+f).value = f === 'amenity_boxes' ? 1 : 0);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner'].forEach(f => document.getElementById('af-'+f).value = f === 'amenity_boxes' ? 1 : f === 'kitchen_bags_cleaner' ? 2 : f === 'red_bag_cleaner' ? 1 : 0);
   document.getElementById('modal-add-formula').style.display = 'flex';
 }
 function openEditFormulaModal(address) {
@@ -5545,14 +5606,14 @@ function openEditFormulaModal(address) {
   if (!formula) { notify('Could not find that property\'s formula to edit.'); return; }
   document.getElementById('af-modal-title').textContent = 'Edit packing formula';
   document.getElementById('af-property-name').value = propertyName;
-  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => document.getElementById('af-'+f).value = formula[f] || 0);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner'].forEach(f => document.getElementById('af-'+f).value = formula[f] || 0);
   document.getElementById('modal-add-formula').style.display = 'flex';
 }
 async function submitAddFormula() {
   const property_name = document.getElementById('af-property-name').value.trim();
   if (!property_name) { notify('Enter a property name'); return; }
   const body = { property_name, pin: _currentPin };
-  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'].forEach(f => body[f] = document.getElementById('af-'+f).value);
+  ['king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner'].forEach(f => body[f] = document.getElementById('af-'+f).value);
   const res = await fetch('/api/pack-list/formula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
   if (!res.ok) { notify(data.error || 'Error'); return; }
@@ -5830,7 +5891,7 @@ function renderManageFormulasList() {
     html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
   }
   html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
-  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${f.king}K · ${f.queen}Q · ${f.twin}T · ${f.towels} towels · ${f.hand} hand · ${f.wash} wash · ${f.mats} mats${f.pool ? ' · ' + f.pool + ' pool' : ''}${f.queen_sleeper ? ' · ' + f.queen_sleeper + ' Q sleeper' : ''}${f.twin_sleeper ? ' · ' + f.twin_sleeper + ' T sleeper' : ''}${f.amenity_boxes ? ' · ' + f.amenity_boxes + ' amenity box' + (f.amenity_boxes!==1?'es':'') : ''}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')"><i class="ic" data-lucide="pencil"></i> Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${formulaSummaryLine(f)}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')"><i class="ic" data-lucide="pencil"></i> Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
   el.innerHTML = html;
 }
 
