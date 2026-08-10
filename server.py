@@ -46,15 +46,28 @@ def now_central():
     return datetime.now(pytz.utc).astimezone(CENTRAL).strftime('%Y-%m-%d %H:%M:%S')
 
 def friendly_date(date_str):
-    """'2026-08-08' -> 'Saturday, August 8th' — for anything shown to a
-    person (alerts, notifications), never the raw ISO string."""
+    """'2026-08-08' -> 'Saturday August 8th' — for anything shown to a
+    person (alerts, notifications, pack lists), never the raw ISO string."""
     try:
         d = datetime.strptime(date_str, '%Y-%m-%d').date()
     except Exception:
         return date_str
     day = d.day
     suffix = 'th' if 11 <= day <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
-    return d.strftime('%A, %B ') + f'{day}{suffix}'
+    return d.strftime('%A %B ') + f'{day}{suffix}'
+
+def pack_day_label(date_str, today_str=None):
+    """'Today' / 'Tomorrow' / 'Friday August 8th' — the one place that
+    decides how a pack-list day should read for a person, so every screen
+    (Bundles Needed, Pack List week view, etc.) says the same thing the
+    same way instead of falling back to a raw ISO date."""
+    today_str = today_str or today_central()
+    if date_str == today_str:
+        return 'Today'
+    tomorrow_str = (datetime.strptime(today_str, '%Y-%m-%d').date() + timedelta(days=1)).isoformat()
+    if date_str == tomorrow_str:
+        return 'Tomorrow'
+    return friendly_date(date_str)
 
 def get_setting(key, default=None):
     conn=get_db(); cur=conn.cursor()
@@ -330,7 +343,11 @@ def init_db():
             towels INTEGER DEFAULT 0, hand INTEGER DEFAULT 0, wash INTEGER DEFAULT 0,
             mats INTEGER DEFAULT 0, pool INTEGER DEFAULT 0,
             queen_sleeper INTEGER DEFAULT 0, twin_sleeper INTEGER DEFAULT 0,
-            amenity_boxes INTEGER DEFAULT 1, updated_at TEXT
+            amenity_boxes INTEGER DEFAULT 1, updated_at TEXT,
+            toilet_paper INTEGER DEFAULT 0, small_trash_bags INTEGER DEFAULT 0,
+            soap_sets INTEGER DEFAULT 0, bar_soap INTEGER DEFAULT 0,
+            paper_towels INTEGER DEFAULT 0,
+            kitchen_bags_cleaner INTEGER DEFAULT 2, red_bag_cleaner INTEGER DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS staff_days_off (
             id SERIAL PRIMARY KEY, staff_name TEXT NOT NULL,
@@ -452,6 +469,13 @@ def init_db():
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS queen_sleeper INTEGER DEFAULT 0",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS twin_sleeper INTEGER DEFAULT 0",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS amenity_boxes INTEGER DEFAULT 1",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS toilet_paper INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS small_trash_bags INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS soap_sets INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS bar_soap INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS paper_towels INTEGER DEFAULT 0",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS kitchen_bags_cleaner INTEGER DEFAULT 2",
+        "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS red_bag_cleaner INTEGER DEFAULT 1",
         "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
         "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS breezeway_task_id TEXT",
     ]:
@@ -875,7 +899,8 @@ def add_home():
         cur.execute("INSERT INTO bags (id,home_id,status) VALUES (%s,%s,'in') ON CONFLICT (id) DO NOTHING", (bag_id, home_id))
         created_bags.append(bag_id)
 
-    formula_fields = ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')
+    formula_fields = ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes',
+                       'toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner')
     formula_given = any(k in data for k in formula_fields)
     if formula_given:
         fields = {}
@@ -884,13 +909,19 @@ def add_home():
             except (TypeError, ValueError): fields[k] = 0
         ts = now_central()
         cur.execute("""
-            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,updated_at)
-            VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,%(ts)s)
+            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,
+                toilet_paper,small_trash_bags,soap_sets,bar_soap,paper_towels,kitchen_bags_cleaner,red_bag_cleaner,updated_at)
+            VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,
+                %(toilet_paper)s,%(small_trash_bags)s,%(soap_sets)s,%(bar_soap)s,%(paper_towels)s,%(kitchen_bags_cleaner)s,%(red_bag_cleaner)s,%(ts)s)
             ON CONFLICT (address) DO UPDATE SET
                 property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
                 twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
                 mats=EXCLUDED.mats, pool=EXCLUDED.pool, queen_sleeper=EXCLUDED.queen_sleeper,
-                twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes, updated_at=EXCLUDED.updated_at
+                twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes,
+                toilet_paper=EXCLUDED.toilet_paper, small_trash_bags=EXCLUDED.small_trash_bags,
+                soap_sets=EXCLUDED.soap_sets, bar_soap=EXCLUDED.bar_soap, paper_towels=EXCLUDED.paper_towels,
+                kitchen_bags_cleaner=EXCLUDED.kitchen_bags_cleaner, red_bag_cleaner=EXCLUDED.red_bag_cleaner,
+                updated_at=EXCLUDED.updated_at
         """, {'address': name.lower().strip(), 'property_name': name, 'ts': ts, **fields})
 
     conn.commit(); cur.close(); conn.close()
@@ -2815,80 +2846,80 @@ def cancel_order(oid):
 # ── Staff PIN Management ──────────────────────────────────────────────────────
 
 PACK_FORMULA_SEED = [
-    {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '1217 western lake drive', 'property_name': '1217 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '124 sunset ridge lane', 'property_name': '124 Sunset Ridge Lane', 'king': 2, 'queen': 0, 'twin': 5, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '134 royal fern way', 'property_name': '134 Royal Fern Way', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '1352 western lake drive', 'property_name': '1352 Western Lake Drive', 'king': 2, 'queen': 0, 'twin': 6, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '138 east royal fern way', 'property_name': '138 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '142 mystic cobalt street', 'property_name': '142 Mystic Cobalt Street', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '157 sunflower street', 'property_name': '157 Sunflower Street', 'king': 4, 'queen': 2, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '1735 east co hwy 30a #203', 'property_name': '1735 East Co Hwy 30A #203', 'king': 1, 'queen': 2, 'twin': 0, 'towels': 12, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '176 red cedar way', 'property_name': '176 Red Cedar Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '179 pine needle way', 'property_name': '179 Pine Needle Way', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '184 east royal fern way', 'property_name': '184 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '22 flatwood street', 'property_name': '22 Flatwood Street', 'king': 4, 'queen': 0, 'twin': 9, 'towels': 30, 'hand': 16, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '25 lake district lane', 'property_name': '25 Lake District Lane', 'king': 1, 'queen': 4, 'twin': 1, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '25 rain lily lane', 'property_name': '25 Rain Lily Lane', 'king': 5, 'queen': 6, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '254 spartina circle', 'property_name': '254 Spartina Circle', 'king': 2, 'queen': 4, 'twin': 1, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '255 garfield street', 'property_name': '255 Garfield Street', 'king': 4, 'queen': 1, 'twin': 6, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1},
-    {'address': '260 needlerush drive', 'property_name': '260 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '262 garfield street', 'property_name': '262 Garfield Street', 'king': 3, 'queen': 1, 'twin': 6, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '263 magnolia street', 'property_name': '263 Magnolia Street', 'king': 4, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '271 red cedar way', 'property_name': '271 Red Cedar Way', 'king': 5, 'queen': 0, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '2743 e co hwy 30a, unit 303', 'property_name': '2743 E Co Hwy 30A, Unit 303', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '29 royal fern way', 'property_name': '29 Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '2912 e. co hwy 30a', 'property_name': '2912 E. Co Hwy 30A', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 16, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '295 salt box lane', 'property_name': '295 Salt Box Lane', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '31 bluejack street', 'property_name': '31 Bluejack Street', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '349 needlerush drive', 'property_name': '349 Needlerush Drive', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 4, 'amenity_boxes': 1},
-    {'address': '35 suzanne drive', 'property_name': '35 Suzanne Drive', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '369 spartina circle', 'property_name': '369 Spartina Circle', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '37 compass point ii, unit 106', 'property_name': '37 Compass Point II, Unit 106', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '37 red cedar way', 'property_name': '37 Red Cedar Way', 'king': 1, 'queen': 4, 'twin': 0, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '379 east royal fern way', 'property_name': '379 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '394 western lake drive', 'property_name': '394 Western Lake Drive', 'king': 1, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1},
-    {'address': '397 needlerush drive', 'property_name': '397 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '406 red cedar way', 'property_name': '406 Red Cedar Way', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '410 pine needle way', 'property_name': '410 Pine Needle Way', 'king': 2, 'queen': 1, 'twin': 8, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '422 pine needle way', 'property_name': '422 Pine Needle Way', 'king': 2, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '428 red cedar way', 'property_name': '428 Red Cedar Way', 'king': 4, 'queen': 3, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '43 sand hill circle', 'property_name': '43 Sand Hill Circle', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 36, 'hand': 12, 'wash': 24, 'mats': 6, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '433 pine needle way', 'property_name': '433 Pine Needle Way', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '44 thicket circle', 'property_name': '44 Thicket Circle', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '442 east royal fern way', 'property_name': '442 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '446 western lake drive', 'property_name': '446 Western Lake Drive', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '46 pine needle way', 'property_name': '46 Pine Needle Way', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '49 bluejack street', 'property_name': '49 Bluejack Street', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 2, 'amenity_boxes': 1},
-    {'address': '5 pond cypress way', 'property_name': '5 Pond Cypress Way', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '51 mistflower lane', 'property_name': '51 Mistflower Lane', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '53 muhly circle', 'property_name': '53 Muhly Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '65 pond cypress circle', 'property_name': '65 Pond Cypress Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '672 western lake drive', 'property_name': '672 Western Lake Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '70 scrub oak circle', 'property_name': '70 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '70 sunset ridge lane', 'property_name': '70 Sunset Ridge Lane', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '72 needlerush drive', 'property_name': '72 Needlerush Drive', 'king': 2, 'queen': 1, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '728 western lake drive', 'property_name': '728 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '73 holly street', 'property_name': '73 Holly Street', 'king': 4, 'queen': 4, 'twin': 8, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 16, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '73 pond cypress circle', 'property_name': '73 Pond Cypress Circle', 'king': 5, 'queen': 2, 'twin': 3, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '75 east summersweet lane', 'property_name': '75 East Summersweet Lane', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '80 scrub oak circle', 'property_name': '80 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '86 sunset ridge lane', 'property_name': '86 Sunset Ridge Lane', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': '9 running oak circle', 'property_name': '9 Running Oak Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '90 flatwood street', 'property_name': '90 Flatwood Street', 'king': 5, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '91 bluejack street', 'property_name': '91 Bluejack Street', 'king': 3, 'queen': 0, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '93 needlerush drive', 'property_name': '93 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '97 east summersweet lane', 'property_name': '97 East Summersweet Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
-    {'address': '99 pond cypress way', 'property_name': '99 Pond Cypress Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1},
-    {'address': 'steve "bay house"', 'property_name': 'Steve "Bay House"', 'king': 4, 'queen': 0, 'twin': 6, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1},
+    {'address': '100 tumblehome way', 'property_name': '100 Tumblehome Way', 'king': 2, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '109 dandelion drive', 'property_name': '109 Dandelion Drive', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '12 viridian park drive', 'property_name': '12 Viridian Park Drive', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '1217 western lake drive', 'property_name': '1217 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '124 sunset ridge lane', 'property_name': '124 Sunset Ridge Lane', 'king': 2, 'queen': 0, 'twin': 5, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 6, 'small_trash_bags': 6, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '134 royal fern way', 'property_name': '134 Royal Fern Way', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '1352 western lake drive', 'property_name': '1352 Western Lake Drive', 'king': 2, 'queen': 0, 'twin': 6, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 6, 'small_trash_bags': 6, 'soap_sets': 3, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '138 east royal fern way', 'property_name': '138 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '142 mystic cobalt street', 'property_name': '142 Mystic Cobalt Street', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '157 sunflower street', 'property_name': '157 Sunflower Street', 'king': 4, 'queen': 2, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 6, 'bar_soap': 8, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '1735 east co hwy 30a #203', 'property_name': '1735 East Co Hwy 30A #203', 'king': 1, 'queen': 2, 'twin': 0, 'towels': 12, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 4, 'small_trash_bags': 4, 'soap_sets': 2, 'bar_soap': 4, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '176 red cedar way', 'property_name': '176 Red Cedar Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '179 pine needle way', 'property_name': '179 Pine Needle Way', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 6, 'small_trash_bags': 6, 'soap_sets': 3, 'bar_soap': 3, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '184 east royal fern way', 'property_name': '184 East Royal Fern Way', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '19 muhly circle', 'property_name': '19 Muhly Circle', 'king': 3, 'queen': 2, 'twin': 2, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '194 spartina circle', 'property_name': '194 Spartina Circle', 'king': 3, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '20 tall timber court', 'property_name': '20 Tall Timber Court', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '2060 e co hwy 30a', 'property_name': '2060 E Co Hwy 30A', 'king': 1, 'queen': 0, 'twin': 0, 'towels': 6, 'hand': 2, 'wash': 4, 'mats': 1, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 2, 'small_trash_bags': 2, 'soap_sets': 1, 'bar_soap': 2, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '209 western lake drive', 'property_name': '209 Western Lake Drive', 'king': 4, 'queen': 2, 'twin': 8, 'towels': 42, 'hand': 16, 'wash': 28, 'mats': 7, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 16, 'small_trash_bags': 16, 'soap_sets': 7, 'bar_soap': 9, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '21 chanel court', 'property_name': '21 Chanel Court', 'king': 3, 'queen': 1, 'twin': 4, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '22 flatwood street', 'property_name': '22 Flatwood Street', 'king': 4, 'queen': 0, 'twin': 9, 'towels': 30, 'hand': 16, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 16, 'small_trash_bags': 16, 'soap_sets': 5, 'bar_soap': 11, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '25 lake district lane', 'property_name': '25 Lake District Lane', 'king': 1, 'queen': 4, 'twin': 1, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '25 rain lily lane', 'property_name': '25 Rain Lily Lane', 'king': 5, 'queen': 6, 'twin': 0, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 6, 'bar_soap': 11, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '254 spartina circle', 'property_name': '254 Spartina Circle', 'king': 2, 'queen': 4, 'twin': 1, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '255 garfield street', 'property_name': '255 Garfield Street', 'king': 4, 'queen': 1, 'twin': 6, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1, 'toilet_paper': 16, 'small_trash_bags': 16, 'soap_sets': 5, 'bar_soap': 9, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '260 needlerush drive', 'property_name': '260 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 5, 'paper_towels': 3, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '262 garfield street', 'property_name': '262 Garfield Street', 'king': 3, 'queen': 1, 'twin': 6, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '263 magnolia street', 'property_name': '263 Magnolia Street', 'king': 4, 'queen': 2, 'twin': 3, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '271 red cedar way', 'property_name': '271 Red Cedar Way', 'king': 5, 'queen': 0, 'twin': 6, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '2743 e co hwy 30a, unit 303', 'property_name': '2743 E Co Hwy 30A, Unit 303', 'king': 2, 'queen': 2, 'twin': 0, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '29 royal fern way', 'property_name': '29 Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '2912 e. co hwy 30a', 'property_name': '2912 E. Co Hwy 30A', 'king': 1, 'queen': 1, 'twin': 4, 'towels': 16, 'hand': 4, 'wash': 8, 'mats': 2, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 4, 'small_trash_bags': 4, 'soap_sets': 2, 'bar_soap': 4, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '295 salt box lane', 'property_name': '295 Salt Box Lane', 'king': 1, 'queen': 2, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '31 bluejack street', 'property_name': '31 Bluejack Street', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '349 needlerush drive', 'property_name': '349 Needlerush Drive', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 4, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '35 suzanne drive', 'property_name': '35 Suzanne Drive', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 30, 'hand': 14, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '369 spartina circle', 'property_name': '369 Spartina Circle', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '37 compass point ii, unit 106', 'property_name': '37 Compass Point II, Unit 106', 'king': 2, 'queen': 1, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '37 red cedar way', 'property_name': '37 Red Cedar Way', 'king': 1, 'queen': 4, 'twin': 0, 'towels': 18, 'hand': 6, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 2, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 6, 'small_trash_bags': 6, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '379 east royal fern way', 'property_name': '379 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '394 western lake drive', 'property_name': '394 Western Lake Drive', 'king': 1, 'queen': 3, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 2, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '397 needlerush drive', 'property_name': '397 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 7, 'paper_towels': 0, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '406 red cedar way', 'property_name': '406 Red Cedar Way', 'king': 2, 'queen': 1, 'twin': 3, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '410 pine needle way', 'property_name': '410 Pine Needle Way', 'king': 2, 'queen': 1, 'twin': 8, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '422 pine needle way', 'property_name': '422 Pine Needle Way', 'king': 2, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '428 red cedar way', 'property_name': '428 Red Cedar Way', 'king': 4, 'queen': 3, 'twin': 2, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 6, 'bar_soap': 8, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '43 sand hill circle', 'property_name': '43 Sand Hill Circle', 'king': 4, 'queen': 1, 'twin': 4, 'towels': 36, 'hand': 12, 'wash': 24, 'mats': 6, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 6, 'bar_soap': 8, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '433 pine needle way', 'property_name': '433 Pine Needle Way', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '44 thicket circle', 'property_name': '44 Thicket Circle', 'king': 3, 'queen': 1, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '442 east royal fern way', 'property_name': '442 East Royal Fern Way', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '446 western lake drive', 'property_name': '446 Western Lake Drive', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '46 pine needle way', 'property_name': '46 Pine Needle Way', 'king': 2, 'queen': 2, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '49 bluejack street', 'property_name': '49 Bluejack Street', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 2, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '5 pond cypress way', 'property_name': '5 Pond Cypress Way', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 24, 'hand': 12, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '51 mistflower lane', 'property_name': '51 Mistflower Lane', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '53 muhly circle', 'property_name': '53 Muhly Circle', 'king': 4, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 8, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '65 pond cypress circle', 'property_name': '65 Pond Cypress Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '672 western lake drive', 'property_name': '672 Western Lake Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 30, 'hand': 10, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '70 scrub oak circle', 'property_name': '70 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 6, 'bar_soap': 8, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '70 sunset ridge lane', 'property_name': '70 Sunset Ridge Lane', 'king': 3, 'queen': 2, 'twin': 0, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '72 needlerush drive', 'property_name': '72 Needlerush Drive', 'king': 2, 'queen': 1, 'twin': 1, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '728 western lake drive', 'property_name': '728 Western Lake Drive', 'king': 2, 'queen': 4, 'twin': 0, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '73 holly street', 'property_name': '73 Holly Street', 'king': 4, 'queen': 4, 'twin': 8, 'towels': 36, 'hand': 16, 'wash': 24, 'mats': 6, 'pool': 16, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 16, 'small_trash_bags': 16, 'soap_sets': 6, 'bar_soap': 12, 'paper_towels': 0, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '73 pond cypress circle', 'property_name': '73 Pond Cypress Circle', 'king': 5, 'queen': 2, 'twin': 3, 'towels': 36, 'hand': 14, 'wash': 24, 'mats': 6, 'pool': 8, 'queen_sleeper': 1, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 14, 'small_trash_bags': 14, 'soap_sets': 6, 'bar_soap': 8, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '75 east summersweet lane', 'property_name': '75 East Summersweet Lane', 'king': 2, 'queen': 2, 'twin': 2, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '80 scrub oak circle', 'property_name': '80 Scrub Oak Circle', 'king': 2, 'queen': 2, 'twin': 6, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 18, 'small_trash_bags': 18, 'soap_sets': 5, 'bar_soap': 9, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '86 sunset ridge lane', 'property_name': '86 Sunset Ridge Lane', 'king': 2, 'queen': 2, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 26, 'soap_sets': 4, 'bar_soap': 8, 'paper_towels': 2, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '9 running oak circle', 'property_name': '9 Running Oak Circle', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '90 flatwood street', 'property_name': '90 Flatwood Street', 'king': 5, 'queen': 1, 'twin': 4, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 7, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '91 bluejack street', 'property_name': '91 Bluejack Street', 'king': 3, 'queen': 0, 'twin': 4, 'towels': 18, 'hand': 8, 'wash': 12, 'mats': 3, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 8, 'small_trash_bags': 8, 'soap_sets': 3, 'bar_soap': 5, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '93 needlerush drive', 'property_name': '93 Needlerush Drive', 'king': 4, 'queen': 0, 'twin': 4, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '97 east summersweet lane', 'property_name': '97 East Summersweet Lane', 'king': 3, 'queen': 0, 'twin': 2, 'towels': 24, 'hand': 10, 'wash': 16, 'mats': 4, 'pool': 0, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 10, 'small_trash_bags': 10, 'soap_sets': 4, 'bar_soap': 6, 'paper_towels': 1, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': '99 pond cypress way', 'property_name': '99 Pond Cypress Way', 'king': 3, 'queen': 1, 'twin': 5, 'towels': 30, 'hand': 12, 'wash': 20, 'mats': 5, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 1, 'amenity_boxes': 1, 'toilet_paper': 12, 'small_trash_bags': 12, 'soap_sets': 5, 'bar_soap': 8, 'paper_towels': 0, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
+    {'address': 'steve "bay house"', 'property_name': 'Steve "Bay House"', 'king': 4, 'queen': 0, 'twin': 6, 'towels': 24, 'hand': 8, 'wash': 16, 'mats': 4, 'pool': 8, 'queen_sleeper': 0, 'twin_sleeper': 0, 'amenity_boxes': 1, 'toilet_paper': 0, 'small_trash_bags': 8, 'soap_sets': 0, 'bar_soap': 0, 'paper_towels': 0, 'kitchen_bags_cleaner': 2, 'red_bag_cleaner': 1},
 ]
 
 STAFF_SEED = [['Kristin', 'admin', '5145'], ['Sarah Elizabeth', 'admin', '7343'], ['Sabrina', 'admin', '9197'], ['Jennifer Matthews', 'admin', '5586'], ['Jessica', 'coordinator', '2129'], ['Chris', 'maintenance', '5269'], ['Keith', 'maintenance', '7836'], ['Chuck', 'maintenance', '4133'], ['Jonathan', 'maintenance', '7154'], ['Shawn', 'maintenance', '5700'], ['Laura Durrance', 'inspector', '4250'], ['Stephanie Pierantoni', 'inspector', '9534'], ['Alexis Rains', 'inspector', '1693'], ['Dawn Bailey', 'inspector', '2761'], ['Cassie Sloan', 'manager', '7410'], ['Micah Haigler', 'inspector', '7982'], ['Kim', 'warehouse', '6460'], ['April', 'warehouse', '1544']]
@@ -4146,19 +4177,26 @@ def upsert_single_pack_formula():
         return jsonify({'error': 'Property name is required'}), 400
     address = property_name.lower().strip()
     fields = {}
-    for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes'):
+    for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes',
+              'toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner'):
         try: fields[k] = int(data.get(k, 0) or 0)
         except (TypeError, ValueError): fields[k] = 0
     conn = get_db(); cur = conn.cursor()
     ts = now_central()
     cur.execute("""
-        INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,updated_at)
-        VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,%(ts)s)
+        INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,
+            toilet_paper,small_trash_bags,soap_sets,bar_soap,paper_towels,kitchen_bags_cleaner,red_bag_cleaner,updated_at)
+        VALUES (%(address)s,%(property_name)s,%(king)s,%(queen)s,%(twin)s,%(towels)s,%(hand)s,%(wash)s,%(mats)s,%(pool)s,%(queen_sleeper)s,%(twin_sleeper)s,%(amenity_boxes)s,
+            %(toilet_paper)s,%(small_trash_bags)s,%(soap_sets)s,%(bar_soap)s,%(paper_towels)s,%(kitchen_bags_cleaner)s,%(red_bag_cleaner)s,%(ts)s)
         ON CONFLICT (address) DO UPDATE SET
             property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
             twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
             mats=EXCLUDED.mats, pool=EXCLUDED.pool, queen_sleeper=EXCLUDED.queen_sleeper,
-            twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes, updated_at=EXCLUDED.updated_at
+            twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes,
+            toilet_paper=EXCLUDED.toilet_paper, small_trash_bags=EXCLUDED.small_trash_bags,
+            soap_sets=EXCLUDED.soap_sets, bar_soap=EXCLUDED.bar_soap, paper_towels=EXCLUDED.paper_towels,
+            kitchen_bags_cleaner=EXCLUDED.kitchen_bags_cleaner, red_bag_cleaner=EXCLUDED.red_bag_cleaner,
+            updated_at=EXCLUDED.updated_at
     """, {'address': address, 'property_name': property_name, 'ts': ts, **fields})
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Added/edited packing formula', property_name, resolve_performer(data))
@@ -4203,14 +4241,24 @@ def seed_pack_formula():
     for row in PACK_FORMULA_SEED:
         addr = row['address']
         cur.execute("""
-            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            INSERT INTO pack_list_formula (address,property_name,king,queen,twin,towels,hand,wash,mats,pool,queen_sleeper,twin_sleeper,amenity_boxes,
+                toilet_paper,small_trash_bags,soap_sets,bar_soap,paper_towels,kitchen_bags_cleaner,red_bag_cleaner,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (address) DO UPDATE SET
                 property_name=EXCLUDED.property_name, king=EXCLUDED.king, queen=EXCLUDED.queen,
                 twin=EXCLUDED.twin, towels=EXCLUDED.towels, hand=EXCLUDED.hand, wash=EXCLUDED.wash,
-                mats=EXCLUDED.mats, pool=EXCLUDED.pool, updated_at=EXCLUDED.updated_at
+                mats=EXCLUDED.mats, pool=EXCLUDED.pool, queen_sleeper=EXCLUDED.queen_sleeper,
+                twin_sleeper=EXCLUDED.twin_sleeper, amenity_boxes=EXCLUDED.amenity_boxes,
+                toilet_paper=EXCLUDED.toilet_paper, small_trash_bags=EXCLUDED.small_trash_bags,
+                soap_sets=EXCLUDED.soap_sets, bar_soap=EXCLUDED.bar_soap, paper_towels=EXCLUDED.paper_towels,
+                kitchen_bags_cleaner=EXCLUDED.kitchen_bags_cleaner, red_bag_cleaner=EXCLUDED.red_bag_cleaner,
+                updated_at=EXCLUDED.updated_at
         """, (addr, row['property_name'], row['king'], row['queen'], row['twin'], row['towels'],
-              row['hand'], row['wash'], row['mats'], row['pool'], ts))
+              row['hand'], row['wash'], row['mats'], row['pool'],
+              row.get('queen_sleeper', 0), row.get('twin_sleeper', 0), row.get('amenity_boxes', 1),
+              row.get('toilet_paper', 0), row.get('small_trash_bags', 0), row.get('soap_sets', 0),
+              row.get('bar_soap', 0), row.get('paper_towels', 0),
+              row.get('kitchen_bags_cleaner', 2), row.get('red_bag_cleaner', 1), ts))
         upserted += 1
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Seeded/refreshed packing formula', f'{upserted} properties', resolve_performer(data))
@@ -4515,7 +4563,7 @@ def get_pack_list():
         return {
             'address': addr,
             'property_name': f['property_name'] if f else emerg_map.get(addr, {}).get('address', addr),
-            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')} if f else None,
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner')} if f else None,
             'is_emergency': addr in emerg_map,
             'emergency_notes': emerg_map[addr]['notes'] if addr in emerg_map else None,
             'packed': bool(st),
@@ -4986,9 +5034,13 @@ def get_bundles_needed():
     formulas = {f['address']: f for f in cur.fetchall()}
     cur.close(); conn.close()
 
+    SUPPLY_FIELDS = ('toilet_paper', 'small_trash_bags', 'soap_sets', 'bar_soap', 'paper_towels',
+                      'kitchen_bags_cleaner', 'red_bag_cleaner')
+
     def tally(addrs, pack_date):
         towel_bags = king = queen = twin = count = 0
         queen_sleeper = twin_sleeper = amenity_boxes = 0
+        supply_totals = {k: 0 for k in SUPPLY_FIELDS}
         missing = []
         for addr in sorted(addrs):
             if (addr, pack_date) in packed_pairs:
@@ -5006,14 +5058,18 @@ def get_bundles_needed():
             queen_sleeper += f.get('queen_sleeper', 0) or 0
             twin_sleeper += f.get('twin_sleeper', 0) or 0
             amenity_boxes += f.get('amenity_boxes', 0) or 0
+            for k in SUPPLY_FIELDS:
+                supply_totals[k] += f.get(k, 0) or 0
         return {'towel_bags_needed': towel_bags, 'king_bundles_needed': king,
                 'queen_bundles_needed': queen, 'twin_bundles_needed': twin,
                 'queen_sleeper_needed': queen_sleeper, 'twin_sleeper_needed': twin_sleeper,
                 'amenity_boxes_needed': amenity_boxes,
+                **{f'{k}_needed': v for k, v in supply_totals.items()},
                 'properties_counted': count, 'missing_formula': missing}
 
     m_towel = m_king = m_queen = m_twin = m_count = 0
     m_queen_sleeper = m_twin_sleeper = m_amenity_boxes = 0
+    m_supply_totals = {k: 0 for k in SUPPLY_FIELDS}
     m_missing = []
     for d, addrs in addr_dates.items():
         if d >= today_str: continue
@@ -5031,19 +5087,23 @@ def get_bundles_needed():
             m_queen_sleeper += f.get('queen_sleeper', 0) or 0
             m_twin_sleeper += f.get('twin_sleeper', 0) or 0
             m_amenity_boxes += f.get('amenity_boxes', 0) or 0
+            for k in SUPPLY_FIELDS:
+                m_supply_totals[k] += f.get(k, 0) or 0
 
     missed_summary = {'label': 'Missed', 'date': None,
                        'towel_bags_needed': m_towel, 'king_bundles_needed': m_king,
                        'queen_bundles_needed': m_queen, 'twin_bundles_needed': m_twin,
                        'queen_sleeper_needed': m_queen_sleeper, 'twin_sleeper_needed': m_twin_sleeper,
                        'amenity_boxes_needed': m_amenity_boxes,
+                       **{f'{k}_needed': v for k, v in m_supply_totals.items()},
                        'properties_counted': m_count, 'missing_formula': m_missing}
+
 
     days = []
     for i in range(days_ahead):
         d = (today_dt + timedelta(days=i)).isoformat()
         t = tally(addr_dates.get(d, set()), d)
-        label = 'Today' if i == 0 else 'Tomorrow' if i == 1 else datetime.strptime(d, '%Y-%m-%d').strftime('%A, %b %-d')
+        label = pack_day_label(d, today_str)
         days.append({'label': label, 'date': d, **t})
 
     return jsonify({'today': today_str, 'days_ahead': days_ahead, 'missed': missed_summary, 'days': days})
@@ -5098,7 +5158,7 @@ def get_pack_list_week():
         return {
             'address': addr,
             'property_name': f['property_name'] if f else (emerg['address'] if emerg else addr),
-            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes')} if f else None,
+            'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner')} if f else None,
             'is_emergency': emerg is not None,
             'emergency_notes': emerg['notes'] if emerg else None,
             'emergency_id': emerg['id'] if emerg else None,
@@ -5126,7 +5186,7 @@ def get_pack_list_week():
     for i in range(7):
         d = (today_dt + timedelta(days=i)).isoformat()
         props = [build_property(e, d) for e in schedule.get(d, [])]
-        days.append({'date': d, 'properties': props})
+        days.append({'date': d, 'label': pack_day_label(d, today_str), 'properties': props})
 
     return jsonify({'today': today_str, 'missed': missed, 'days': days})
 
