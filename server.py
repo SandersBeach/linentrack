@@ -1254,7 +1254,7 @@ def bags_qr_cards_pdf():
                 # business, so it only needs to print once. Some cleaning
                 # companies work multiple property managers, so the logo up
                 # top makes clear whose bag it is at a glance.
-                logo_w = 1.3 * _CARD_IN
+                logo_w = 1.7 * _CARD_IN  # bumped up from 1.3in per Kristin's request — home name/address sizing is untouched, it's still centered in whatever room is left below the logo
                 logo_h = logo_w * _SBR_LOGO_ASPECT
                 logo_x = x + (_CARD_W - logo_w) / 2
                 logo_y = y + _CARD_H - logo_h - 0.16 * _CARD_IN
