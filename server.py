@@ -583,6 +583,31 @@ def init_db():
     except Exception as e:
         print(f'Days-off seed note: {e}')
         conn.rollback()
+    # Catch-up seed to match Streamline's SBR Loaners count (Kristin's request —
+    # Streamline is the record for loaners going forward). Only ever ADDS items
+    # that were confirmed missing; never touches or removes anything already
+    # tracked. Idempotent — safe to run on every startup.
+    try:
+        loaner_catchup_seed = [
+            ('LOAN-MW-53', 'Microwave 53', 'Microwave'),
+            ('LOAN-MW-54', 'Microwave 54', 'Microwave'),
+            ('LOAN-MW-55', 'Microwave 55', 'Microwave'),
+            ('LOAN-BURNER-01', 'Cuisinart Double Burner 1', 'Burner'),
+            ('LOAN-BURNER-02', 'Cuisinart Double Burner 2', 'Burner'),
+            ('LOAN-SPEAKER-01', 'JBL Speaker', 'Speaker'),
+            ('LOAN-HEATER-01', 'Mini Heater 1', 'Heater'),
+            ('LOAN-HEATER-02', 'Mini Heater 2', 'Heater'),
+            ('LOAN-HEATER-03', 'Mini Heater 3', 'Heater'),
+        ]
+        for loaner_id, name, category in loaner_catchup_seed:
+            cur.execute(
+                "INSERT INTO loaners (id,name,category,status) VALUES (%s,%s,%s,'in') ON CONFLICT (id) DO NOTHING",
+                (loaner_id, name, category)
+            )
+        conn.commit()
+    except Exception as e:
+        print(f'Loaner catch-up seed note: {e}')
+        conn.rollback()
     # Backfill bucket for existing hk_supply_items rows based on category —
     # Amenities: Guest Amenities, Kitchen, Laundry, Trash & Liners.
     # Cleaning Supplies: Maintenance, Cleaning Supplies.
@@ -1883,6 +1908,52 @@ def get_loaners():
         FROM loaners l LEFT JOIN homes h ON h.id=l.home_id LEFT JOIN loaner_staff s ON s.id=l.staff_id
         ORDER BY l.category,l.name""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+@app.route('/api/loaners', methods=['POST'])
+def add_loaner():
+    """Admin-only: register a new loaner item. There was previously no way to
+    add one through the app at all — items had to be inserted directly in the
+    database. The ID is entered manually (not auto-generated) since existing
+    IDs often correspond to a physical asset tag already on the item (e.g.
+    AC 22/23/24), not a simple running count."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('admin_pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    loaner_id = data.get('id', '').strip().upper()
+    name = data.get('name', '').strip()
+    category = data.get('category', '').strip()
+    if not loaner_id or not name or not category:
+        return jsonify({'error': 'ID, name, and category are required'}), 400
+    conn = get_db(); cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO loaners (id,name,category,status) VALUES (%s,%s,%s,'in')", (loaner_id, name, category))
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback(); cur.close(); conn.close()
+        return jsonify({'error': f'{loaner_id} already exists'}), 409
+    conn.commit(); cur.close(); conn.close()
+    log_audit('LoanerCentral', 'Added loaner', name, resolve_performer(data), loaner_id)
+    return jsonify({'success': True, 'id': loaner_id})
+
+@app.route('/api/loaner/<path:loaner_id>', methods=['DELETE'])
+def delete_loaner(loaner_id):
+    """Admin-only: remove a loaner item, but only if it's currently at the
+    warehouse — never while checked out, same safety rule as removing a
+    cleaner with bags still out."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('admin_pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT status, name FROM loaners WHERE id=%s", (loaner_id.upper(),))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close(); return jsonify({'error': 'Loaner not found'}), 404
+    if row['status'] != 'in':
+        cur.close(); conn.close(); return jsonify({'error': 'Cannot remove a loaner that is currently checked out'}), 400
+    cur2 = conn.cursor()
+    cur2.execute("DELETE FROM loaners WHERE id=%s", (loaner_id.upper(),))
+    conn.commit(); cur2.close(); cur.close(); conn.close()
+    log_audit('LoanerCentral', 'Removed loaner', row['name'], resolve_performer(data), loaner_id.upper())
+    return jsonify({'success': True})
 
 @app.route('/api/loaners/qr-sheet', methods=['GET'])
 def loaners_qr_sheet():
