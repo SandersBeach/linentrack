@@ -1618,7 +1618,7 @@ def flag_supply_low():
 
 @app.route('/api/check-pickup-deadline', methods=['POST'])
 def check_pickup_deadline():
-    """Admin-only manual trigger, for testing/verifying the 11:30am alert
+    """Admin-only manual trigger, for testing/verifying the 10:30am alert
     without waiting for the actual time of day or the next scheduler tick."""
     data = request.json or {}
     if not is_admin_pin(str(data.get('pin', ''))):
@@ -1657,6 +1657,39 @@ def bulk_set_cleaner_emails():
     conn.commit(); cur2.close(); cur.close(); conn.close()
     if updated:
         log_audit('Cleaners', 'Bulk email import', f'{len(updated)} cleaners', resolve_performer(data), ', '.join(updated))
+    return jsonify({'success': True, 'updated': updated, 'unmatched': unmatched})
+
+@app.route('/api/cleaners/bulk-set-phones', methods=['POST'])
+def bulk_set_cleaner_phones():
+    """Admin-only: same pattern as bulk-set-emails — match a pasted list of
+    {name, phone} against existing cleaners by normalized name (trim/collapse-
+    whitespace/case-insensitive) and update their phone. Names that don't
+    match anything are reported back, not guessed."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('admin_pin',''))):
+        return jsonify({'error':'Admin PIN required'}), 403
+    entries = data.get('entries', [])
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name FROM cleaners WHERE active=1")
+    cleaners = cur.fetchall()
+    def norm(s): return ' '.join(s.strip().lower().split())
+    by_norm_name = {norm(c['name']): c['id'] for c in cleaners}
+    updated = []
+    unmatched = []
+    cur2 = conn.cursor()
+    for entry in entries:
+        name = (entry.get('name') or '').strip()
+        phone = (entry.get('phone') or '').strip()
+        if not name or not phone: continue
+        cid = by_norm_name.get(norm(name))
+        if cid is None:
+            unmatched.append(name)
+            continue
+        cur2.execute("UPDATE cleaners SET phone=%s WHERE id=%s", (phone, cid))
+        updated.append(name)
+    conn.commit(); cur2.close(); cur.close(); conn.close()
+    if updated:
+        log_audit('Cleaners', 'Bulk phone import', f'{len(updated)} cleaners', resolve_performer(data), ', '.join(updated))
     return jsonify({'success': True, 'updated': updated, 'unmatched': unmatched})
 
 @app.route('/api/cleaners', methods=['GET'])
@@ -5188,6 +5221,7 @@ def get_pack_list_week():
             'cleaner_name': st['cleaner_name'] if st else None,
             'staged_bags': (st['staged_bag_ids'] or '').split(',') if st and st['staged_bag_ids'] else [],
             'assigned_cleaner_name': entry.get('cleaner_name'),
+            'assigned_cleaner_id': entry.get('cleaner_id'),
             'assigned': entry.get('assigned', False),
             'pack_date': pack_date,
         }
@@ -5557,7 +5591,7 @@ def set_inventory_reminder_setting():
     return jsonify({'success': True})
 
 def run_pickup_deadline_check(force=False):
-    """At/after 11:30am Central, alerts Cassie if any property packed for
+    """At/after 10:30am Central, alerts Cassie if any property packed for
     TODAY still has bags sitting staged (not yet picked up by the cleaner).
     Only ever sends once per day — checks daily_alert_log first, and the
     unique constraint on it means even if two worker threads raced to send
@@ -5565,8 +5599,8 @@ def run_pickup_deadline_check(force=False):
     `force=True` skips the time-of-day gate — only used by the manual admin
     test endpoint, never by the automatic scheduler."""
     now = datetime.now(pytz.utc).astimezone(CENTRAL)
-    if not force and (now.hour, now.minute) < (11, 30):
-        return {'checked': 0, 'alerted': False, 'reason': 'before 11:30am Central'}
+    if not force and (now.hour, now.minute) < (10, 30):
+        return {'checked': 0, 'alerted': False, 'reason': 'before 10:30am Central'}
     today_str = now.strftime('%Y-%m-%d')
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -5602,9 +5636,9 @@ def run_pickup_deadline_check(force=False):
     alert_sent = False
     if cassie_email and PICKUP_DEADLINE_ALERT_ENABLED:
         lines = [f"- {s['address']} — bag {s['bag_id']} — {s['cleaner_name']}" for s in still_staged]
-        body = (f"As of 11:30am Central, the following {len(still_staged)} bag(s) packed for today "
+        body = (f"As of 10:30am Central, the following {len(still_staged)} bag(s) packed for today "
                 f"have not been picked up by the cleaner yet:\n\n" + '\n'.join(lines))
-        alert_sent = send_email(f"Bags not picked up by 11:30am ({today_str})", body, to=cassie_email)
+        alert_sent = send_email(f"Bags not picked up by 10:30am ({today_str})", body, to=cassie_email)
     elif not PICKUP_DEADLINE_ALERT_ENABLED:
         print(f"[Pickup Deadline Alert] PAUSED — would have alerted about {len(still_staged)} bag(s) still staged, but PICKUP_DEADLINE_ALERT_ENABLED is False. Nothing sent.", flush=True)
 
