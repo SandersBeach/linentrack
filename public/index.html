@@ -2567,9 +2567,21 @@ async function renderLoaners(gen) {
     inW.forEach(l => { const c = l.category || 'Other'; if (!cats[c]) cats[c] = []; cats[c].push(l); });
     Object.entries(cats).sort().forEach(([cat, items]) => {
       html += `<div style="font-size:12px;font-weight:500;color:var(--gray-400);margin:8px 0 4px">${cat}</div>`;
-      items.forEach(l => { html += `<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><span class="badge badge-in">In</span></div>`; });
+      items.forEach(l => { html += `<div class="row"><div class="row-main"><div class="row-title">${l.name} <span class="tag">${l.id}</span></div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge badge-in">In</span>${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="removeLoaner('${l.id}','${l.name.replace(/'/g,"\\'")}')" style="font-size:11px;padding:3px 8px">Remove</button>`:''}</div></div>`; });
     });
     html += '</div>';
+  }
+
+  if (userRoles.includes('admin')) {
+    html += `<div class="card"><div class="card-title">Add loaner item</div>
+      <div class="form-row">
+        <div><label>Item name</label><input type="text" id="new-loaner-name" placeholder="e.g. Microwave 56" /></div>
+        <div><label>Category</label><input type="text" id="new-loaner-category" placeholder="e.g. Microwave" /></div>
+        <div><label>ID / asset tag</label><input type="text" id="new-loaner-id" placeholder="e.g. LOAN-MW-56" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()" /></div>
+      </div>
+      <button class="btn btn-primary" onclick="addLoaner()">Add loaner</button>
+      <div id="add-loaner-msg" style="font-size:12px;color:var(--teal);margin-top:8px;min-height:18px"></div>
+    </div>`;
   }
 
   html += '<div class="card"><div class="card-title">Activity log</div>';
@@ -2587,6 +2599,26 @@ async function renderLoaners(gen) {
   renderLoanerSessionLog();
 }
 function setLoanerMode(m) { loanerScanState.mode = m; loanerScanState.sessionLog = []; renderLoaners(); }
+async function addLoaner() {
+  const name = document.getElementById('new-loaner-name')?.value.trim();
+  const category = document.getElementById('new-loaner-category')?.value.trim();
+  const id = document.getElementById('new-loaner-id')?.value.trim();
+  const msg = document.getElementById('add-loaner-msg');
+  if (!name || !category || !id) { msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Name, category, and ID are all required.'; return; }
+  try {
+    const res = await fetch('/api/loaners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admin_pin: _currentPin, name, category, id }) });
+    const data = await res.json();
+    if (!res.ok) { msg.style.color = 'var(--coral-dark)'; msg.textContent = data.error; return; }
+    renderLoaners();
+  } catch (e) { msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Connection error — please try again.'; }
+}
+async function removeLoaner(id, name) {
+  if (!await confirmModal(`Remove ${name}?`, { confirmLabel: 'Remove', danger: true })) return;
+  const res = await fetch('/api/loaner/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admin_pin: _currentPin }) });
+  const data = await res.json();
+  if (!res.ok) { notify(data.error); return; }
+  renderLoaners();
+}
 async function processLoanerScan() {
   const input=document.getElementById('loaner-scan-input'); let id=(input?.value||'').trim();
   if(id.includes('LOANER=')||id.includes('loaner=')){const match=id.match(/[Ll][Oo][Aa][Nn][Ee][Rr]=([A-Za-z0-9-]+)/);if(match)id=match[1].toUpperCase();}else{id=id.toUpperCase();}
