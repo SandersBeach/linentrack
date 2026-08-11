@@ -867,7 +867,7 @@ const TABS = {
   warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
-  manager: ['warehouse_dashboard', 'pack_productivity'],
+  manager: ['admin_dashboard', 'pack_productivity'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
   admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
@@ -1334,7 +1334,7 @@ async function renderWarehouseHome(gen, opts) {
   // Overdue tab uses, so the two screens can never disagree.
   const _now = new Date();
   const lateBags = inv.filter(b => b.status === 'out' && b.picked_up_at && (_now - new Date(b.picked_up_at)) / 3600000 >= 24).length;
-  // Packed and staged but nobody has collected it yet — drives the 11:30 nudge.
+  // Packed and staged but nobody has collected it yet — drives the 10:30 nudge.
   const stagedNotPickedUp = inv.filter(b => b.status === 'staged').length;
   // Ready-to-go amenity boxes vs. what the next 5 days actually need — the
   // two numbers used to live on separate screens with nothing comparing
@@ -1366,8 +1366,8 @@ async function renderWarehouseHome(gen, opts) {
   // day. Only genuinely open problems are named here.
   const problems = [];
   if (lateBags) problems.push(`${lateBags} late bag${lateBags === 1 ? '' : 's'}`);
-  if (missedCount) problems.push(`${missedCount} missed pack item${missedCount === 1 ? '' : 's'}`);
-  if (shortages.length) problems.push(`${shortages.length} packed bag${shortages.length === 1 ? '' : 's'} short`);
+  if (missedCount) problems.push(`${missedCount} missed packed bag${missedCount === 1 ? '' : 's'}`);
+  if (shortages.length) problems.push(`${shortages.length} packed item${shortages.length === 1 ? '' : 's'} short`);
   if (checklistRemaining) problems.push(`${checklistRemaining} checklist item${checklistRemaining === 1 ? '' : 's'} left`);
   const headline = problems.length
     ? problems.join(', ').replace(/, ([^,]*)$/, ' and $1')
@@ -1404,8 +1404,8 @@ async function renderWarehouseHome(gen, opts) {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:2.5rem">
       ${tile('', 'Late bags', lateBags, lateBags > 0 ? '24 hours or more past pickup' : 'Nothing past 24 hours', lateBags > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('overdue')")}
-      ${tile('', 'Missed pack items', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
-      ${tile('', 'Packed bag short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
+      ${tile('', 'Missed packed bags', missedCount, missedCount > 0 ? 'Needs attention' : 'All caught up', missedCount > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
+      ${tile('', 'Packed items short', shortages.length, shortages.length > 0 ? 'Waiting to be topped off' : 'None open', shortages.length > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_list')")}
       ${tile('', 'Daily checklist', checklistRemaining, checklistTotal ? `${checklistDone} of ${checklistTotal} done` : 'No checklist set for today', checklistRemaining > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('daily_tasks')")}
     </div>
     <div onclick="showTab('pack_list')" style="background:#fff;border:1px solid var(--gray-200);border-top:2px solid var(--teal-mid);border-radius:var(--radius);box-shadow:var(--shadow);padding:1.75rem 1.5rem;margin-bottom:2.5rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap" onmouseenter="this.style.boxShadow='0 2px 4px rgba(58,78,93,0.06),0 8px 24px rgba(58,78,93,0.09)'" onmouseleave="this.style.boxShadow='var(--shadow)'">
@@ -1453,15 +1453,15 @@ async function renderWarehouseHome(gen, opts) {
   maybeShowStagedPickupNudge(stagedNotPickedUp, today);
 }
 
-// ── 11:30 staged-pickup nudge ─────────────────────────────────────────────
-// At or after 11:30am, anything packed for today that is still sitting staged
+// ── 10:30 staged-pickup nudge ─────────────────────────────────────────────
+// At or after 10:30am, anything packed for today that is still sitting staged
 // has most likely been forgotten. This is a nudge on top of the existing email,
 // never a replacement for it. Dismissed once, it stays gone for the rest of the
 // day. NOTE: mocked here for design — wire to real staged/pickup state in app.
 function maybeShowStagedPickupNudge(stagedCount, today) {
   if (!stagedCount) return;
   const now = new Date();
-  if (now.getHours() * 60 + now.getMinutes() < 11 * 60 + 30) return;
+  if (now.getHours() * 60 + now.getMinutes() < 10 * 60 + 30) return;
   if (sessionStorage.getItem('staged-nudge-dismissed') === today) return;
   if (document.getElementById('staged-nudge')) return;
 
@@ -1473,7 +1473,7 @@ function maybeShowStagedPickupNudge(stagedCount, today) {
     <div class="modal-box" style="max-width:460px">
       <div style="font-size:13px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--coral-dark);margin-bottom:14px">Still waiting on pickup</div>
       <h3 style="margin-bottom:14px">${stagedCount} bag${stagedCount === 1 ? '' : 's'} packed for today ${stagedCount === 1 ? 'has' : 'have'} not been collected.</h3>
-      <p style="font-size:13px;font-weight:300;line-height:1.7;color:var(--gray-700);text-wrap:pretty">It is past 11:30. These are staged and ready, but no cleaner has scanned them out yet — worth a call before the afternoon turn.</p>
+      <p style="font-size:13px;font-weight:300;line-height:1.7;color:var(--gray-700);text-wrap:pretty">It is past 10:30. These are staged and ready, but no cleaner has scanned them out yet — worth a call before the afternoon turn.</p>
       <div class="modal-actions" style="margin-top:1.5rem">
         <button class="btn btn-ghost" onclick="dismissStagedNudge()">Dismiss</button>
         <button class="btn btn-primary" onclick="dismissStagedNudge();showTab('status')">See bag assignments</button>
@@ -1860,6 +1860,21 @@ Monserrat Guzman: jacsirymonserrat@gmail.com</textarea>
     <div id="bulk-email-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
   </div>`;
 
+  // Bulk phone import
+  html += `<div class="card"><div class="card-title">Bulk import phone numbers</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:0.75rem">One per line: <code>Name: phone</code>. Matching is by name — anything that doesn't match an existing cleaner will be reported, not guessed.</p>
+    <textarea id="bulk-phone-textarea" style="width:100%;min-height:140px;font-family:monospace;font-size:13px;padding:10px;border:0.5px solid var(--gray-200);border-radius:var(--radius-sm)">A&D Cleaning: (850) 714-4966 / (850) 919-5591 (Derron)
+Dream Clean: (786) 930-2088
+Elizabeth Varo: (407) 535-1746
+Gesiane Barbosa: (850) 582-1094
+Jennifer Hawkins: (706) 289-4183
+Juan Carlos Rocha: (754) 261-9137
+Miranda Edney: (850) 704-0438
+Monserrat Guzman: (678) 510-8226</textarea>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="bulkImportCleanerPhones()">Import Phone Numbers</button>
+    <div id="bulk-phone-msg" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+  </div>`;
+
   // Edit modal
   html += `<div id="modal-cleaner-edit" class="modal-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
     <div class="modal-box">
@@ -1938,6 +1953,33 @@ async function bulkImportCleanerEmails() {
   msg.style.color = 'var(--teal)'; msg.textContent = 'Importing...';
   try {
     const res = await fetch('/api/cleaners/bulk-set-emails', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin, entries})});
+    const data = await res.json();
+    if (data.error) { msg.style.color='var(--coral-dark)'; msg.textContent = data.error; return; }
+    let text = `<i class="ic" data-lucide="check"></i> Updated ${data.updated.length}: ${data.updated.join(', ')}`;
+    if (data.unmatched.length) text += ` — <i class="ic" data-lucide="triangle-alert"></i> No match found for: ${data.unmatched.join(', ')}`;
+    msg.style.color = data.unmatched.length ? 'var(--amber)' : 'var(--teal)';
+    msg.textContent = text;
+    renderCleaners();
+  } catch(e) { msg.style.color='var(--coral-dark)'; msg.textContent = 'Connection error — please try again.'; }
+}
+
+async function bulkImportCleanerPhones() {
+  const raw = document.getElementById('bulk-phone-textarea')?.value || '';
+  const entries = [];
+  raw.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const idx = line.indexOf(':');
+    if (idx === -1) return;
+    const name = line.slice(0, idx).trim();
+    const phone = line.slice(idx+1).trim();
+    if (name && phone) entries.push({name, phone});
+  });
+  if (!entries.length) { notify('No valid lines found. Use format: Name: phone'); return; }
+  const msg = document.getElementById('bulk-phone-msg');
+  msg.style.color = 'var(--teal)'; msg.textContent = 'Importing...';
+  try {
+    const res = await fetch('/api/cleaners/bulk-set-phones', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({admin_pin:_currentPin, entries})});
     const data = await res.json();
     if (data.error) { msg.style.color='var(--coral-dark)'; msg.textContent = data.error; return; }
     let text = `<i class="ic" data-lucide="check"></i> Updated ${data.updated.length}: ${data.updated.join(', ')}`;
@@ -3167,6 +3209,7 @@ async function renderAmenitiesCountHome() {
   el.innerHTML = `<div class="card">
     <div class="card-title">Start new count</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Scan each item and enter the quantity you physically find — no expected counts shown, so this stays an honest blind count.</p>
+    <div style="background:#E7F1F2;border:0.5px solid #89BBBE;border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem"><div style="font-size:13px;color:var(--green-dark)"><i class="ic" data-lucide="package"></i> Count all items — both full, unopened boxes <strong>and</strong> opened/partial boxes go in your total.</div></div>
     <button class="btn btn-primary btn-full" onclick="startAmenitiesCount()">Begin count</button>
   </div>${pastHtml}`;
 }
@@ -3307,6 +3350,7 @@ function renderWeeklyCountHome() {
   el.innerHTML = `<div class="card">
     <div class="card-title">Start this week's count</div>
     <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">One session covering amenities and cleaning supplies together. Enter the quantity you physically find — no expected numbers are shown, so it stays an honest blind count.</p>
+    <div style="background:#E7F1F2;border:0.5px solid #89BBBE;border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:1rem"><div style="font-size:13px;color:var(--green-dark)"><i class="ic" data-lucide="package"></i> Count all items — both full, unopened boxes <strong>and</strong> opened/partial boxes go in your total.</div></div>
     <button class="btn btn-primary btn-full" onclick="startWeeklyCount()">Begin count</button>
   </div>`;
 }
