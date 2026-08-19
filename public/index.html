@@ -6274,7 +6274,8 @@ function roleCheckboxes(selectedRoles) {
   const roles = [
     {v:'admin', l:'Admin'}, {v:'manager', l:'Manager (productivity dashboard)'},
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
-    {v:'coordinator', l:'Coordinator'}, {v:'store_manager', l:'Store Manager'}
+    {v:'coordinator', l:'Coordinator'}, {v:'store_manager', l:'Store Manager'},
+    {v:'inspector', l:'Inspector'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
