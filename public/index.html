@@ -2182,10 +2182,16 @@ async function renderSettings(gen) {
     </div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Loaner Item Labels</h2></div>
-    <div class="card"><div class="card-title">Print loaner QR labels</div>
-    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the item ID directly into the Scan Item field in Loaners. Good for labeling all 33 loaner items or replacing a lost/damaged label.</p>
+    <div class="card"><div class="card-title">Print loaner QR labels (quick reference sheet)</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">These QR codes work with your Bluetooth barcode scanner — scanning one types the item ID directly into the Scan Item field in Loaners. Good for a quick reference printout or checking a code before ordering labels — not sized for sticker sheets.</p>
     <button class="btn btn-primary btn-sm" onclick="printLoanerQRCodes()"><i class="ic" data-lucide="printer"></i> Print All Loaner Item Labels</button>
     <div id="loaner-qr-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
+    </div>
+    <div class="card"><div class="card-title">Print Avery sticker sheet (5164/8164, 2x3-1/3in labels)</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Ready-to-stick labels — SBR logo, QR code, item ID, and item name/category all on one sticker. Sized for Avery 5164/8164 (or any compatible store-brand equivalent): 3-1/3in x 4in, 6 per sheet.</p>
+    <p style="font-size:12px;color:var(--coral-dark);margin-bottom:10px"><strong>First time using this:</strong> print one test sheet on plain paper before running actual label stock — the margins are a best estimate based on Avery's published spec, and it's much cheaper to catch a small offset on paper than on a sheet of real labels.</p>
+    <button class="btn btn-primary btn-sm" onclick="openLoanerLabelsPDF()"><i class="ic" data-lucide="printer"></i> Print Avery Label Sheet</button>
+    <div id="loaner-labels-msg" style="font-size:12px;color:var(--coral-dark);margin-top:8px;min-height:18px"></div>
     </div>`;
   html += `<div class="section-header" style="margin-top:1rem"><h2>Maintenance Supply Labels</h2></div>
     <div class="card"><div class="card-title">Print maintenance supply QR labels</div>
@@ -2359,6 +2365,10 @@ async function printBagQRCodes(homeId) {
   } catch (e) {
     msg.style.color = 'var(--coral-dark)'; msg.textContent = 'Something went wrong loading the labels — please try again.';
   }
+}
+
+function openLoanerLabelsPDF() {
+  window.open('/api/loaners/qr-labels-pdf', '_blank');
 }
 
 async function printLoanerQRCodes() {
