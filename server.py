@@ -3657,16 +3657,11 @@ def staff_auth():
     staff = check_staff_pin(pin)
     if staff:
         roles = staff_role_list(staff)
-        # Inspector role is paused for now — reversible, nothing deleted, just
-        # filtered out of what a login can actually use.
-        active_roles = [r for r in roles if r != 'inspector']
-        if not active_roles:
-            return jsonify({'error': 'The Inspector role is currently paused. Please check with your admin.'}), 403
-        return jsonify({'success': True, 'name': staff['name'], 'role': active_roles[0], 'roles': active_roles, 'id': staff['id'], 'email': staff.get('email') or ''})
+        if not roles:
+            return jsonify({'error': 'No active role on this account. Please check with your admin.'}), 403
+        return jsonify({'success': True, 'name': staff['name'], 'role': roles[0], 'roles': roles, 'id': staff['id'], 'email': staff.get('email') or ''})
     legacy_role = check_pin(pin)
     if legacy_role:
-        if legacy_role == 'inspector':
-            return jsonify({'error': 'The Inspector role is currently paused. Please check with your admin.'}), 403
         return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'roles': [legacy_role], 'is_master': legacy_role == 'admin'})
     return jsonify({'error': 'Invalid PIN'}), 401
 
