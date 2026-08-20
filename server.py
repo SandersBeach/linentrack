@@ -1807,17 +1807,17 @@ def get_inventory():
         ORDER BY h.code, b.id""")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
 
-# ── Loaner item QR stickers (Avery 5164/8164, single-sided) ────────────────
-# Label is 4in wide x 3-1/3in tall (landscape), 6 per letter sheet, 2 columns
-# x 3 rows. Unlike the bag tag cards, this is one adhesive sticker per item —
-# the QR code, item ID, and the SBR logo all print on the single face that
-# goes right on the item, so there's no front/back flip step.
+# ── Loaner item QR stickers (Avery 15513, single-sided) ────────────────────
+# Label is 4in wide x 2in tall (landscape), 10 per letter sheet, 2 columns x
+# 5 rows — same footprint family as 5163/8163, just the waterproof stock.
+# One adhesive sticker per item — the QR code, item ID, and the SBR logo all
+# print on the single face that goes right on the item.
 #
 # 0.25in side margin / 0.5in top margin / no gap between labels is the
-# standard published Avery 5164/8164 layout. Run a one-sheet test print on
-# plain paper before a full box, same as with the bag tag cards.
-_LOANER_LABEL_W, _LOANER_LABEL_H = 4.0 * _CARD_IN, (10.0 / 3) * _CARD_IN
-_LOANER_LABEL_COLS, _LOANER_LABEL_ROWS = 2, 3
+# standard published layout for this label family. Run a one-sheet test print
+# on plain paper before a full box, same as with the bag tag cards.
+_LOANER_LABEL_W, _LOANER_LABEL_H = 4.0 * _CARD_IN, 2.0 * _CARD_IN
+_LOANER_LABEL_COLS, _LOANER_LABEL_ROWS = 2, 5
 _LOANER_LABEL_LEFT_MARGIN, _LOANER_LABEL_TOP_MARGIN = 0.25 * _CARD_IN, 0.5 * _CARD_IN
 _LOANER_LABEL_PER_PAGE = _LOANER_LABEL_COLS * _LOANER_LABEL_ROWS
 
@@ -1829,11 +1829,11 @@ def _loaner_label_xy(row, col):
 
 @app.route('/api/loaners/qr-labels-pdf', methods=['GET'])
 def loaners_qr_labels_pdf():
-    """Print-ready PDF for Avery 5164/8164 labels (3-1/3in x 4in, 6/sheet) —
-    SBR logo up top, QR code + item ID + item name/category below it, all on
-    the one sticker face. Best-supported estimate for the standard 5164/8164
-    margins since Avery's exact published numbers vary slightly by SKU —
-    always run a one-sheet test print on plain paper before real labels."""
+    """Print-ready PDF for Avery 15513 waterproof labels (2in x 4in, 10/sheet)
+    — SBR logo up top, QR code + item ID + item name/category below it, all
+    on the one sticker face. Best-supported estimate for the standard layout
+    since Avery's exact published numbers vary slightly by SKU — always run
+    a one-sheet test print on plain paper before real labels."""
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT id, name, category FROM loaners ORDER BY category, name")
     items = cur.fetchall(); cur.close(); conn.close()
@@ -1850,28 +1850,26 @@ def loaners_qr_labels_pdf():
             x, y = _loaner_label_xy(row, col)
             lw, lh = _LOANER_LABEL_W, _LOANER_LABEL_H
 
-            # Logo centered near the top of the label. Bigger than the first
-            # pass, and pulled down a bit further from the top edge — a test
-            # print showed the logo can end up right at (or past) the label's
-            # real edge if the printer's own margin/scaling shifts things
-            # even slightly, so this extra top_pad is a safety buffer, not
-            # just spacing.
-            top_pad = 0.24 * _CARD_IN
-            logo_w = 1.7 * _CARD_IN
+            # Logo centered near the top of the label, using the bold variant
+            # (dilated alpha channel — see top of file) so it holds up at
+            # this print size. Sized as large as this short 2in label allows
+            # while leaving safe room for the QR code and text below.
+            top_pad = 0.12 * _CARD_IN
+            logo_w = 1.25 * _CARD_IN
             logo_h = logo_w * _SBR_LOGO_ASPECT
             logo_x = x + (lw - logo_w) / 2
             logo_y = y + lh - top_pad - logo_h
-            c.drawImage(_SBR_LOGO_IMG, logo_x, logo_y, logo_w, logo_h, mask='auto')
+            c.drawImage(_SBR_LOGO_BOLD_IMG, logo_x, logo_y, logo_w, logo_h, mask='auto')
 
             # QR code + item ID/name/category, vertically centered in the
             # space left below the logo.
-            gap_after_logo = 0.12 * _CARD_IN
-            bottom_pad = 0.2 * _CARD_IN
+            gap_after_logo = 0.07 * _CARD_IN
+            bottom_pad = 0.1 * _CARD_IN
             remaining_top = logo_y - gap_after_logo
             remaining_bottom = y + bottom_pad
             remaining_h = remaining_top - remaining_bottom
 
-            qr_size = min(1.7 * _CARD_IN, remaining_h - 4)
+            qr_size = min(1.1 * _CARD_IN, remaining_h - 4)
             qr_y = remaining_bottom + (remaining_h - qr_size) / 2
             qr_x = x + 0.3 * _CARD_IN
             qr_data_uri = make_loaner_qr(item['id'])
@@ -1883,20 +1881,20 @@ def loaners_qr_labels_pdf():
             center_y = qr_y + qr_size / 2
             max_w = (x + lw - 0.15 * _CARD_IN) - text_x
 
-            c.setFont('Helvetica-Bold', 16)
-            c.drawString(text_x, center_y + 14, item['id'])
+            c.setFont('Helvetica-Bold', 13)
+            c.drawString(text_x, center_y + 10, item['id'])
 
             name = item['name']
-            c.setFont('Helvetica', 10)
-            while c.stringWidth(name, 'Helvetica', 10) > max_w and len(name) > 3:
+            c.setFont('Helvetica', 9)
+            while c.stringWidth(name, 'Helvetica', 9) > max_w and len(name) > 3:
                 name = name[:-1]
             if name != item['name']:
                 name = name[:-1] + '…'
-            c.drawString(text_x, center_y - 8, name)
+            c.drawString(text_x, center_y - 6, name)
 
-            c.setFont('Helvetica', 8)
+            c.setFont('Helvetica', 7)
             c.setFillColorRGB(0.4, 0.4, 0.4)
-            c.drawString(text_x, center_y - 24, item['category'])
+            c.drawString(text_x, center_y - 19, item['category'])
             c.setFillColorRGB(0, 0, 0)
         c.showPage()
     c.save()
