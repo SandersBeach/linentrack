@@ -5209,6 +5209,30 @@ def ack_missing_clean_issue():
     log_audit('PackListCentral', 'Acknowledged missing clean', address, resolve_performer(data), f'next arrival {next_arrival_date}')
     return jsonify({'success': True})
 
+@app.route('/api/homes/resolve-address', methods=['GET'])
+def resolve_home_address():
+    """Resolves a possibly-imprecise address (Breezeway formatting, abbreviations,
+    etc.) to the actual home record, using the same fuzzy_match_address logic
+    already relied on when marking a property packed — so a bag-scan check can
+    compare home IDs directly instead of comparing name strings itself."""
+    address = (request.args.get('address') or '').strip()
+    if not address:
+        return jsonify({'error': 'address is required'}), 400
+    addr_key = address.lower().strip()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id,name FROM homes WHERE LOWER(TRIM(name))=%s", (addr_key,))
+    home = cur.fetchone()
+    if not home:
+        cur.execute("SELECT id,name FROM homes")
+        all_homes = cur.fetchall()
+        fuzzy_name = fuzzy_match_address(addr_key, [h['name'].lower().strip() for h in all_homes])
+        if fuzzy_name:
+            home = next((h for h in all_homes if h['name'].lower().strip() == fuzzy_name), None)
+    cur.close(); conn.close()
+    if not home:
+        return jsonify({'error': f'No home on file matching "{address}"'}), 404
+    return jsonify({'id': home['id'], 'name': home['name']})
+
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
     """Daily pack list. Pack date comes from compute_pack_schedule — clean
@@ -5926,7 +5950,7 @@ def pack_property():
         b = found.get(bid)
         if not b: problems.append(f'{bid}: not found')
         elif b['home_id'] != home['id']: problems.append(f'{bid}: belongs to a different home')
-        elif b['status'] != 'in': problems.append(f'{bid}: already {b["status"]}')
+        elif b['status'] not in ('in', 'staged'): problems.append(f'{bid}: already {b["status"]}')
     if problems:
         cur.close(); conn.close()
         return jsonify({'error': 'Bag scan problem — ' + '; '.join(problems)}), 400
