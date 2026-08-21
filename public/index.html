@@ -3563,7 +3563,7 @@ async function renderOrders() {
     <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="package"></i> ${_ordersModuleFilter === 'housekeeping' ? 'Housekeeping Orders' : 'Maintenance Orders'}</div>
     <div class="subtab-bar">
       <button class="subtab ${_ordersViewMode==='pending'?'active':''}" id="ord-t-pending" onclick="ordersSubtab('pending')"><i class="ic" data-lucide="hourglass"></i> Pending</button>
-      ${userRoles.includes('admin') ? `<button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>` : ''}
+      ${(userRoles.includes('admin') || userRoles.includes('coordinator')) ? `<button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>` : ''}
       <button class="subtab ${_ordersViewMode==='history'?'active':''}" id="ord-t-history" onclick="ordersSubtab('history')">History</button>
       <button class="subtab ${_ordersViewMode==='discrepancies'?'active':''}" id="ord-t-discrepancies" onclick="ordersSubtab('discrepancies')"><i class="ic" data-lucide="triangle-alert"></i> Discrepancies</button>
     </div>
@@ -3572,7 +3572,7 @@ async function renderOrders() {
 }
 
 function ordersSubtab(mode) {
-  if (mode === 'place' && !userRoles.includes('admin')) mode = 'pending'; // placing orders is Admin-only
+  if (mode === 'place' && !userRoles.includes('admin') && !userRoles.includes('coordinator')) mode = 'pending'; // placing orders is Admin/Coordinator
   _ordersViewMode = mode;
   document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
   document.getElementById('ord-t-'+mode)?.classList.add('active');
@@ -4191,7 +4191,7 @@ async function renderStoreLog() {
           <span class="badge ${isSold?'badge-out':'badge-warn'}" style="margin-right:6px">${isSold?'<i class="ic" data-lucide="coins"></i> Sold Out':'<i class="ic" data-lucide="arrow-up-from-line"></i> Loan'}</span>
           ${tx.item_name}${isReturned?' <span style="color: var(--green-dark);font-size:11px"><i class="ic" data-lucide="check"></i> Returned</span>':''}
         </div>
-        <div class="row-sub">${tx.timestamp} · ${tx.performed_by} · qty ${tx.quantity} · ${tx.property_address}${tx.price&&isSold?` · $${(parseFloat(tx.price)*tx.quantity).toFixed(2)}`:''}</div>
+        <div class="row-sub">${tx.timestamp} · ${tx.performed_by} · qty ${tx.quantity}${tx.property_address?` · ${tx.property_address}`:''}${tx.price&&isSold?` · $${(parseFloat(tx.price)*tx.quantity).toFixed(2)}`:''}</div>
         ${tx.notes?`<div class="row-sub" style="font-style:italic">${tx.notes}</div>`:''}
       </div>
     </div>`;
