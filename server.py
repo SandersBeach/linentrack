@@ -1993,7 +1993,7 @@ def checkin(bag_id):
 # This exists specifically to prevent "false" check-ins claimed from off-site.
 
 WAREHOUSE_CHECKIN_PAUSED = True  # set to False to re-enable cleaner self-checkin via the warehouse QR screen
-PICKUP_DEADLINE_ALERT_ENABLED = False  # set to True once this has been discussed with Cassie — the check still runs and logs what it *would* have sent either way, so the logic can be verified, but no email actually goes out while this is False
+PICKUP_DEADLINE_ALERT_ENABLED = True  # confirmed with Cassie — live as of go-live
 WH_TOKEN_ROTATE_SECONDS = 900   # how often the displayed QR changes (15 min)
 WH_SESSION_MINUTES = 20        # how long a validated session stays usable, once started
 
