@@ -1879,23 +1879,11 @@ def loaners_qr_labels_pdf():
 
             text_x = qr_x + qr_size + 0.22 * _CARD_IN
             center_y = qr_y + qr_size / 2
-            max_w = (x + lw - 0.15 * _CARD_IN) - text_x
 
-            c.setFont('Helvetica-Bold', 13)
-            c.drawString(text_x, center_y + 10, item['id'])
-
-            name = item['name']
-            c.setFont('Helvetica', 9)
-            while c.stringWidth(name, 'Helvetica', 9) > max_w and len(name) > 3:
-                name = name[:-1]
-            if name != item['name']:
-                name = name[:-1] + '…'
-            c.drawString(text_x, center_y - 6, name)
-
-            c.setFont('Helvetica', 7)
-            c.setFillColorRGB(0.4, 0.4, 0.4)
-            c.drawString(text_x, center_y - 19, item['category'])
-            c.setFillColorRGB(0, 0, 0)
+            # Just the item ID next to the QR code now — name and category
+            # both dropped, single line vertically centered on the QR.
+            c.setFont('Helvetica-Bold', 16)
+            c.drawString(text_x, center_y - 6, item['id'])
         c.showPage()
     c.save()
     buf.seek(0)
@@ -2530,16 +2518,6 @@ def delete_loaner(loaner_id):
     conn.commit(); cur2.close(); cur.close(); conn.close()
     log_audit('LoanerCentral', 'Removed loaner', row['name'], resolve_performer(data), loaner_id.upper())
     return jsonify({'success': True})
-
-@app.route('/api/loaners/qr-sheet', methods=['GET'])
-def loaners_qr_sheet():
-    """Generate printable QR codes for loaner items — literal item ID encoded,
-    same pattern as the bag label sheet."""
-    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id, name, category FROM loaners ORDER BY category, name")
-    rows=cur.fetchall(); cur.close(); conn.close()
-    result=[{'id':r['id'],'name':r['name'],'category':r['category'],'qr_code':make_loaner_qr(r['id'])} for r in rows]
-    return jsonify(result)
 
 @app.route('/api/loaner/<path:loaner_id>/deploy', methods=['POST'])
 def deploy_loaner(loaner_id):
