@@ -5549,14 +5549,26 @@ async function scanPackBag() {
   if (!bagId) return;
   if (packModalState.scannedBags.includes(bagId)) { errEl.textContent = 'Already scanned.'; return; }
   try {
+    // Resolve the modal's address to an actual home ID once per session and
+    // cache it — uses the same tolerant fuzzy_match_address matching already
+    // trusted for marking a property packed, so a formatting difference
+    // between Breezeway's address and the home's name on file (abbreviations,
+    // punctuation, etc.) can't cause a false "wrong home" rejection here.
+    if (packModalState.homeId === undefined) {
+      try {
+        const homeRes = await fetch(`/api/homes/resolve-address?address=${encodeURIComponent(packModalState.address)}`);
+        const homeData = await homeRes.json();
+        packModalState.homeId = homeRes.ok ? homeData.id : null;
+      } catch (e) { packModalState.homeId = null; }
+    }
     const res = await fetch(`/api/bag/${encodeURIComponent(bagId)}`);
     const data = await res.json();
     if (!res.ok) { errEl.textContent = 'Bag not found.'; return; }
-    if ((data.home_name || '').toLowerCase().trim() !== packModalState.address.toLowerCase().trim()) {
+    if (packModalState.homeId == null || data.home_id !== packModalState.homeId) {
       errEl.textContent = `That bag belongs to ${data.home_name}, not ${packModalState.address}.`; return;
     }
-    if (data.status !== 'in') {
-      errEl.textContent = `That bag is already ${data.status === 'staged' ? 'staged' : 'checked out'}.`; return;
+    if (data.status === 'out') {
+      errEl.textContent = 'That bag is already checked out.'; return;
     }
     packModalState.scannedBags.push(bagId);
     renderPackModalBagList();
