@@ -867,7 +867,7 @@ const TABS = {
   warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
-  manager: ['admin_dashboard', 'pack_productivity'],
+  manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
   admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
@@ -5409,6 +5409,7 @@ function packCard(p, showDate) {
   if (showDate && p.pack_date) {
     dateLine = formatDueDate(p.pack_date, p.packed);
   }
+  const canCancelReservation = (userRoles.includes('admin') || userRoles.includes('manager')) && !p.is_emergency && p.checkout_date;
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
     ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px"><i class="ic" data-lucide="zap"></i> Last-minute add</div>' : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -5423,9 +5424,31 @@ function packCard(p, showDate) {
           : `${p.assigned ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Unassigned</div>`}
              <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}','${p.pack_date}')"><i class="ic" data-lucide="check"></i> Mark packed</button>
              <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`}
+        ${canCancelReservation ? `<div style="margin-top:4px"><button class="btn btn-ghost btn-sm" style="color:var(--coral-dark)" onclick="cancelReservation('${p.address}','${p.checkout_date}')"><i class="ic" data-lucide="x-circle"></i> Cancel Reservation</button></div>` : ''}
       </div>
     </div>
   </div>`;
+}
+
+async function cancelReservation(address, checkoutDate, confirmPacked) {
+  if (!confirm(`Cancel this reservation (checkout ${checkoutDate})? This removes it from the pack schedule entirely.`)) return;
+  const body = { staff_name: _currentStaffName, address, checkout_date: checkoutDate };
+  if (confirmPacked) body.confirm_packed = true;
+  const res = await fetch('/api/pack-list/cancel-reservation', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (res.status === 409 && data.error === 'already_packed') {
+    if (confirm(data.message)) {
+      return cancelReservation(address, checkoutDate, true);
+    }
+    return;
+  }
+  if (!res.ok) {
+    alert(data.error || 'Could not cancel this reservation.');
+    return;
+  }
+  showTab('pack_list');
 }
 
 function renderPackListBody(invTask, shortages) {
