@@ -154,6 +154,14 @@ def is_admin_pin(pin):
     staff = check_staff_pin(pin)
     return 'admin' in staff_role_list(staff)
 
+def is_manager_or_admin_pin(pin):
+    """True for admin OR manager — used for actions Cassie should be able to
+    do (like cancelling a reservation) that warehouse/other roles should not."""
+    if is_admin_pin(pin): return True
+    if check_pin(pin) == 'manager': return True
+    staff = check_staff_pin(pin)
+    return 'manager' in staff_role_list(staff)
+
 def resolve_roles(pin):
     """Return the effective list of roles for a PIN — checks individual staff
     first (may hold multiple roles), then falls back to the single legacy
@@ -333,6 +341,15 @@ def init_db():
             unit_address TEXT NOT NULL,
             area TEXT,
             uploaded_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pack_cancelled_reservations (
+            id SERIAL PRIMARY KEY,
+            address TEXT NOT NULL,
+            checkout_date TEXT NOT NULL,
+            cancelled_by TEXT NOT NULL,
+            cancelled_at TEXT NOT NULL,
+            notes TEXT,
+            UNIQUE(address, checkout_date)
         );
         CREATE TABLE IF NOT EXISTS breezeway_properties (
             breezeway_property_id INTEGER PRIMARY KEY,
@@ -2982,8 +2999,24 @@ def sync_breezeway_properties(token):
 
 def sync_breezeway_reservations(token):
     """Pulls upcoming reservations (Breezeway defaults to checkout_date >=
-    today when no filter is given) and replaces forecast_reservations —
-    same full-replace pattern the manual CSV upload already used."""
+    today when no filter is given) and refreshes forecast_reservations.
+
+    IMPORTANT: this used to be a blanket full-replace (delete everything,
+    reinsert whatever Breezeway just returned). That silently dropped any
+    checkout the moment its date passed, because Breezeway itself stops
+    listing past checkouts as "upcoming" — even if bags were never packed
+    for it. A property could vanish from the pack schedule with zero
+    warning simply because nobody had gotten to it yet.
+
+    Fixed behavior:
+      - Today-and-future checkouts: fully replaced from this pull, same as
+        before. Breezeway is authoritative here (handles real cancellations
+        and date changes correctly).
+      - Past checkouts: left alone by default, even though Breezeway no
+        longer returns them. They're only purged once a pack_list_status
+        row shows the address was actually packed on or after that
+        checkout date. An unpacked past checkout never silently disappears
+        — it just keeps aging on the schedule until someone deals with it."""
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT breezeway_property_id, address FROM breezeway_properties")
     addr_by_id = {r['breezeway_property_id']: r['address'] for r in cur.fetchall()}
@@ -2998,8 +3031,45 @@ def sync_breezeway_reservations(token):
         page += 1
         if page > 20: break
 
+    if not all_items:
+        # An empty pull is indistinguishable here from a transient hiccup
+        # (rate limit, malformed response, unexpected JSON shape all land
+        # as "0 items" via _bw_extract_list, with no exception raised).
+        # Treating that as "Breezeway says there are truly zero upcoming
+        # reservations" would wipe every today-and-future row on the
+        # strength of a single bad response. Bail out instead and leave
+        # existing data untouched — the next sync cycle will pull cleanly
+        # once Breezeway responds normally again.
+        cur.close(); conn.close()
+        print("[Breezeway Sync] reservations pull returned 0 items — skipping "
+              "delete/replace to avoid wiping real data on a bad response", flush=True)
+        return 0
+
     cur2 = conn.cursor()
-    cur2.execute("DELETE FROM forecast_reservations")
+    today_str = today_central()
+
+    # Refresh today-and-future rows only — Breezeway's pull below will
+    # reinsert whatever's currently on the books for those dates.
+    cur2.execute("DELETE FROM forecast_reservations WHERE TO_DATE(depart,'MM/DD/YYYY') >= %s", (today_str,))
+
+    # Prune past checkouts, but only the ones that have actually been
+    # packed since. Anything not yet packed survives regardless of age.
+    cur2.execute("""
+        DELETE FROM forecast_reservations fr
+        WHERE TO_DATE(fr.depart,'MM/DD/YYYY') < %s
+          AND EXISTS (
+              SELECT 1 FROM pack_list_status ps
+              WHERE ps.address = fr.unit_address
+                AND TO_DATE(ps.pack_date,'YYYY-MM-DD') >= TO_DATE(fr.depart,'MM/DD/YYYY')
+          )
+    """, (today_str,))
+
+    # Never let a manually-cancelled reservation reappear just because
+    # Breezeway hasn't caught up on the cancellation yet (or it was only
+    # ever cancelled by phone/text and never made it into Breezeway at all).
+    cur2.execute("SELECT address, checkout_date FROM pack_cancelled_reservations")
+    cancelled_pairs = {(r[0], r[1]) for r in cur2.fetchall()}
+
     now = now_central()
     count = 0
     for r in all_items:
@@ -3010,6 +3080,12 @@ def sync_breezeway_reservations(token):
         arrive = r.get('checkin_date') or r.get('arrival_date') or ''
         depart = r.get('checkout_date') or r.get('departure_date') or ''
         if not arrive or not depart:
+            continue
+        try:
+            depart_iso = datetime.strptime(depart[:10], '%Y-%m-%d').date().isoformat()
+        except Exception:
+            depart_iso = None
+        if depart_iso and (address.lower().strip(), depart_iso) in cancelled_pairs:
             continue
         def to_mdy(d):
             try: return datetime.strptime(d[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -5097,6 +5173,11 @@ def api_today():
     timezone whenever a device is set to something else."""
     return jsonify({'date': today_central()})
 
+TASK_ONLY_PROPERTIES = {'262 wrm cir'}  # Bay House — used by SBR Team & Facilities,
+# has Breezeway cleaning tasks but no guest reservations. See the fallback
+# at the bottom of compute_pack_schedule. Address must be lowercase/stripped
+# to match how addresses are keyed everywhere else in this function.
+
 def compute_pack_schedule(window_start, window_end):
     """Single source of truth for pack scheduling: pack_date = scheduled
     clean date minus 1 day, NOT checkout date directly. For each address,
@@ -5132,6 +5213,9 @@ def compute_pack_schedule(window_start, window_end):
 
     cur.execute("SELECT address, next_arrival_date FROM pack_missing_clean_acks")
     acked = {(r['address'], r['next_arrival_date']) for r in cur.fetchall()}
+
+    cur.execute("SELECT address, checkout_date FROM pack_cancelled_reservations")
+    cancelled_pairs = {(r['address'], r['checkout_date']) for r in cur.fetchall()}
     cur.close(); conn.close()
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
@@ -5140,6 +5224,7 @@ def compute_pack_schedule(window_start, window_end):
 
     for address, stays in by_address.items():
         checkouts = sorted(set(s['depart_d'] for s in stays))
+        checkouts = [c for c in checkouts if (address, c.isoformat()) not in cancelled_pairs]
         arrivals = sorted(set(s['arrive_d'] for s in stays))
         cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
 
@@ -5173,6 +5258,31 @@ def compute_pack_schedule(window_start, window_end):
                         'next_arrival_date': next_arrival.isoformat(),
                         'days_until_arrival': days_until,
                     })
+
+    # Task-only fallback: Bay House (262 WRM Cir) is used by SBR Team &
+    # Facilities, not booked guests, so it has Breezeway cleaning tasks but
+    # never a reservation to anchor a pack_date to via the loop above. For
+    # this address specifically, derive pack_date straight from the task's
+    # own scheduled clean date instead. Scoped to just this address for
+    # now — not a general rule for every task-only property.
+    window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
+    window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
+    for address in TASK_ONLY_PROPERTIES:
+        if address in by_address:
+            continue  # has real reservations now — normal path handles it
+        for c in cleans_by_address.get(address, []):
+            c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
+            if not (window_start_dt <= c_date <= window_end_dt):
+                continue
+            pack_date = (c_date - timedelta(days=1)).isoformat()
+            schedule.setdefault(pack_date, []).append({
+                'address': address,
+                'checkout_date': None,
+                'clean_date': c['assignment_date'],
+                'cleaner_id': c['cleaner_id'],
+                'cleaner_name': c['cleaner_name'] if c['cleaner_id'] else None,
+                'assigned': bool(c['cleaner_id']),
+            })
 
     return schedule, issues
 
@@ -5233,6 +5343,77 @@ def resolve_home_address():
         return jsonify({'error': f'No home on file matching "{address}"'}), 404
     return jsonify({'id': home['id'], 'name': home['name']})
 
+def _find_pack_date_for_checkout(address, checkout_date_iso):
+    """Given an address and a checkout (depart) date, find the pack_date
+    that checkout actually maps to (clean date minus 1), if any."""
+    checkout_dt = datetime.strptime(checkout_date_iso, '%Y-%m-%d').date()
+    window_start = (checkout_dt - timedelta(days=3)).isoformat()
+    window_end = (checkout_dt + timedelta(days=3)).isoformat()
+    schedule, _ = compute_pack_schedule(window_start, window_end)
+    for pd, entries in schedule.items():
+        for e in entries:
+            if e['address'] == address and e['checkout_date'] == checkout_date_iso:
+                return pd
+    return None
+
+@app.route('/api/pack-list/cancel-reservation', methods=['POST'])
+def cancel_reservation():
+    """Admin/Manager-only: mark a reservation cancelled so it's pulled off
+    the pack schedule and never re-added by a later Breezeway sync, even if
+    Breezeway itself hasn't caught up on the cancellation yet. Warehouse has
+    no access to this action.
+
+    If bags were already packed/staged for this turnover, the first call
+    (without confirm_packed) is rejected with the packed details so the
+    caller can warn before resubmitting with confirm_packed=true — this
+    never silently cancels something that's already been packed."""
+    data = request.json or {}
+    pin = str(data.get('pin') or data.get('admin_pin') or '')
+    if not is_manager_or_admin_pin(pin):
+        return jsonify({'error': 'Admin or Manager PIN required'}), 403
+
+    address = (data.get('address') or '').strip()
+    checkout_date = (data.get('checkout_date') or '').strip()
+    notes = (data.get('notes') or '').strip()
+    confirm_packed = bool(data.get('confirm_packed'))
+    if not address or not checkout_date:
+        return jsonify({'error': 'address and checkout_date are required'}), 400
+    addr_key = address.lower().strip()
+
+    pack_date = _find_pack_date_for_checkout(addr_key, checkout_date)
+    packed_info = None
+    if pack_date:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT packed_by, packed_at FROM pack_list_status WHERE address=%s AND pack_date=%s", (addr_key, pack_date))
+        st = cur.fetchone()
+        cur.close(); conn.close()
+        if st:
+            packed_info = {'packed_by': st['packed_by'], 'packed_at': st['packed_at'], 'pack_date': pack_date}
+
+    if packed_info and not confirm_packed:
+        return jsonify({
+            'error': 'already_packed',
+            'message': f"Bags for this property were already packed by {packed_info['packed_by']} on {packed_info['packed_at']}. Cancel anyway?",
+            'packed_info': packed_info,
+        }), 409
+
+    performer = resolve_performer(data)
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO pack_cancelled_reservations (address, checkout_date, cancelled_by, cancelled_at, notes)
+        VALUES (%s,%s,%s,%s,%s)
+        ON CONFLICT (address, checkout_date) DO UPDATE
+            SET cancelled_by=EXCLUDED.cancelled_by, cancelled_at=EXCLUDED.cancelled_at, notes=EXCLUDED.notes
+    """, (addr_key, checkout_date, performer, now_central(), notes or None))
+    cur.execute("""
+        DELETE FROM forecast_reservations
+        WHERE LOWER(TRIM(unit_address))=%s AND TO_DATE(depart,'MM/DD/YYYY')=%s
+    """, (addr_key, checkout_date))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Cancelled reservation', addr_key, performer,
+              f'checkout {checkout_date}' + (f' — already packed by {packed_info["packed_by"]}' if packed_info else ''))
+    return jsonify({'success': True, 'was_already_packed': bool(packed_info)})
+
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
     """Daily pack list. Pack date comes from compute_pack_schedule — clean
@@ -5290,7 +5471,56 @@ def get_pack_list():
     for addr in addrs_extra - seen:
         properties.append(build(addr, None))
 
-    return jsonify({'date': date_str, 'properties': properties})
+    # Carry-forward safety net: any pack date before today that's still
+    # unpacked shows up here too, so it's never only visible on a past
+    # date nobody's looking at anymore. Same mechanism as the 'missed'
+    # list on /api/pack-list/week. Only computed when viewing today —
+    # browsing a specific past/future date still shows just that date,
+    # same as before.
+    missed = []
+    if date_str == today_central():
+        today_dt = datetime.strptime(date_str, '%Y-%m-%d').date()
+        lookback_dt = max(today_dt - timedelta(days=30), datetime(2026, 7, 20).date())
+        missed_schedule, _ = compute_pack_schedule(lookback_dt.isoformat(), (today_dt - timedelta(days=1)).isoformat())
+
+        conn2 = get_db(); cur2 = conn2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur2.execute("SELECT address, pack_date FROM pack_list_status WHERE pack_date BETWEEN %s AND %s",
+                     (lookback_dt.isoformat(), date_str))
+        packed_pairs = {(s['address'], s['pack_date']) for s in cur2.fetchall()}
+        cur2.close(); conn2.close()
+
+        def build_missed(addr, entry, pack_date):
+            f = formulas.get(addr)
+            if not f:
+                fuzzy_addr = fuzzy_match_address(addr, formulas.keys())
+                if fuzzy_addr:
+                    f = formulas.get(fuzzy_addr)
+            return {
+                'address': addr,
+                'property_name': f['property_name'] if f else addr,
+                'formula': {k: f[k] for k in ('king','queen','twin','towels','hand','wash','mats','pool','queen_sleeper','twin_sleeper','amenity_boxes','toilet_paper','small_trash_bags','soap_sets','bar_soap','paper_towels','kitchen_bags_cleaner','red_bag_cleaner')} if f else None,
+                'is_emergency': False,
+                'emergency_notes': None,
+                'packed': False,
+                'packed_by': None,
+                'packed_at': None,
+                'cleaner_name': entry.get('cleaner_name'),
+                'staged_bags': [],
+                'assigned_cleaner_name': entry.get('cleaner_name'),
+                'assigned_cleaner_id': entry.get('cleaner_id'),
+                'assigned': entry.get('assigned', False),
+                'pack_date': pack_date,
+                'days_overdue': (today_dt - datetime.strptime(pack_date, '%Y-%m-%d').date()).days,
+            }
+
+        for d, ents in missed_schedule.items():
+            if d >= date_str: continue
+            for e in ents:
+                if (e['address'], d) in packed_pairs: continue
+                missed.append(build_missed(e['address'], e, d))
+        missed.sort(key=lambda m: m['pack_date'])
+
+    return jsonify({'date': date_str, 'properties': properties, 'missed': missed})
 
 def _build_warehouse_dashboard_data(week_start_weekday=0):
     """Shared computation behind both Cassie's dashboard and Admin's expanded
@@ -5880,6 +6110,7 @@ def get_pack_list_week():
             'assigned_cleaner_id': entry.get('cleaner_id'),
             'assigned': entry.get('assigned', False),
             'pack_date': pack_date,
+            'checkout_date': entry.get('checkout_date'),
         }
 
     missed = []
