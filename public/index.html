@@ -5808,14 +5808,24 @@ async function resolvePackFlag(id) {
 
 async function renderPackEmergency(gen) {
   if (!packListState.date) packListState.date = await getServerToday();
-  const res = await fetch('/api/pack-list/emergency?date=' + packListState.date);
+  const [res, homesRes] = await Promise.all([
+    fetch('/api/pack-list/emergency?date=' + packListState.date),
+    fetch('/api/homes')
+  ]);
   const rows = await res.json();
+  const homes = await homesRes.json();
   if (_stale(gen)) return;
+  const homeOptions = homes.slice().sort((a, b) => a.name.localeCompare(b.name))
+    .map(h => `<option value="${h.name.replace(/"/g,'&quot;')}">${h.name}</option>`).join('');
   document.getElementById('main-content').innerHTML = `
     <div class="card">
       <div class="card-title"><i class="ic" data-lucide="zap"></i> Add last-minute property</div>
       <label>Date</label><input type="date" id="pe-date" value="${packListState.date}" onchange="packListState.date=this.value;showTab('pack_emergency')">
-      <label>Property name</label><input id="pe-address" placeholder="Must match a home name exactly">
+      <label>Property name</label>
+      <select id="pe-address">
+        <option value="">Select a property...</option>
+        ${homeOptions}
+      </select>
       <label>Notes for Kim &amp; April</label><input id="pe-notes" placeholder="Optional">
       <button class="btn btn-danger" style="width:100%;margin-top:10px" onclick="submitPackEmergency()"><i class="ic" data-lucide="zap"></i> Send alert</button>
     </div>
@@ -5826,7 +5836,7 @@ async function renderPackEmergency(gen) {
 async function submitPackEmergency() {
   const address = document.getElementById('pe-address').value.trim();
   const notes = document.getElementById('pe-notes').value.trim();
-  if (!address) { notify('Enter a property name'); return; }
+  if (!address) { notify('Select a property'); return; }
   const res = await fetch('/api/pack-list/emergency', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, notes, pack_date: packListState.date, added_by: _currentStaffName })
