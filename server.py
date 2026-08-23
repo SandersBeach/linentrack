@@ -4884,7 +4884,17 @@ def fuzzy_match_address(raw_address, candidate_addresses):
     known-correct addresses — same leading-number + word-overlap approach
     used to reconcile the original packing-list spreadsheet against homes.
     Exact match always wins first; only falls back to fuzzy matching when
-    nothing matches exactly. Returns the matching candidate or None."""
+    nothing matches exactly. Returns the matching candidate or None.
+
+    IMPORTANT: a shared leading house number is NOT enough on its own —
+    two entirely different properties on different streets can share a
+    house number (e.g. '262 WRM Cir' and '262 Garfield ...'). This used to
+    auto-accept a same-number candidate even with zero words in common
+    whenever it was the only same-number option, which silently cross-
+    matched unrelated properties (and could assign the wrong packing
+    formula to the wrong house). Now it always requires at least one
+    real word in common — no word overlap, no match, regardless of how
+    many same-number candidates exist."""
     key = _normalize_addr(raw_address)
     if not candidate_addresses:
         return None
@@ -4900,7 +4910,7 @@ def fuzzy_match_address(raw_address, candidate_addresses):
     scored = sorted(same_num, key=lambda c: len(fw & set(_normalize_addr(c).split())), reverse=True)
     best = scored[0]
     best_score = len(fw & set(_normalize_addr(best).split()))
-    if len(same_num) == 1 or best_score >= 1:
+    if best_score >= 1:
         return best
     return None
 
@@ -5173,10 +5183,16 @@ def api_today():
     timezone whenever a device is set to something else."""
     return jsonify({'date': today_central()})
 
-TASK_ONLY_PROPERTIES = {'262 wrm cir'}  # Bay House — used by SBR Team & Facilities,
-# has Breezeway cleaning tasks but no guest reservations. See the fallback
-# at the bottom of compute_pack_schedule. Address must be lowercase/stripped
-# to match how addresses are keyed everywhere else in this function.
+TASK_ONLY_PROPERTIES = {'262 wrm cir': 'steve "bay house"'}  # Bay House — used by
+# SBR Team & Facilities, has Breezeway cleaning tasks but no guest
+# reservations. Maps Breezeway's own address for the task ('262 WRM Cir')
+# to the actual Home/formula record name ('Steve "Bay House"') — these are
+# two unrelated strings for the same property, so this is an explicit,
+# exact translation rather than relying on fuzzy matching (which could
+# cross-match to a different property entirely; see fuzzy_match_address).
+# See the fallback at the bottom of compute_pack_schedule. Keys/values
+# must be lowercase/stripped to match how addresses are keyed everywhere
+# else in this function.
 
 def compute_pack_schedule(window_start, window_end):
     """Single source of truth for pack scheduling: pack_date = scheduled
@@ -5267,16 +5283,16 @@ def compute_pack_schedule(window_start, window_end):
     # now — not a general rule for every task-only property.
     window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
     window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
-    for address in TASK_ONLY_PROPERTIES:
-        if address in by_address:
+    for bw_address, canonical_address in TASK_ONLY_PROPERTIES.items():
+        if bw_address in by_address or canonical_address in by_address:
             continue  # has real reservations now — normal path handles it
-        for c in cleans_by_address.get(address, []):
+        for c in cleans_by_address.get(bw_address, []):
             c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
             if not (window_start_dt <= c_date <= window_end_dt):
                 continue
             pack_date = (c_date - timedelta(days=1)).isoformat()
             schedule.setdefault(pack_date, []).append({
-                'address': address,
+                'address': canonical_address,
                 'checkout_date': None,
                 'clean_date': c['assignment_date'],
                 'cleaner_id': c['cleaner_id'],
