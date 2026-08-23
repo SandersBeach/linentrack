@@ -5410,21 +5410,27 @@ function packCard(p, showDate) {
     dateLine = formatDueDate(p.pack_date, p.packed);
   }
   const canCancelReservation = (userRoles.includes('admin') || userRoles.includes('manager')) && !p.is_emergency && p.checkout_date;
+  // Addresses can contain literal quote characters (e.g. Steve "Bay House"),
+  // which would otherwise break the double-quoted onclick attribute (HTML)
+  // and/or the single-quoted string argument (JS) it wraps. Escape both so
+  // every button below actually fires regardless of what's in the address.
+  const addrJs = (p.address || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const checkoutJs = (p.checkout_date || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   return `<div class="card" style="${p.packed ? 'opacity:0.55;' : ''}${p.is_emergency ? 'border-color:var(--amber);' : ''}">
     ${p.is_emergency ? '<div class="badge badge-warn" style="margin-bottom:6px"><i class="ic" data-lucide="zap"></i> Last-minute add</div>' : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <div style="cursor:pointer" onclick="showPropertyDetail('${p.address}','${p.pack_date}')">
+      <div style="cursor:pointer" onclick="showPropertyDetail('${addrJs}','${p.pack_date}')">
         <div class="row-title" style="font-weight:600">${p.property_name} <span class="row-hint">tap to enlarge</span></div>
         ${dateLine}
         ${f ? `<div class="row-sub">${formulaSummaryLine(f)}</div>` : `<div class="row-sub" style="color:var(--coral-dark)">No packing formula on file for this property</div>`}
       </div>
       <div style="text-align:right">
         ${p.packed
-          ? `<div class="badge badge-ok"><i class="ic" data-lucide="check"></i> Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name === 'Unassigned' ? '<strong style="color:var(--amber)">Unassigned</strong>' : p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><div style="display:flex;gap:6px;margin-top:4px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="openSwapCleanerModal('${p.address}','${p.pack_date}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button><button class="btn btn-ghost btn-sm" onclick="undoPack('${p.address}','${p.pack_date}')">Undo</button></div>`
+          ? `<div class="badge badge-ok"><i class="ic" data-lucide="check"></i> Packed</div><div class="row-sub">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name === 'Unassigned' ? '<strong style="color:var(--amber)">Unassigned</strong>' : p.cleaner_name}</div><div class="row-sub">Bags: ${p.staged_bags.join(', ')}</div><div style="display:flex;gap:6px;margin-top:4px;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="openSwapCleanerModal('${addrJs}','${p.pack_date}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button><button class="btn btn-ghost btn-sm" onclick="undoPack('${addrJs}','${p.pack_date}')">Undo</button></div>`
           : `${p.assigned ? `<div class="row-sub">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>` : `<div class="row-sub" style="color:var(--coral-dark);font-weight:600">Unassigned</div>`}
-             <button class="btn btn-primary btn-sm" onclick="openPackModal('${p.address}','${p.pack_date}')"><i class="ic" data-lucide="check"></i> Mark packed</button>
-             <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${p.address}','${p.pack_date}')" style="margin-left:6px"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`}
-        ${canCancelReservation ? `<div style="margin-top:4px"><button class="btn btn-ghost btn-sm" style="color:var(--coral-dark)" onclick="cancelReservation('${p.address}','${p.checkout_date}')"><i class="ic" data-lucide="x-circle"></i> Cancel Reservation</button></div>` : ''}
+             <button class="btn btn-primary btn-sm" onclick="openPackModal('${addrJs}','${p.pack_date}')"><i class="ic" data-lucide="check"></i> Mark packed</button>
+             <button class="btn btn-ghost btn-sm" onclick="openFlagModal('${addrJs}','${p.pack_date}')" style="margin-left:6px"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`}
+        ${canCancelReservation ? `<div style="margin-top:4px"><button class="btn btn-ghost btn-sm" style="color:var(--coral-dark)" onclick="cancelReservation('${addrJs}','${checkoutJs}')"><i class="ic" data-lucide="x-circle"></i> Cancel Reservation</button></div>` : ''}
       </div>
     </div>
   </div>`;
