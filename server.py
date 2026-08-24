@@ -2757,7 +2757,10 @@ def hk_supply_transaction(sid):
     conn.commit(); alert_sent=False
     if new_qty<=item['low_stock_threshold']:
         body=f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
-        alert_sent=send_email(f"LOW STOCK (Housekeeping): {item['name']}",body,to=SARAH_EMAIL)
+        # Kitchen Amenity Boxes goes to Jennifer Sims instead of Sarah —
+        # everything else in Housekeeping Supplies still goes to Sarah.
+        alert_to = JENNIFER_EMAIL if item['name'] == 'Kitchen Amenity Boxes' else SARAH_EMAIL
+        alert_sent=send_email(f"LOW STOCK (Housekeeping): {item['name']}",body,to=alert_to)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
 
 @app.route('/api/hk-supplies/<int:sid>/qr', methods=['GET'])
@@ -4266,6 +4269,7 @@ def seed_store():
 # ── ForecastCentral ───────────────────────────────────────────────────────────
 
 SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
+JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert recipient for Kitchen Amenity Boxes specifically, instead of Sarah
 
 SUPPLY_MAP = {
     11: ['Toilet Paper Rolls'],
@@ -6494,7 +6498,7 @@ def set_inventory_reminder_setting():
     return jsonify({'success': True})
 
 def run_pickup_deadline_check(force=False):
-    """At/after 10:30am Central, alerts Cassie if any property packed for
+    """At/after 10:30am Central, alerts Cassie if any property being cleaned
     TODAY still has bags sitting staged (not yet picked up by the cleaner).
     Only ever sends once per day — checks daily_alert_log first, and the
     unique constraint on it means even if two worker threads raced to send
@@ -6505,6 +6509,7 @@ def run_pickup_deadline_check(force=False):
     if not force and (now.hour, now.minute) < (10, 30):
         return {'checked': 0, 'alerted': False, 'reason': 'before 10:30am Central'}
     today_str = now.strftime('%Y-%m-%d')
+    yesterday_str = (now.date() - timedelta(days=1)).isoformat()
 
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='pickup_deadline' AND log_date=%s", (today_str,))
@@ -6512,9 +6517,27 @@ def run_pickup_deadline_check(force=False):
         cur.close(); conn.close()
         return {'checked': 0, 'alerted': False, 'reason': 'already sent today'}
 
+    # Normal turnovers are packed the day BEFORE the clean (see
+    # compute_pack_schedule: pack_date = clean_date - 1 day), and the
+    # cleaner grabs the bags the morning of the actual clean — i.e. today.
+    # So "packed for today's clean" means pack_date = yesterday, not today.
+    # Checking pack_date=today here used to catch everything packed for
+    # TOMORROW's clean instead, which naturally sits untouched at 10:30am
+    # and was the source of the false-alarm flood.
     cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
-                   WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (today_str,))
+                   WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (yesterday_str,))
     rows = cur.fetchall()
+
+    # Last-Minute/emergency adds: how far ahead these get packed relative to
+    # pickup isn't confirmed yet, so they keep the original same-day check
+    # (pack_date=today) rather than assuming the day-ahead offset applies.
+    cur.execute("SELECT LOWER(TRIM(address)) AS address FROM pack_emergency_adds WHERE pack_date=%s", (today_str,))
+    emergency_addresses = [r['address'] for r in cur.fetchall()]
+    if emergency_addresses:
+        cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
+                       WHERE pack_date=%s AND address = ANY(%s) AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""",
+                    (today_str, emergency_addresses))
+        rows += cur.fetchall()
 
     still_staged = []  # [{address, bag_id, cleaner_name}]
     for r in rows:
