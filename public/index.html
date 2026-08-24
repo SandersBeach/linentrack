@@ -3031,9 +3031,14 @@ async function finalizeCount() {
     // its own matching endpoint. (Loaner items are tracked as found/missing
     // rather than a quantity, so there's nothing to "set" for those — the
     // variance list still flags them for follow-up same as before.)
+    // Items left blank are skipped entirely here — a blank field means
+    // "didn't get to this one," not "confirmed zero on hand," so it must
+    // never overwrite the real inventory number. Only an item where someone
+    // actually typed 0 should zero out that item's stock.
     for (const item of s.items) {
       if (item.type !== 'supply' || !item.supplyId || !item.source) continue;
-      const counted = s.counts.hasOwnProperty(item.id) ? s.counts[item.id] : 0;
+      if (!s.counts.hasOwnProperty(item.id)) continue;
+      const counted = s.counts[item.id];
       if (item.source === 'store') {
         await fetch(`/api/store/items/${item.supplyId}/set-count`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3089,6 +3094,7 @@ function renderCountReport(data) {
       const isShort = item.diff<0||item.counted==='Missing'; const isOver = item.diff>0;
       let detail = '';
       if (item.type==='loaner') detail = item.counted==='Found'?'<i class="ic" data-lucide="check"></i> Found':'<i class="ic" data-lucide="x"></i> Missing — expected in warehouse';
+      else if (item.missing) detail = `<strong style="color:var(--coral-dark)">Not counted</strong> — left blank, on-hand quantity unchanged · expected ${item.expected} ${item.unit||''}`;
       else { const diff=item.counted-item.expected; detail=`Found ${item.counted} ${item.unit||''} · expected ${item.expected} · <strong style="color:${diff<0?'var(--coral-dark)':'var(--amber)'}">${diff>0?'+':''}${diff}</strong>`; }
       html+=`<div class="row"><div class="row-main"><div class="row-title">${item.label} <span class="tag" style="font-size:10px">${item.type}</span></div><div class="row-sub">${detail}</div></div><span class="badge ${isShort?'badge-out':isOver?'badge-warn':'badge-ok'}">${isShort?'Short':'Over'}</span></div>`;
     });
@@ -5351,6 +5357,13 @@ function showPropertyDetail(address, packDate) {
   const p = packListState.properties.find(x => x.address === address && x.pack_date === packDate);
   if (!p) return;
   const f = p.formula;
+  // Addresses can contain literal quote characters (e.g. Steve "Bay House"),
+  // which would otherwise break the double-quoted onclick attribute (HTML)
+  // and/or the single-quoted string argument (JS) it wraps. Escape both so
+  // every button below actually fires regardless of what's in the address —
+  // same fix already applied to the pack-list cards themselves (packCard).
+  const addrJs = (address || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  const propNameJs = (p.property_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   let dateLine = p.pack_date ? formatDueDate(p.pack_date, p.packed) : '';
   let body = `<div style="text-align:center;margin-bottom:1rem">
     <div style="font-size:24px;font-weight:700">${p.property_name}</div>
@@ -5379,21 +5392,21 @@ function showPropertyDetail(address, packDate) {
       ${f.kitchen_bags_cleaner ? box(f.kitchen_bags_cleaner, 'Kitchen bags (cleaner)') : ''}
       ${f.red_bag_cleaner ? box(f.red_bag_cleaner, 'Red bag (cleaner)') : ''}
     </div>`;
-    if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${p.address}');return false;" style="color:var(--teal);font-size:15px"><i class="ic" data-lucide="pencil"></i> Edit formula</a></div>`;
+    if (userRoles.includes('admin')) body += `<div style="text-align:center;margin-bottom:1rem"><a href="#" onclick="closePropertyDetail();openEditFormulaModal('${addrJs}');return false;" style="color:var(--teal);font-size:15px"><i class="ic" data-lucide="pencil"></i> Edit formula</a></div>`;
   } else {
-    body += `<div class="card" style="text-align:center;color:var(--coral-dark);font-size:16px;margin-bottom:1.25rem">No packing formula on file for this property${userRoles.includes('admin') ? `<br><a href="#" onclick="closePropertyDetail();openAddFormulaModal('${p.property_name}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`;
+    body += `<div class="card" style="text-align:center;color:var(--coral-dark);font-size:16px;margin-bottom:1.25rem">No packing formula on file for this property${userRoles.includes('admin') ? `<br><a href="#" onclick="closePropertyDetail();openAddFormulaModal('${propNameJs}');return false;" style="color:var(--teal)">add one</a>` : ''}</div>`;
   }
   if (p.packed) {
     body += `<div class="badge badge-ok" style="font-size:16px;padding:10px 16px;display:block;text-align:center;margin-bottom:8px"><i class="ic" data-lucide="check"></i> Packed</div>
       <div class="row-sub" style="text-align:center">${p.packed_by} · ${p.packed_at} · for ${p.cleaner_name === 'Unassigned' ? '<strong style="color:var(--amber)">Unassigned</strong>' : p.cleaner_name}</div>
       <div class="row-sub" style="text-align:center">Bags: ${p.staged_bags.join(', ')}</div>
-      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePropertyDetail();openSwapCleanerModal('${address}','${packDate}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button>
-      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();undoPack('${address}','${packDate}')">Undo</button>`;
+      <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="closePropertyDetail();openSwapCleanerModal('${addrJs}','${packDate}','${(p.cleaner_name||'').replace(/'/g,"\\'")}')">${p.cleaner_name === 'Unassigned' ? 'Assign Cleaner' : 'Swap Cleaner'}</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();undoPack('${addrJs}','${packDate}')">Undo</button>`;
   } else {
     if (p.assigned) body += `<div class="row-sub" style="text-align:center;margin-bottom:10px">Assigned: <strong>${p.assigned_cleaner_name}</strong></div>`;
     else body += `<div class="row-sub" style="text-align:center;color:var(--coral-dark);font-weight:600;margin-bottom:10px">Unassigned</div>`;
-    body += `<button class="btn btn-primary btn-full" style="font-size:18px;padding:16px" onclick="closePropertyDetail();openPackModal('${address}','${packDate}')"><i class="ic" data-lucide="check"></i> Mark Packed</button>
-      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${address}','${packDate}')"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`;
+    body += `<button class="btn btn-primary btn-full" style="font-size:18px;padding:16px" onclick="closePropertyDetail();openPackModal('${addrJs}','${packDate}')"><i class="ic" data-lucide="check"></i> Mark Packed</button>
+      <button class="btn btn-ghost btn-full" style="margin-top:8px" onclick="closePropertyDetail();openFlagModal('${addrJs}','${packDate}')"><i class="ic" data-lucide="triangle-alert"></i> Flag</button>`;
   }
   document.getElementById('property-detail-body').innerHTML = body;
   document.getElementById('modal-property-detail').style.display = 'flex';
