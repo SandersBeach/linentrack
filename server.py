@@ -3945,12 +3945,85 @@ STORE_ITEMS_SEED = [
     ("Wooden Hangers", "Additional Housewares", 105, 0),
 ]
 
+# One-off batch of new Store items requested 2026-08-24. This is deliberately
+# kept separate from STORE_ITEMS_SEED and from /api/seed-store — that seed
+# route DELETEs everything in store_items/store_transactions before
+# re-inserting, and this batch must never touch existing rows. The endpoint
+# below only ever INSERTs, and skips any name that already exists so it's
+# safe to trigger more than once by accident.
+NEW_STORE_ITEMS_BATCH_20260824 = [
+    # (name, category, quantity, price)
+    ("White Ceramic Rectangle Soap Dish", "Bathrooms", 4, 0),
+    ("Round Stone Soap Dish", "Bathrooms", 3, 0),
+    ("Clear Glass Rectangle Soap Dish", "Bathrooms", 4, 0),
+    ("Shower Tension Rod", "Bathrooms", 3, 0),
+    ("Freestanding Toilet Paper Holder", "Bathrooms", 1, 0),
+    ("Kitchen Tongs", "Kitchen", 1, 0),
+    ("Black Handle Steak Knife", "Kitchen/Flatware", 11, 0),
+    ("Brighton Butter Knife", "Kitchen/Flatware", 29, 0),
+    ("No Name Butter Knife", "Kitchen/Flatware", 20, 0),
+    ("Mikasa Butter Knife", "Kitchen/Flatware", 29, 0),
+    ("Oneida Butter Knife", "Kitchen/Flatware", 108, 0),
+    ("Butter Spreader", "Kitchen/Flatware", 4, 0),
+    ("Mikasa Salad Fork", "Kitchen/Flatware", 6, 0),
+    ("Mikasa Dinner Fork", "Kitchen/Flatware", 12, 0),
+    ("Oneida Salad Fork", "Kitchen/Flatware", 42, 0),
+    ("Oneida Dinner Fork", "Kitchen/Flatware", 51, 0),
+    ("Oneida Teaspoon", "Kitchen/Flatware", 39, 0),
+    ("Oneida Tablespoon", "Kitchen/Flatware", 60, 0),
+    ("Mikasa Teaspoon", "Kitchen/Flatware", 8, 0),
+    ("Mikasa Tablespoon", "Kitchen/Flatware", 4, 0),
+    ("Air Mattress", "Additional Housewares", 2, 0),
+    ("Anchor 8x11 Baking Dish", "Kitchen", 2, 0),
+    ("Anchor 11x13 Baking Dish", "Kitchen", 1, 0),
+    ("Small Glass Bake Set (3-Piece)", "Kitchen", 1, 0),
+    ("Glass Pyrex Prep Bowl Set (3-Piece)", "Kitchen", 2, 0),
+    ("Anchor 10-Piece Glass Bake Set", "Kitchen", 1, 0),
+    ("Williams Sonoma 10-Piece Glass Mixing Bowl Set", "Kitchen", 1, 0),
+    ("Measuring Cups", "Kitchen", 1, 0),
+    ("Measuring Spoons", "Kitchen", 1, 0),
+    ("Small Cookie Sheet", "Kitchen", 2, 0),
+    ("Medium Cookie Sheet", "Kitchen", 2, 0),
+    ("Large Cookie Sheet", "Kitchen", 2, 0),
+    ("6in Round Cake Pan", "Kitchen", 2, 0),
+    ("Raydun Roasting Pan", "Kitchen", 1, 0),
+    ("Cuisinart Roasting Pan", "Kitchen", 1, 0),
+    ("Cuisinart 2-Slice Toaster", "Kitchen", 1, 0),
+    ("Cuisinart 4-Slice Toaster", "Kitchen", 1, 0),
+    ("2-Gallon Stainless Trash Can", "Additional Housewares", 1, 0),
+    ("Reusable K-Cup Coffee Filter", "Kitchen", 3, 0),
+    ("Cuisinart Gold Tone Reusable Coffee Filter", "Kitchen", 1, 0),
+    ("Glass Juice Pitcher", "Kitchen/Glasses", 2, 0),
+    ("10-Gallon Black Trash Can", "Additional Housewares", 1, 0),
+]
+
 @app.route('/api/store/items', methods=['GET'])
 def get_store_items():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT * FROM store_items ORDER BY category, name")
     rows=cur.fetchall(); cur.close(); conn.close()
     return jsonify(rows)
+
+@app.route('/api/store/items/bulk-add-2026-08-24', methods=['POST'])
+def bulk_add_store_items_20260824():
+    """Adds the 2026-08-24 batch of new Store items. INSERT-only — never
+    deletes or edits anything, and skips any name that already exists in
+    store_items (case-insensitive), so it's safe to call more than once."""
+    data=request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    inserted=[]; skipped=[]
+    for name,category,qty,price in NEW_STORE_ITEMS_BATCH_20260824:
+        cur.execute("SELECT id FROM store_items WHERE LOWER(name)=LOWER(%s)", (name,))
+        if cur.fetchone():
+            skipped.append(name); continue
+        cur.execute("INSERT INTO store_items (name,category,quantity,price,created_at) VALUES (%s,%s,%s,%s,%s)",
+            (name, category, qty, price, now_central()))
+        inserted.append(name)
+    conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Bulk-added new items (2026-08-24 batch)', f'{len(inserted)} added, {len(skipped)} already existed', resolve_performer(data))
+    return jsonify({'success':True,'inserted':inserted,'skipped_existing':skipped})
 
 @app.route('/api/store/items', methods=['POST'])
 def add_store_item():
