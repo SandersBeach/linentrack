@@ -4361,6 +4361,26 @@ SUPPLY_MAP = {
     24: ['10oz Tide Bottles'],
 }
 
+# Kitchen Amenity Box contents — how many of each ingredient go into ONE box.
+# Used by /api/forecast/box-packing, and also by run_forecast() below to
+# surface these ingredients on the main Run Forecast tab / email-Sarah
+# report, since they were previously only visible on the separate Box
+# Packing tab even though Kristin emails shortages from Run Forecast.
+# 'Kitchen Amenity Boxes' and 'Kitchen Trash Bags' are deliberately excluded
+# from that merge — both are already tracked directly per-property via
+# SUPPLY_MAP above, so re-adding them here would double-count them.
+BOX_CONTENTS = {
+    'Kitchen Trash Bags':      5,
+    'Round Coffee Filters':    3,  # "Basket" coffee filters
+    '#4 Cone Coffee Filters':  3,
+    'Amavida Coffee Packs':    1,
+    '3oz Palmolive Bottles':   2,
+    'Dishwasher Pod Packs':    2,
+    'Kitchen Sponges':         1,
+    '10oz Tide Bottles':       1,
+    'Kitchen Amenity Boxes':   1,
+}
+
 def parse_pack_list_csv(content):
     """Parse pack list CSV → {address: {supply_name: qty}}"""
     import csv, io
@@ -4509,6 +4529,39 @@ def run_forecast(conn, date_from=None, date_to=None):
             'breakdown': breakdown[supply_name][:5]  # top 5 properties
         })
 
+    # Merge in Kitchen Amenity Box ingredients that aren't tracked as their
+    # own per-property pack list column (coffee filters, Palmolive,
+    # dishwasher pods, sponges, Tide, Amavida packs). These were previously
+    # only visible on the separate Box Packing tab, even though shortage
+    # emails go out from this report. Computed from the recipe (BOX_CONTENTS)
+    # applied to however many Kitchen Amenity Boxes are actually needed.
+    # 'Kitchen Amenity Boxes' and 'Kitchen Trash Bags' are skipped here since
+    # both already have their own pack-list-tracked row above — adding them
+    # again from the recipe would double-count them.
+    boxes_needed_qty = needed.get('Kitchen Amenity Boxes', 0)
+    if boxes_needed_qty > 0:
+        for item, per_box in BOX_CONTENTS.items():
+            if item in ('Kitchen Amenity Boxes', 'Kitchen Trash Bags'):
+                continue
+            if item in needed:
+                continue  # already covered by a direct pack-list column
+            qty_needed = per_box * boxes_needed_qty
+            current_stock = inventory.get(item, 0)
+            on_order_qty = on_order.get(item, 0)
+            available = current_stock + on_order_qty
+            shortfall = max(0, qty_needed - available)
+            results.append({
+                'supply_name': item,
+                'needed': qty_needed,
+                'current_stock': current_stock,
+                'on_order': on_order_qty,
+                'available': available,
+                'shortfall': shortfall,
+                'ok': shortfall == 0,
+                'breakdown': []  # not tracked per-property — derived from box recipe
+            })
+        results.sort(key=lambda r: r['supply_name'])
+
     cur.close()
     return {
         'results': results,
@@ -4636,18 +4689,6 @@ def forecast_status():
 @app.route('/api/forecast/box-packing', methods=['GET'])
 def box_packing():
     """Calculate how many amenity boxes can be packed vs how many are needed."""
-    BOX_CONTENTS = {
-        'Kitchen Trash Bags':      5,
-        'Round Coffee Filters':    3,  # "Basket" coffee filters
-        '#4 Cone Coffee Filters':  3,
-        'Amavida Coffee Packs':    1,
-        '3oz Palmolive Bottles':   2,
-        'Dishwasher Pod Packs':    2,
-        'Kitchen Sponges':         1,
-        '10oz Tide Bottles':       1,
-        'Kitchen Amenity Boxes':   1,
-    }
-
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # Current inventory of each box ingredient
