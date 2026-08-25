@@ -4361,15 +4361,23 @@ JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert reci
 # though they're tracked elsewhere (pack list formula). "Insert" is the
 # duvet insert itself, distinct from the "Duvet Cover" line. Twin Pillowcase
 # is deliberately excluded (Kristin's request) even though King/Queen
-# Pillowcase are tracked. Pillows and pillow protectors come in King/
-# Standard only (no per-bed-size breakdown), matching how they're actually
-# stocked.
+# Pillowcase are tracked. Queen Blanket is split into "Queen Waffle Blanket"
+# and "Queen Grey Blanket" — the two blanket styles actually stocked for
+# queen beds — while King/Twin Blanket stay as single lines. Pillows and
+# pillow protectors come in King/Standard only (no per-bed-size breakdown),
+# matching how they're actually stocked.
 _LINEN_BED_SIZES = ['King', 'Queen', 'Twin']
 _LINEN_BEDDING_COMPONENTS = ['Flat Sheet', 'Fitted Sheet', 'Pillowcase', 'Blanket', 'Insert', 'Duvet Cover', 'Mattress Pad']
-LINEN_ITEMS = [
-    f'{size} {component}' for size in _LINEN_BED_SIZES for component in _LINEN_BEDDING_COMPONENTS
-    if not (size == 'Twin' and component == 'Pillowcase')
-] + [
+LINEN_ITEMS = []
+for _size in _LINEN_BED_SIZES:
+    for _component in _LINEN_BEDDING_COMPONENTS:
+        if _size == 'Twin' and _component == 'Pillowcase':
+            continue
+        if _size == 'Queen' and _component == 'Blanket':
+            LINEN_ITEMS += ['Queen Waffle Blanket', 'Queen Grey Blanket']
+            continue
+        LINEN_ITEMS.append(f'{_size} {_component}')
+LINEN_ITEMS += [
     'Bath Towels', 'Hand Towels', 'Washcloths', 'Bath Mats', 'Pool Towels',
     'Blue Linen Bag', 'Kitchen Towels',
     'King Pillows', 'Standard Pillows', 'King Pillow Protector', 'Standard Pillow Protector',
