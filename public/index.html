@@ -864,13 +864,13 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
+  warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
   manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
-  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
   warehouse_home: 'Daily Priorities',
@@ -890,6 +890,7 @@ const TAB_LABELS = {
   store: 'SBR Store',
   pack_list: 'Pack List',
   daily_tasks: 'Daily Tasks',
+  damage_log: 'Damage Log',
   warehouse_dashboard: 'Dashboard',
   admin_dashboard: 'Dashboard',
   bundles_needed: 'Bundles Needed',
@@ -1268,6 +1269,7 @@ function showTab(t) {
     store: renderStore,
     pack_list: renderPackList,
     daily_tasks: renderDailyTasks,
+    damage_log: renderDamageLog,
     warehouse_dashboard: renderWarehouseDashboard,
     admin_dashboard: renderAdminDashboard,
     bundles_needed: renderBundlesNeeded,
@@ -5144,7 +5146,7 @@ function renderDashboardSharedHtml(data) {
       ${metricCard('Bins unpacked today', data.daily_task_today.bins_unpacked, false, "showTab('daily_tasks')")}
       ${metricCard('Boxes assembled today', data.daily_task_today.boxes_assembled, false, "showTab('daily_tasks')")}
     </div>
-    <div class="row-sub">This week: ${data.daily_task_week.bins_received} bins received · ${data.daily_task_week.bins_unpacked} unpacked · ${data.daily_task_week.boxes_assembled} boxes assembled</div>
+    <div class="row-sub">This week: ${data.daily_task_week.bins_received} bins received · ${data.daily_task_week.bins_unpacked} unpacked · ${data.daily_task_week.bins_out} out · ${data.daily_task_week.boxes_assembled} boxes assembled</div>
   </div>`;
   html += `<div class="card" style="margin-top:1rem">
     <div class="card-title"><i class="ic" data-lucide="square-pen"></i> Notes for Next Shift</div>
@@ -5253,6 +5255,7 @@ async function renderDailyTasks(gen) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
         <div><label>Laundry bins received</label><input type="number" id="dt-bins-received" value="0" min="0"></div>
         <div><label>Laundry bins unpacked</label><input type="number" id="dt-bins-unpacked" value="0" min="0"></div>
+        <div><label>Laundry bins out</label><input type="number" id="dt-bins-out" value="0" min="0"></div>
         <div><label>Amenity boxes assembled</label><input type="number" id="dt-boxes-assembled" value="0" min="0"></div>
       </div>
       <button class="btn btn-primary btn-full" onclick="submitDailyLog()">Submit</button>
@@ -5260,11 +5263,12 @@ async function renderDailyTasks(gen) {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1rem">
       ${metricCard('Bins received today', t.bins_received, false)}
       ${metricCard('Bins unpacked today', t.bins_unpacked, false)}
+      ${metricCard('Bins out today', t.bins_out, false)}
       ${metricCard('Boxes assembled today', t.boxes_assembled, false)}
     </div>
     ${userRoles.includes('admin') ? `<div class="card">
       <div class="card-title">Today's log entries</div>
-      ${data.entries.length ? data.entries.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.staff_name}</div><div class="row-sub">${e.laundry_bins_received} received · ${e.laundry_bins_unpacked} unpacked · ${e.amenity_boxes_assembled} boxes assembled · ${e.logged_at}</div></div></div>`).join('') : '<div class="empty">No entries logged yet today.</div>'}
+      ${data.entries.length ? data.entries.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.staff_name}</div><div class="row-sub">${e.laundry_bins_received} received · ${e.laundry_bins_unpacked} unpacked · ${e.laundry_bins_out} out · ${e.amenity_boxes_assembled} boxes assembled · ${e.logged_at}</div></div></div>`).join('') : '<div class="empty">No entries logged yet today.</div>'}
     </div>` : ''}`;
   document.getElementById('main-content').innerHTML = html;
 }
@@ -5272,12 +5276,207 @@ async function renderDailyTasks(gen) {
 async function submitDailyLog() {
   const laundry_bins_received = document.getElementById('dt-bins-received').value;
   const laundry_bins_unpacked = document.getElementById('dt-bins-unpacked').value;
+  const laundry_bins_out = document.getElementById('dt-bins-out').value;
   const amenity_boxes_assembled = document.getElementById('dt-boxes-assembled').value;
   await fetch('/api/warehouse-daily-log', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, amenity_boxes_assembled })
+    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out, amenity_boxes_assembled })
   });
   showTab('daily_tasks');
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Damage Log ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+let _damageLogItems = [];
+let _damageLogSavedRows = []; // in-progress "saved items" rows before submit
+
+async function renderDamageLog() {
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="shirt"></i> Damage Log</div>
+    <div class="subtab-bar">
+      <button class="subtab active" id="dl-log" onclick="damageLogSubtab('log')"><i class="ic" data-lucide="clipboard-list"></i> Log Damage</button>
+      <button class="subtab" id="dl-summary" onclick="damageLogSubtab('summary')"><i class="ic" data-lucide="calendar-range"></i> Weekly Summary</button>
+    </div>
+    <div id="damage-log-body"></div>`;
+  damageLogSubtab('log');
+}
+
+function damageLogSubtab(tab) {
+  document.querySelectorAll('.subtab').forEach(b => b.classList.remove('active'));
+  document.getElementById('dl-' + tab)?.classList.add('active');
+  if (tab === 'log') renderDamageLogEntry();
+  else if (tab === 'summary') renderDamageLogSummary();
+}
+
+async function renderDamageLogEntry(gen) {
+  const today = await getServerToday();
+  const [itemsData, logData] = await Promise.all([
+    fetch('/api/damage-log/items').then(r => r.json()),
+    fetch(`/api/damage-log?date=${today}`).then(r => r.json())
+  ]);
+  if (_stale(gen)) return;
+  _damageLogItems = itemsData.items;
+  _damageLogSavedRows = [];
+
+  const existingDamaged = {};
+  (logData.damaged || []).forEach(d => existingDamaged[d.item_name] = d.qty);
+
+  const damagedRowsHtml = _damageLogItems.map((item, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--gray-200)">
+      <label style="font-size:13px;color:var(--gray-700);margin:0">${item}</label>
+      <input type="number" min="0" value="0" style="width:70px;text-align:center" id="dl-item-${i}">
+    </div>`).join('');
+
+  document.getElementById('damage-log-body').innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title"><i class="ic" data-lucide="triangle-alert"></i> Damaged Items — ${today}</div>
+      <p style="font-size:12px;color:var(--gray-400);margin-bottom:4px">Enter how many of each item were found damaged today.</p>
+      ${damagedRowsHtml}
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title"><i class="ic" data-lucide="package-check"></i> Saved Items</div>
+      <p style="font-size:12px;color:var(--gray-400);margin-bottom:8px">Items salvaged today — add as many as needed.</p>
+      <div id="dl-saved-rows"></div>
+      <button class="btn btn-ghost btn-full" style="margin-top:4px" onclick="addDamageLogSavedRow()">+ Add saved item</button>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="submitDamageLog()">Submit Today's Log</button>
+    <div id="dl-submit-msg" style="font-size:13px;margin-top:8px;min-height:18px;text-align:center"></div>
+    <div class="card" style="margin-top:1rem">
+      <div class="card-title">Today's Entries</div>
+      <div id="dl-today-entries"></div>
+    </div>`;
+  renderDamageLogSavedRows();
+  renderDamageLogTodayEntries(logData);
+}
+
+function renderDamageLogSavedRows() {
+  const container = document.getElementById('dl-saved-rows');
+  if (!container) return;
+  if (!_damageLogSavedRows.length) {
+    container.innerHTML = '<div class="empty" style="font-size:12px">No saved items added yet.</div>';
+    return;
+  }
+  container.innerHTML = _damageLogSavedRows.map((row, i) => `
+    <div class="card" style="background:var(--gray-50);margin-bottom:8px;padding:10px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select style="flex:1" onchange="updateDamageLogSavedRow(${i},'item_name',this.value)">
+          ${_damageLogItems.map(item => `<option value="${item}" ${row.item_name === item ? 'selected' : ''}>${item}</option>`).join('')}
+        </select>
+        <input type="number" min="0" value="${row.qty}" style="width:70px;text-align:center" onchange="updateDamageLogSavedRow(${i},'qty',this.value)">
+        <button class="btn btn-ghost btn-sm" onclick="removeDamageLogSavedRow(${i})"><i class="ic" data-lucide="x"></i></button>
+      </div>
+    </div>`).join('');
+  if (window.lucide) lucide.createIcons();
+}
+
+function addDamageLogSavedRow() {
+  _damageLogSavedRows.push({ item_name: _damageLogItems[0], qty: 1 });
+  renderDamageLogSavedRows();
+}
+function removeDamageLogSavedRow(i) {
+  _damageLogSavedRows.splice(i, 1);
+  renderDamageLogSavedRows();
+}
+function updateDamageLogSavedRow(i, field, value) {
+  _damageLogSavedRows[i][field] = field === 'qty' ? (parseInt(value) || 0) : value;
+}
+
+function renderDamageLogTodayEntries(logData) {
+  const el = document.getElementById('dl-today-entries');
+  if (!el) return;
+  const damaged = logData.damaged || [];
+  const saved = logData.saved || [];
+  if (!damaged.length && !saved.length) {
+    el.innerHTML = '<div class="empty">Nothing logged yet today.</div>';
+    return;
+  }
+  let html = '';
+  if (damaged.length) {
+    html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Damaged</div>`;
+    html += damaged.map(d => `<div class="row-sub">${d.item_name}: ${d.qty}</div>`).join('');
+  }
+  if (saved.length) {
+    html += `<div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.06em;margin:10px 0 4px">Saved</div>`;
+    html += saved.map(s => `<div class="row-sub" style="display:flex;justify-content:space-between;align-items:center">
+      <span>${s.item_name}: ${s.saved_qty} — ${s.staff_name}</span>
+      <button class="btn btn-ghost btn-sm" onclick="deleteDamageLogSaved(${s.id})"><i class="ic" data-lucide="x"></i></button>
+    </div>`).join('');
+  }
+  el.innerHTML = html;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function deleteDamageLogSaved(id) {
+  await fetch(`/api/damage-log/saved/${id}`, { method: 'DELETE' });
+  renderDamageLogEntry();
+}
+
+async function submitDamageLog() {
+  const damaged = {};
+  _damageLogItems.forEach((item, i) => {
+    const input = document.getElementById(`dl-item-${i}`);
+    const qty = parseInt(input?.value) || 0;
+    if (qty > 0) damaged[item] = qty;
+  });
+  const saved = _damageLogSavedRows.filter(r => r.qty > 0).map(r => ({ item_name: r.item_name, qty: r.qty }));
+  const msg = document.getElementById('dl-submit-msg');
+  msg.textContent = 'Saving...'; msg.style.color = 'var(--gray-400)';
+  try {
+    const res = await fetch('/api/damage-log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_name: _currentStaffName, damaged, saved })
+    });
+    const data = await res.json();
+    if (!data.damaged_logged && !data.saved_logged) {
+      msg.textContent = 'Nothing entered — add a quantity before submitting.';
+      msg.style.color = 'var(--coral-dark)';
+      return;
+    }
+    msg.textContent = `Logged ${data.damaged_logged} damaged item(s) and ${data.saved_logged} saved item(s).`;
+    msg.style.color = 'var(--teal-dark)';
+    renderDamageLogEntry();
+  } catch (e) {
+    msg.textContent = 'Connection error — please try again.';
+    msg.style.color = 'var(--coral-dark)';
+  }
+}
+
+async function renderDamageLogSummary(gen, weekStart) {
+  const url = weekStart ? `/api/damage-log/weekly-summary?week_start=${weekStart}` : '/api/damage-log/weekly-summary';
+  const data = await fetch(url).then(r => r.json());
+  if (_stale(gen)) return;
+  const fmt = d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const prevWeek = new Date(data.week_start + 'T12:00:00'); prevWeek.setDate(prevWeek.getDate() - 7);
+  const nextWeek = new Date(data.week_start + 'T12:00:00'); nextWeek.setDate(nextWeek.getDate() + 7);
+  const prevStr = prevWeek.toISOString().slice(0, 10);
+  const nextStr = nextWeek.toISOString().slice(0, 10);
+
+  document.getElementById('damage-log-body').innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <button class="btn btn-ghost btn-sm" onclick="renderDamageLogSummary(undefined,'${prevStr}')"><i class="ic" data-lucide="chevron-left"></i></button>
+        <div style="font-weight:600;font-size:14px">${fmt(data.week_start)} – ${fmt(data.week_end)}</div>
+        <button class="btn btn-ghost btn-sm" onclick="renderDamageLogSummary(undefined,'${nextStr}')"><i class="ic" data-lucide="chevron-right"></i></button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center">
+        <div><div style="font-size:28px;font-weight:700;color:var(--coral-dark)">${data.total_damaged}</div><div class="row-sub">Total Damaged</div></div>
+        <div><div style="font-size:28px;font-weight:700;color:var(--teal-dark)">${data.total_saved}</div><div class="row-sub">Total Saved</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Damaged by Item</div>
+      ${data.damaged_totals.length ? data.damaged_totals.map(r => `<div class="row"><div class="row-main"><div class="row-title">${r.item_name}</div></div><div style="font-weight:700;color:var(--coral-dark)">${r.total_qty}</div></div>`).join('') : '<div class="empty">No damage logged this week.</div>'}
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Saved by Item</div>
+      ${data.saved_totals.length ? data.saved_totals.map(r => `<div class="row"><div class="row-main"><div class="row-title">${r.item_name}</div></div><div style="font-weight:700;color:var(--teal-dark)">${r.total_qty}</div></div>`).join('') : '<div class="empty">No saved items logged this week.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">Day-by-Day Detail</div>
+      ${data.damaged_by_day.length ? data.damaged_by_day.map(r => `<div class="row-sub">${r.log_date}: ${r.item_name} — ${r.qty}</div>`).join('') : '<div class="empty">No entries this week.</div>'}
+    </div>`;
+  if (window.lucide) lucide.createIcons();
 }
 
 async function addShiftNote() {
