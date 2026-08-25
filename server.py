@@ -4353,12 +4353,16 @@ def seed_store():
 SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
 JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert recipient for Kitchen Amenity Boxes specifically, instead of Sarah
 
-# Linen items tracked in the daily Damage Log (matches the categories
-# already used across the pack list formula: king/queen/twin/sleeper sheet
-# sets, bath towels, hand towels, washcloths, bath mats, pool towels).
-LINEN_ITEMS = [
-    'King Sheet Sets', 'Queen Sheet Sets', 'Twin Sheet Sets',
-    'Queen Sleeper Sheets', 'Twin Sleeper Sheets',
+# Linen items tracked in the daily Damage Log. Sheet sets are broken out per
+# bed size AND per component (Kristin's request) — a damaged fitted sheet
+# needs a different replacement than a damaged duvet cover of the same size,
+# so one combined "Sheet Set" line wasn't precise enough. Sleeper sizes
+# (queen/twin sleeper) are intentionally excluded from the Damage Log per
+# Kristin's request, even though they're tracked elsewhere (pack list
+# formula). Towels/mats stay as single lines since they aren't sized sets.
+_LINEN_BED_SIZES = ['King', 'Queen', 'Twin']
+_LINEN_BEDDING_COMPONENTS = ['Flat Sheet', 'Fitted Sheet', 'Pillowcase', 'Blanket', 'Duvet', 'Duvet Cover']
+LINEN_ITEMS = [f'{size} {component}' for size in _LINEN_BED_SIZES for component in _LINEN_BEDDING_COMPONENTS] + [
     'Bath Towels', 'Hand Towels', 'Washcloths', 'Bath Mats', 'Pool Towels',
 ]
 
