@@ -4357,13 +4357,22 @@ JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert reci
 # bed size AND per component (Kristin's request) — a damaged fitted sheet
 # needs a different replacement than a damaged duvet cover of the same size,
 # so one combined "Sheet Set" line wasn't precise enough. Sleeper sizes
-# (queen/twin sleeper) are intentionally excluded from the Damage Log per
-# Kristin's request, even though they're tracked elsewhere (pack list
-# formula). Towels/mats stay as single lines since they aren't sized sets.
+# (queen/twin sleeper) are intentionally excluded per Kristin's request, even
+# though they're tracked elsewhere (pack list formula). "Insert" is the
+# duvet insert itself, distinct from the "Duvet Cover" line. Twin Pillowcase
+# is deliberately excluded (Kristin's request) even though King/Queen
+# Pillowcase are tracked. Pillows and pillow protectors come in King/
+# Standard only (no per-bed-size breakdown), matching how they're actually
+# stocked.
 _LINEN_BED_SIZES = ['King', 'Queen', 'Twin']
-_LINEN_BEDDING_COMPONENTS = ['Flat Sheet', 'Fitted Sheet', 'Pillowcase', 'Blanket', 'Duvet', 'Duvet Cover']
-LINEN_ITEMS = [f'{size} {component}' for size in _LINEN_BED_SIZES for component in _LINEN_BEDDING_COMPONENTS] + [
+_LINEN_BEDDING_COMPONENTS = ['Flat Sheet', 'Fitted Sheet', 'Pillowcase', 'Blanket', 'Insert', 'Duvet Cover', 'Mattress Pad']
+LINEN_ITEMS = [
+    f'{size} {component}' for size in _LINEN_BED_SIZES for component in _LINEN_BEDDING_COMPONENTS
+    if not (size == 'Twin' and component == 'Pillowcase')
+] + [
     'Bath Towels', 'Hand Towels', 'Washcloths', 'Bath Mats', 'Pool Towels',
+    'Blue Linen Bag', 'Kitchen Towels',
+    'King Pillows', 'Standard Pillows', 'King Pillow Protector', 'Standard Pillow Protector',
 ]
 
 SUPPLY_MAP = {
