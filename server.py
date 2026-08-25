@@ -4435,12 +4435,21 @@ def run_forecast(conn, date_from=None, date_to=None):
     # Count turnovers per property
     turnovers = defaultdict(int)
     unmatched = set()
+    pack_list_keys = list(pack_list.keys())
     for r in reservations:
         unit = r['unit_address'].lower().strip()
         if unit in pack_list:
             turnovers[unit] += 1
         else:
-            unmatched.add(unit)
+            # Exact match failed — fall back to the same leading-number +
+            # word-overlap fuzzy match used for Breezeway address reconciliation,
+            # so a spelled-out/abbreviated street suffix or stray punctuation
+            # doesn't silently drop a property from the forecast.
+            matched = fuzzy_match_address(unit, pack_list_keys)
+            if matched:
+                turnovers[matched] += 1
+            else:
+                unmatched.add(unit)
 
     # Sum supply needs
     needed = defaultdict(int)
@@ -4542,6 +4551,11 @@ def upload_pack_list():
     if not pack_list:
         return jsonify({'error': 'No valid pack list data found in file'}), 400
     conn = get_db(); cur = conn.cursor()
+    # Full replace on each upload (same pattern as reservations) — an
+    # upsert-only approach let stale rows from a previous upload's address
+    # spelling linger alongside the new upload's spelling for the same
+    # physical property, silently doubling the property count over time.
+    cur.execute("DELETE FROM forecast_pack_list")
     inserted = 0
     for addr, data in pack_list.items():
         import json
@@ -6464,13 +6478,20 @@ def create_pack_flag():
         return jsonify({'error': 'item_name, issue_type, and flagged_by are required'}), 400
     conn = get_db(); cur = conn.cursor()
     ts = now_central()
+    address = (data.get('address') or '').strip() or None
+    notes = (data.get('notes') or '').strip() or None
     cur.execute("""INSERT INTO pack_flags (address,item_name,issue_type,notes,flagged_by,flagged_at,pack_date,resolved)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,0)""",
-                ((data.get('address') or '').strip() or None, item_name, issue_type,
-                 (data.get('notes') or '').strip() or None, flagged_by, ts, (data.get('pack_date') or '').strip() or None))
+                (address, item_name, issue_type,
+                 notes, flagged_by, ts, (data.get('pack_date') or '').strip() or None))
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Flagged supply issue', item_name, flagged_by, issue_type)
-    return jsonify({'success': True})
+    # Report Issue previously only wrote to the flags table with no
+    # notification - nobody knew a flag came in unless they happened to
+    # open the tab. Email Sarah so flagged issues actually get seen.
+    body = f"A supply issue was flagged in PackListCentral.\n\nItem: {item_name}\nIssue: {issue_type}\nProperty: {address or 'N/A'}\nNotes: {notes or 'None'}\nFlagged by: {flagged_by}\nTime: {ts}"
+    alert_sent = send_email(f"Supply Issue Flagged: {item_name}", body, to=SARAH_EMAIL)
+    return jsonify({'success': True, 'alert_sent': alert_sent})
 
 @app.route('/api/pack-list/flags/<int:fid>/resolve', methods=['POST'])
 def resolve_pack_flag(fid):
