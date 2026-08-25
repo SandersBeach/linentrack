@@ -4371,8 +4371,13 @@ def parse_pack_list_csv(content):
         if not row: continue
         first = row[0].strip().strip('"')
         if not first or not (first[0].isdigit() or first[0].isalpha()): continue
-        # Must look like an address - has a number or starts with a digit
-        if not any(c.isdigit() for c in first[:5]): continue
+        # Must look like an address - has a digit somewhere in the value.
+        # Previously only checked the first 5 characters, which silently
+        # dropped any property whose name leads with a word 5+ letters long
+        # before the number (e.g. "Condo 1735 #203") -- the row never made
+        # it into pack_list at all, so no match (fuzzy or exact) was ever
+        # possible for it.
+        if not any(c.isdigit() for c in first): continue
         addr = first.lower().strip()
         prop_name = row[1].strip() if len(row) > 1 else addr
         supplies = {}
