@@ -424,6 +424,15 @@ def init_db():
             amenity_boxes_assembled INTEGER NOT NULL DEFAULT 0,
             logged_at TEXT NOT NULL
         );
+        ALTER TABLE warehouse_daily_log ADD COLUMN IF NOT EXISTS laundry_bins_out INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE IF NOT EXISTS damage_log (
+            id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, item_name TEXT NOT NULL,
+            damaged_qty INTEGER NOT NULL DEFAULT 0, staff_name TEXT NOT NULL, logged_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS damage_log_saved (
+            id SERIAL PRIMARY KEY, log_date TEXT NOT NULL, item_name TEXT NOT NULL,
+            saved_qty INTEGER NOT NULL DEFAULT 0, staff_name TEXT NOT NULL, logged_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS amenity_box_stock (
             id INTEGER PRIMARY KEY DEFAULT 1, quantity INTEGER NOT NULL DEFAULT 0,
             CONSTRAINT single_row CHECK (id = 1)
@@ -4344,6 +4353,15 @@ def seed_store():
 SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
 JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert recipient for Kitchen Amenity Boxes specifically, instead of Sarah
 
+# Linen items tracked in the daily Damage Log (matches the categories
+# already used across the pack list formula: king/queen/twin/sleeper sheet
+# sets, bath towels, hand towels, washcloths, bath mats, pool towels).
+LINEN_ITEMS = [
+    'King Sheet Sets', 'Queen Sheet Sets', 'Twin Sheet Sets',
+    'Queen Sleeper Sheets', 'Twin Sleeper Sheets',
+    'Bath Towels', 'Hand Towels', 'Washcloths', 'Bath Mats', 'Pool Towels',
+]
+
 SUPPLY_MAP = {
     11: ['Toilet Paper Rolls'],
     12: ['Bathroom Trash Liners'],
@@ -5742,12 +5760,14 @@ def _build_warehouse_dashboard_data(week_start_weekday=0):
 
     cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
                           COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(laundry_bins_out),0) AS bins_out,
                           COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
                    FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s""",
                 (week_start_dt.isoformat(), week_end_dt.isoformat()))
     daily_task_week = cur.fetchone()
     cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
                           COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(laundry_bins_out),0) AS bins_out,
                           COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
                    FROM warehouse_daily_log WHERE log_date = %s""", (today_str,))
     daily_task_today = cur.fetchone()
@@ -5868,12 +5888,13 @@ def add_warehouse_daily_log():
     staff_name = (data.get('staff_name') or '').strip() or 'Unknown'
     bins_received = int(data.get('laundry_bins_received', 0) or 0)
     bins_unpacked = int(data.get('laundry_bins_unpacked', 0) or 0)
+    bins_out = int(data.get('laundry_bins_out', 0) or 0)
     boxes_assembled = int(data.get('amenity_boxes_assembled', 0) or 0)
     conn = get_db(); cur = conn.cursor()
     cur.execute("""INSERT INTO warehouse_daily_log
-                   (log_date,staff_name,laundry_bins_received,laundry_bins_unpacked,amenity_boxes_assembled,logged_at)
-                   VALUES (%s,%s,%s,%s,%s,%s)""",
-                (log_date, staff_name, bins_received, bins_unpacked, boxes_assembled, now_central()))
+                   (log_date,staff_name,laundry_bins_received,laundry_bins_unpacked,laundry_bins_out,amenity_boxes_assembled,logged_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (log_date, staff_name, bins_received, bins_unpacked, bins_out, boxes_assembled, now_central()))
     if boxes_assembled:
         cur.execute("UPDATE amenity_box_stock SET quantity = quantity + %s WHERE id=1", (boxes_assembled,))
     conn.commit(); cur.close(); conn.close()
@@ -5887,16 +5908,134 @@ def get_warehouse_daily_log():
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""SELECT COALESCE(SUM(laundry_bins_received),0) AS bins_received,
                           COALESCE(SUM(laundry_bins_unpacked),0) AS bins_unpacked,
+                          COALESCE(SUM(laundry_bins_out),0) AS bins_out,
                           COALESCE(SUM(amenity_boxes_assembled),0) AS boxes_assembled
                    FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s""", (date_from, date_to))
     totals = cur.fetchone()
-    cur.execute("""SELECT log_date, staff_name, laundry_bins_received, laundry_bins_unpacked, amenity_boxes_assembled, logged_at
+    cur.execute("""SELECT log_date, staff_name, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out, amenity_boxes_assembled, logged_at
                    FROM warehouse_daily_log WHERE log_date BETWEEN %s AND %s ORDER BY id DESC LIMIT 30""", (date_from, date_to))
     entries = cur.fetchall()
     cur.execute("SELECT quantity FROM amenity_box_stock WHERE id=1")
     stock_row = cur.fetchone()
     cur.close(); conn.close()
     return jsonify({'totals': totals, 'entries': entries, 'amenity_box_stock': stock_row['quantity'] if stock_row else 0})
+
+
+def _thu_wed_week_bounds(for_date=None):
+    """Thursday-through-Wednesday week containing for_date (defaults to
+    today). Reuses the same week_start_weekday=3 convention already used
+    for Cassie's warehouse dashboard."""
+    d = for_date or datetime.strptime(today_central(), '%Y-%m-%d').date()
+    days_since_thu = (d.weekday() - 3) % 7  # Monday=0 ... Thursday=3
+    week_start = d - timedelta(days=days_since_thu)
+    week_end = week_start + timedelta(days=6)
+    return week_start, week_end
+
+@app.route('/api/damage-log/items', methods=['GET'])
+def get_damage_log_items():
+    """The fixed list of linen items tracked in the Damage Log."""
+    return jsonify({'items': LINEN_ITEMS})
+
+@app.route('/api/damage-log', methods=['POST'])
+def submit_damage_log():
+    """Submit a day's damaged-item counts plus any saved-item entries.
+    'damaged' is {item_name: qty} — only nonzero quantities are stored.
+    'saved' is a list of {item_name, qty} — each becomes its own row so the
+    same item can be saved multiple times in a day if logged at different
+    points, and multiple staff logging the same day just adds more rows
+    (summed together in the daily/weekly views), matching the existing
+    warehouse_daily_log pattern.
+    """
+    data = request.json or {}
+    log_date = data.get('log_date') or today_central()
+    staff_name = (data.get('staff_name') or '').strip() or 'Unknown'
+    damaged = data.get('damaged') or {}
+    saved = data.get('saved') or []
+    ts = now_central()
+    conn = get_db(); cur = conn.cursor()
+    damaged_logged = 0
+    for item_name, qty in damaged.items():
+        if item_name not in LINEN_ITEMS: continue
+        qty = int(qty or 0)
+        if qty <= 0: continue
+        cur.execute("""INSERT INTO damage_log (log_date,item_name,damaged_qty,staff_name,logged_at)
+                       VALUES (%s,%s,%s,%s,%s)""", (log_date, item_name, qty, staff_name, ts))
+        damaged_logged += 1
+    saved_logged = 0
+    for row in saved:
+        item_name = (row.get('item_name') or '').strip()
+        qty = int(row.get('qty', 0) or 0)
+        if not item_name or item_name not in LINEN_ITEMS or qty <= 0: continue
+        cur.execute("""INSERT INTO damage_log_saved (log_date,item_name,saved_qty,staff_name,logged_at)
+                       VALUES (%s,%s,%s,%s,%s)""", (log_date, item_name, qty, staff_name, ts))
+        saved_logged += 1
+    conn.commit(); cur.close(); conn.close()
+    log_audit('DamageLog', 'Logged daily damage', f'{damaged_logged} damaged item(s), {saved_logged} saved item(s)', staff_name)
+    return jsonify({'success': True, 'damaged_logged': damaged_logged, 'saved_logged': saved_logged})
+
+@app.route('/api/damage-log', methods=['GET'])
+def get_damage_log():
+    """A single date's damaged + saved entries (defaults to today), for the
+    log screen and for reviewing/editing what's already been entered."""
+    log_date = request.args.get('date') or today_central()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT item_name, SUM(damaged_qty) AS qty
+                   FROM damage_log WHERE log_date=%s GROUP BY item_name ORDER BY item_name""", (log_date,))
+    damaged = cur.fetchall()
+    cur.execute("""SELECT id, item_name, saved_qty, staff_name, logged_at
+                   FROM damage_log_saved WHERE log_date=%s ORDER BY id DESC""", (log_date,))
+    saved = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify({'log_date': log_date, 'damaged': damaged, 'saved': saved})
+
+@app.route('/api/damage-log/saved/<int:row_id>', methods=['DELETE'])
+def delete_damage_log_saved(row_id):
+    """Remove a mistakenly-added saved-item entry."""
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM damage_log_saved WHERE id=%s", (row_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/damage-log/weekly-summary', methods=['GET'])
+def damage_log_weekly_summary():
+    """Damage/saved summary for a Thursday-through-Wednesday week. Defaults
+    to the week containing today; pass ?week_start=YYYY-MM-DD (any date in
+    the target week) to view a prior week."""
+    week_start_param = request.args.get('week_start')
+    if week_start_param:
+        anchor = datetime.strptime(week_start_param, '%Y-%m-%d').date()
+        week_start, week_end = _thu_wed_week_bounds(anchor)
+    else:
+        week_start, week_end = _thu_wed_week_bounds()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT item_name, SUM(damaged_qty) AS total_qty
+                   FROM damage_log WHERE log_date BETWEEN %s AND %s
+                   GROUP BY item_name ORDER BY total_qty DESC, item_name""",
+                (week_start.isoformat(), week_end.isoformat()))
+    damaged_totals = cur.fetchall()
+    cur.execute("""SELECT log_date, item_name, SUM(damaged_qty) AS qty
+                   FROM damage_log WHERE log_date BETWEEN %s AND %s
+                   GROUP BY log_date, item_name ORDER BY log_date, item_name""",
+                (week_start.isoformat(), week_end.isoformat()))
+    damaged_by_day = cur.fetchall()
+    cur.execute("""SELECT item_name, SUM(saved_qty) AS total_qty
+                   FROM damage_log_saved WHERE log_date BETWEEN %s AND %s
+                   GROUP BY item_name ORDER BY total_qty DESC, item_name""",
+                (week_start.isoformat(), week_end.isoformat()))
+    saved_totals = cur.fetchall()
+    cur.close(); conn.close()
+    total_damaged = sum(r['total_qty'] for r in damaged_totals)
+    total_saved = sum(r['total_qty'] for r in saved_totals)
+    return jsonify({
+        'week_start': week_start.isoformat(),
+        'week_end': week_end.isoformat(),
+        'damaged_totals': damaged_totals,
+        'damaged_by_day': damaged_by_day,
+        'saved_totals': saved_totals,
+        'total_damaged': total_damaged,
+        'total_saved': total_saved
+    })
+
 
 @app.route('/api/warehouse-notes', methods=['GET'])
 def get_warehouse_notes():
