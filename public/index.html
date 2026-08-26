@@ -2921,6 +2921,24 @@ function calcToggle() {
   const panel = document.getElementById('calc-panel');
   if (panel) panel.style.display = _calcOpen ? 'flex' : 'none';
 }
+// position:fixed anchors to the actual browser window edge, not the app's
+// own content column. On a phone/iPad the two are basically the same width,
+// so it looked fine — but .content caps at 1000px and doesn't center itself,
+// so on a wide desktop window there's empty margin to the right of it, and
+// a plain "right:16px" calculator would float out in that empty space
+// instead of sitting against the visible card. This keeps it pinned to the
+// actual right edge of .content regardless of window width.
+function positionCalcWidget() {
+  const content = document.getElementById('main-content');
+  const fab = document.getElementById('calc-fab');
+  const panel = document.getElementById('calc-panel');
+  if (!content || !fab || !panel) return;
+  const rect = content.getBoundingClientRect();
+  const rightGap = Math.max(16, window.innerWidth - rect.right + 16);
+  fab.style.right = rightGap + 'px';
+  panel.style.right = rightGap + 'px';
+}
+window.addEventListener('resize', () => { if (document.getElementById('calc-fab')) positionCalcWidget(); });
 function calcRenderDisplay() {
   const d = document.getElementById('calc-display');
   if (d) d.textContent = _calcDisplay;
@@ -2966,27 +2984,27 @@ function calcWidgetHtml() {
     <button id="calc-fab" onclick="calcToggle()" title="Calculator" style="position:fixed;bottom:84px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--teal);color:#fff;border:none;box-shadow:0 2px 10px rgba(0,0,0,0.25);z-index:500;display:flex;align-items:center;justify-content:center;cursor:pointer">
       <i class="ic" data-lucide="calculator" style="width:22px;height:22px"></i>
     </button>
-    <div id="calc-panel" style="display:${_calcOpen ? 'flex' : 'none'};flex-direction:column;gap:6px;position:fixed;bottom:146px;right:16px;z-index:501;background:#fff;border-radius:var(--radius-md);box-shadow:0 6px 24px rgba(0,0,0,0.28);padding:12px;width:216px">
+    <div id="calc-panel" style="display:${_calcOpen ? 'flex' : 'none'};flex-direction:column;gap:6px;position:fixed;bottom:146px;right:16px;z-index:501;background:#fff;border-radius:var(--radius-md);box-shadow:0 6px 24px rgba(0,0,0,0.28);padding:12px;width:236px;box-sizing:border-box">
       <div id="calc-display" style="background:var(--gray-50);border-radius:6px;padding:10px 12px;text-align:right;font-size:20px;font-family:monospace;min-height:30px;overflow-x:auto">${_calcDisplay}</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcClear()">C</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcBackspace()"><i class="ic" data-lucide="delete"></i></button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('÷')">÷</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('×')">×</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('7')">7</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('8')">8</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('9')">9</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('-')">−</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('4')">4</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('5')">5</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('6')">6</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('+')">+</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('1')">1</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('2')">2</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('3')">3</button>
-        <button type="button" class="btn btn-primary btn-sm" style="grid-row:span 2" onclick="calcEquals()">=</button>
-        <button type="button" class="btn btn-ghost btn-sm" style="grid-column:span 2" onclick="calcDigit('0')">0</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('.')">.</button>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px">
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcClear()">C</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcBackspace()"><i class="ic" data-lucide="delete"></i></button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcOperator('÷')">÷</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcOperator('×')">×</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('7')">7</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('8')">8</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('9')">9</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcOperator('-')">−</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('4')">4</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('5')">5</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('6')">6</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcOperator('+')">+</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('1')">1</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('2')">2</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('3')">3</button>
+        <button type="button" class="btn btn-primary btn-sm" style="padding:8px 2px;min-width:0;grid-row:span 2" onclick="calcEquals()">=</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px;grid-column:span 2" onclick="calcDigit('0')">0</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="padding:8px 2px;min-width:0;min-height:38px" onclick="calcDigit('.')">.</button>
       </div>
     </div>`;
 }
@@ -3065,6 +3083,7 @@ function renderCountInProgress() {
   html += `<div style="display:flex;gap:8px;margin-top:1.25rem"><button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button><button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button></div></div>`;
   html += calcWidgetHtml();
   document.getElementById('main-content').innerHTML = html;
+  positionCalcWidget();
   document.getElementById('count-scan-input')?.focus();
 }
 
