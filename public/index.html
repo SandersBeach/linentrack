@@ -2904,6 +2904,102 @@ function toggleCountArea(area) {
 
 let _countReturnTarget = 'inventory_count';
 
+// ── Inventory count helper calculator ───────────────────────────────────────
+// Floating widget so warehouse staff can add up multiple boxes/areas without
+// reaching for their phone. State lives in these globals (not just the DOM)
+// so the open/closed state and whatever's on the display survive a
+// renderCountInProgress() re-render (e.g. after tapping Found/Missing on a
+// loaner, which redraws the whole screen).
+let _calcOpen = false;
+let _calcDisplay = '0';
+let _calcStored = null;
+let _calcOp = null;
+let _calcNewEntry = true;
+
+function calcToggle() {
+  _calcOpen = !_calcOpen;
+  const panel = document.getElementById('calc-panel');
+  if (panel) panel.style.display = _calcOpen ? 'flex' : 'none';
+}
+function calcRenderDisplay() {
+  const d = document.getElementById('calc-display');
+  if (d) d.textContent = _calcDisplay;
+}
+function calcDigit(d) {
+  if (_calcNewEntry) { _calcDisplay = (d === '.' ? '0.' : d); _calcNewEntry = false; }
+  else if (d === '.' && _calcDisplay.includes('.')) { /* only one decimal point */ }
+  else if (_calcDisplay === '0' && d !== '.') { _calcDisplay = d; }
+  else { _calcDisplay += d; }
+  calcRenderDisplay();
+}
+function calcOperator(op) {
+  if (_calcStored !== null && !_calcNewEntry) calcEquals();
+  _calcStored = parseFloat(_calcDisplay);
+  _calcOp = op;
+  _calcNewEntry = true;
+}
+function calcEquals() {
+  if (_calcStored === null || _calcOp === null) return;
+  const cur = parseFloat(_calcDisplay);
+  let result;
+  if (_calcOp === '+') result = _calcStored + cur;
+  else if (_calcOp === '-') result = _calcStored - cur;
+  else if (_calcOp === '×') result = _calcStored * cur;
+  else if (_calcOp === '÷') result = cur !== 0 ? _calcStored / cur : 0;
+  else result = cur;
+  result = Math.round(result * 100000) / 100000; // trims float rounding noise like 0.1+0.2
+  _calcDisplay = String(result);
+  _calcStored = null; _calcOp = null; _calcNewEntry = true;
+  calcRenderDisplay();
+}
+function calcClear() {
+  _calcDisplay = '0'; _calcStored = null; _calcOp = null; _calcNewEntry = true;
+  calcRenderDisplay();
+}
+function calcBackspace() {
+  if (_calcNewEntry) return;
+  _calcDisplay = _calcDisplay.length > 1 ? _calcDisplay.slice(0, -1) : '0';
+  calcRenderDisplay();
+}
+function calcWidgetHtml() {
+  return `
+    <button id="calc-fab" onclick="calcToggle()" title="Calculator" style="position:fixed;bottom:84px;right:16px;width:52px;height:52px;border-radius:50%;background:var(--teal);color:#fff;border:none;box-shadow:0 2px 10px rgba(0,0,0,0.25);z-index:500;display:flex;align-items:center;justify-content:center;cursor:pointer">
+      <i class="ic" data-lucide="calculator" style="width:22px;height:22px"></i>
+    </button>
+    <div id="calc-panel" style="display:${_calcOpen ? 'flex' : 'none'};flex-direction:column;gap:6px;position:fixed;bottom:146px;right:16px;z-index:501;background:#fff;border-radius:var(--radius-md);box-shadow:0 6px 24px rgba(0,0,0,0.28);padding:12px;width:216px">
+      <div id="calc-display" style="background:var(--gray-50);border-radius:6px;padding:10px 12px;text-align:right;font-size:20px;font-family:monospace;min-height:30px;overflow-x:auto">${_calcDisplay}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcClear()">C</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcBackspace()"><i class="ic" data-lucide="delete"></i></button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('÷')">÷</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('×')">×</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('7')">7</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('8')">8</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('9')">9</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('-')">−</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('4')">4</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('5')">5</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('6')">6</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcOperator('+')">+</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('1')">1</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('2')">2</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('3')">3</button>
+        <button type="button" class="btn btn-primary btn-sm" style="grid-row:span 2" onclick="calcEquals()">=</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="grid-column:span 2" onclick="calcDigit('0')">0</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="calcDigit('.')">.</button>
+      </div>
+    </div>`;
+}
+// Tapping anywhere outside the panel/button closes it, same as any other
+// popover in the app — added once at load, guarded by _calcOpen so it's a
+// no-op the rest of the time.
+document.addEventListener('click', function(e) {
+  if (!_calcOpen) return;
+  const panel = document.getElementById('calc-panel');
+  const fab = document.getElementById('calc-fab');
+  if (panel && fab && !panel.contains(e.target) && !fab.contains(e.target)) calcToggle();
+});
+
 async function startCount() {
   _countReturnTarget = 'inventory_count';
   const areas = [];
@@ -2961,7 +3057,13 @@ function renderCountInProgress() {
       </div>` : ''}`;
   if (loanerItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin-bottom:8px"><i class="ic" data-lucide="package"></i> Loaner Items</div>`; html += loanerItems.map(itemRow).join(''); }
   if (supplyItems.length) { html += `<div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 8px"><i class="ic" data-lucide="wrench"></i> Supplies</div>`; html += supplyItems.map(itemRow).join(''); }
+  html += `<div style="margin-top:1.25rem">
+      <label style="margin-bottom:4px"><i class="ic" data-lucide="mail"></i> Note for Kristin (optional)</label>
+      <div style="font-size:11px;color:var(--gray-400);margin-bottom:6px">e.g. a new item that was ordered and needs to be added — this emails Kristin directly, separate from the count itself.</div>
+      <textarea id="count-notes-input" rows="3" placeholder="Anything Kristin should know about this count..." style="width:100%;resize:vertical" oninput="if(_countSessions[_countReturnTarget])_countSessions[_countReturnTarget].notes=this.value">${s.notes ? s.notes.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) : ''}</textarea>
+    </div>`;
   html += `<div style="display:flex;gap:8px;margin-top:1.25rem"><button class="btn btn-ghost" onclick="cancelCount()">Cancel count</button><button class="btn btn-primary btn-full" onclick="finalizeCount()">Finalize & generate report</button></div></div>`;
+  html += calcWidgetHtml();
   document.getElementById('main-content').innerHTML = html;
   document.getElementById('count-scan-input')?.focus();
 }
@@ -3021,7 +3123,7 @@ async function finalizeCount() {
     }
   });
   const totalCounted = s.items.length;
-  const payload = { areas:s.areas.join(', '), started_at:s.startedAt, item_count:totalCounted, variances:variances.length, details:JSON.stringify({counts:s.counts,items:s.items,variances}), performed_by:_currentStaffName };
+  const payload = { areas:s.areas.join(', '), started_at:s.startedAt, item_count:totalCounted, variances:variances.length, details:JSON.stringify({counts:s.counts,items:s.items,variances}), performed_by:_currentStaffName, notes:(s.notes||'').trim() };
   try {
     const res = await fetch('/api/inventory-counts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const saved = await res.json();
@@ -3037,40 +3139,58 @@ async function finalizeCount() {
     // "didn't get to this one," not "confirmed zero on hand," so it must
     // never overwrite the real inventory number. Only an item where someone
     // actually typed 0 should zero out that item's stock.
+    const failedUpdates = [];
     for (const item of s.items) {
       if (item.type !== 'supply' || !item.supplyId || !item.source) continue;
       if (!s.counts.hasOwnProperty(item.id)) continue;
       const counted = s.counts[item.id];
+      let updateRes;
       if (item.source === 'store') {
-        await fetch(`/api/store/items/${item.supplyId}/set-count`, {
+        updateRes = await fetch(`/api/store/items/${item.supplyId}/set-count`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: _currentPin, quantity: counted, performed_by: _currentStaffName, notes: `Physical count (${s.areas.join(', ')})` })
         });
       } else {
         const endpoint = item.source === 'hk_supply' ? '/api/hk-supplies/' : '/api/supplies/';
-        await fetch(`${endpoint}${item.supplyId}/transaction`, {
+        updateRes = await fetch(`${endpoint}${item.supplyId}/transaction`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: _currentPin, action: 'set', quantity: counted, performed_by: _currentStaffName, notes: `Physical count (${s.areas.join(', ')})` })
         });
       }
+      // A rejected or errored write here used to fail silently — the count
+      // would look submitted with no indication the real inventory number
+      // never actually changed. Now every failure is tracked and surfaced.
+      try {
+        const updateData = await updateRes.json();
+        if (!updateRes.ok || updateData.error) {
+          failedUpdates.push({ label: item.label, error: updateData.error || `HTTP ${updateRes.status}` });
+        }
+      } catch (e) {
+        failedUpdates.push({ label: item.label, error: `HTTP ${updateRes.status}` });
+      }
+    }
+    if (failedUpdates.length) {
+      console.error('[Inventory Count] Failed to update on-hand quantity for:', failedUpdates);
+      notify(`Count saved, but ${failedUpdates.length} item${failedUpdates.length!==1?'s':''} could not be updated in inventory (${failedUpdates.map(f=>f.label).join(', ')}). Let Kristin know so it can be fixed by hand.`);
     }
     _countSessions[_countReturnTarget] = null;
     const isBlindCount = _countReturnTarget === 'amenities_inventory' || _countReturnTarget === 'weekly_inventory';
     const canSeeResults = userRoles.includes('admin') || userRoles.includes('manager');
     if (isBlindCount && !canSeeResults) {
-      renderCountSubmittedConfirmation();
+      renderCountSubmittedConfirmation(!!payload.notes);
     } else {
       renderCountReport({...payload, variances_list:variances, matchCount, totalCounted, id:saved.id});
     }
   } catch(e) { notify('Error saving count — please try again.'); console.error(e); }
 }
 
-function renderCountSubmittedConfirmation() {
+function renderCountSubmittedConfirmation(noteSent) {
   document.getElementById('main-content').innerHTML = `
     <div class="card" style="text-align:center;padding:2.5rem">
       <div style="font-size:40px;margin-bottom:10px"><i class="ic" data-lucide="check"></i></div>
       <div style="font-size:17px;font-weight:600;color:var(--teal)">Count submitted!</div>
       <div style="font-size:13px;color:var(--gray-400);margin-top:6px">Thanks for completing this week's count.</div>
+      ${noteSent ? `<div style="font-size:12px;color:var(--teal);margin-top:8px"><i class="ic" data-lucide="mail"></i> Your note was emailed to Kristin.</div>` : ''}
       <button class="btn btn-primary" style="margin-top:1.25rem" onclick="showTab(_countReturnTarget)">Done</button>
     </div>`;
 }
@@ -3084,6 +3204,7 @@ function renderCountReport(data) {
       <div style="font-size:15px;font-weight:600"><i class="ic" data-lucide="clipboard-list"></i> Count Report — ${data.started_at}${data.performed_by?` <span style="font-size:12px;color:var(--gray-400);font-weight:400">by ${data.performed_by}</span>`:''}</div>
       <button class="btn btn-primary btn-sm" onclick="emailCountReport(${data.id})"><i class="ic" data-lucide="mail"></i> Email to accounting</button>
     </div>
+    ${data.notes ? `<div class="card" style="background:var(--gray-50);border:0.5px solid var(--gray-200)"><div class="card-title" style="color:var(--teal)"><i class="ic" data-lucide="mail"></i> Note left for Kristin</div><div style="font-size:13px;white-space:pre-wrap">${data.notes}</div></div>` : ''}
     <div class="report-stat-grid">
       <div class="report-stat" style="background:var(--gray-50);border:0.5px solid var(--gray-200)"><div class="rnum">${data.totalCounted}</div><div class="rlbl" style="color:var(--gray-400)">Counted</div></div>
       <div class="report-stat" style="background:var(--green-light)"><div class="rnum" style="color: var(--green-dark)">${data.matchCount}</div><div class="rlbl" style="color: var(--green-dark)">Match</div></div>
@@ -3969,10 +4090,13 @@ function renderStoreInventory() {
   const cats = [...new Set(_storeItems.map(i=>i.category))].sort();
   const body = document.getElementById('store-body');
   body.innerHTML = `
-    <select id="st-cat-filter" onchange="renderStoreCards()" style="margin-bottom:12px">
-      <option value="">All categories</option>
-      ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
-    </select>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <select id="st-cat-filter" onchange="renderStoreCards()">
+        <option value="">All categories</option>
+        ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
+      </select>
+      ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showArchivedStoreItemsModal()"><i class="ic" data-lucide="archive"></i> Archived items</button>`:''}
+    </div>
     <div id="store-cards" class="supply-grid"></div>`;
   renderStoreCards();
 }
@@ -3997,7 +4121,7 @@ function renderStoreCards() {
       <div class="supply-actions" style="flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="showStoreCheckoutModal(${item.id})" ${item.quantity===0?'disabled':''}>Check Out</button>
         <button class="btn btn-ghost btn-sm" style="background:var(--green-light);color: var(--green-dark)" onclick="showStoreRestockModal(${item.id})"><i class="ic" data-lucide="arrow-down-to-line"></i> Restock</button>
-        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})"><i class="ic" data-lucide="pencil"></i></button>`:''}
+        ${userRoles.includes('admin')?`<button class="btn btn-ghost btn-sm" onclick="showEditStoreItemModal(${item.id})"><i class="ic" data-lucide="pencil"></i></button><button class="btn btn-ghost btn-sm" style="color:var(--coral-dark)" onclick="deleteStoreItem(${item.id})"><i class="ic" data-lucide="trash-2"></i></button>`:''}
       </div>
     </div>`).join('');
 }
@@ -4233,6 +4357,49 @@ async function saveStoreItem(itemId) {
   const storeRes = await fetch('/api/store/items');
   _storeItems = await storeRes.json();
   renderStoreInventory();
+}
+
+async function deleteStoreItem(itemId) {
+  const item = _storeItems.find(i=>i.id===itemId); if (!item) return;
+  if (!await confirmModal(`Archive "${item.name}"? It disappears from the store, but its checkout/restock history is kept and you can restore it later.`,
+      {title:'Archive this item?', confirmLabel:'Archive item', cancelLabel:'Cancel', danger:true})) return;
+  const res = await fetch(`/api/store/items/${itemId}`, {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin})});
+  const data = await res.json();
+  if (data.error) { notify(data.error); return; }
+  notify(`${item.name} archived.`);
+  const storeRes = await fetch('/api/store/items');
+  _storeItems = await storeRes.json();
+  renderStoreCards();
+}
+
+async function showArchivedStoreItemsModal() {
+  const archived = await fetch('/api/store/items?archived=1').then(r=>r.json()).catch(()=>[]);
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay'; modal.id = 'modal-archived-store-items';
+  modal.innerHTML = `<div class="modal-box" style="max-width:480px">
+    <h3>Archived Store Items</h3>
+    ${archived.length ? `<div style="max-height:400px;overflow-y:auto;margin-top:0.5rem">${archived.map(i=>`
+      <div class="row">
+        <div class="row-main"><div class="row-title">${i.name}</div><div class="row-sub">${i.category}</div></div>
+        <button class="btn btn-ghost btn-sm" onclick="restoreStoreItem(${i.id})"><i class="ic" data-lucide="undo-2"></i> Restore</button>
+      </div>`).join('')}</div>`
+      : `<div class="empty" style="margin-top:0.5rem">No archived items.</div>`}
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-archived-store-items').remove()">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function restoreStoreItem(itemId) {
+  const res = await fetch(`/api/store/items/${itemId}/restore`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_currentPin})});
+  const data = await res.json();
+  if (data.error) { notify(data.error); return; }
+  notify('Item restored.');
+  document.getElementById('modal-archived-store-items')?.remove();
+  const storeRes = await fetch('/api/store/items');
+  _storeItems = await storeRes.json();
+  renderStoreCards();
 }
 
 // ══════════════════════════════════════════════════════════════
