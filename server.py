@@ -232,6 +232,7 @@ def init_db():
             low_stock_threshold INTEGER NOT NULL DEFAULT 5, unit TEXT NOT NULL DEFAULT 'units',
             created_at TEXT NOT NULL, qr_code TEXT
         );
+        ALTER TABLE supply_items ADD COLUMN IF NOT EXISTS low_stock_alerted INTEGER NOT NULL DEFAULT 0;
         CREATE TABLE IF NOT EXISTS supply_transactions (
             id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES supply_items(id),
             action TEXT NOT NULL, quantity INTEGER NOT NULL, quantity_after INTEGER NOT NULL,
@@ -248,6 +249,7 @@ def init_db():
             low_stock_threshold INTEGER NOT NULL DEFAULT 5, unit TEXT NOT NULL DEFAULT 'units',
             created_at TEXT NOT NULL, qr_code TEXT
         );
+        ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS low_stock_alerted INTEGER NOT NULL DEFAULT 0;
         CREATE TABLE IF NOT EXISTS hk_supply_transactions (
             id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES hk_supply_items(id),
             action TEXT NOT NULL, quantity INTEGER NOT NULL, quantity_after INTEGER NOT NULL,
@@ -303,6 +305,8 @@ def init_db():
             created_at TEXT NOT NULL
         );
         ALTER TABLE store_items ADD COLUMN IF NOT EXISTS low_stock_threshold INTEGER NOT NULL DEFAULT 2;
+        ALTER TABLE store_items ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE store_items ADD COLUMN IF NOT EXISTS low_stock_alerted INTEGER NOT NULL DEFAULT 0;
         CREATE TABLE IF NOT EXISTS store_transactions (
             id SERIAL PRIMARY KEY,
             item_id INTEGER NOT NULL REFERENCES store_items(id),
@@ -509,6 +513,7 @@ def init_db():
         "ALTER TABLE po_requests ADD COLUMN IF NOT EXISTS stage1_decided_at TEXT",
         "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS performed_by TEXT",
         "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS reviewed INTEGER DEFAULT 0",
+        "ALTER TABLE inventory_counts ADD COLUMN IF NOT EXISTS notes TEXT",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS queen_sleeper INTEGER DEFAULT 0",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS twin_sleeper INTEGER DEFAULT 0",
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS amenity_boxes INTEGER DEFAULT 1",
@@ -1179,6 +1184,28 @@ def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
     except Exception as e:
         import traceback; print(f'[EMAIL ERROR] {subject}: {e}', flush=True); traceback.print_exc()
         return False
+
+def should_send_low_stock_alert(conn, cur, table, item, new_qty):
+    """Decides whether a low-stock email should fire for this quantity update.
+
+    Fires only on the transition INTO low stock (qty <= threshold) from a
+    state that hadn't already been alerted on. Once alerted, no repeat email
+    goes out for that item no matter how many more transactions leave it
+    still low — the alert clears itself (and can fire again) once the item
+    is restocked back above its threshold and later dips again.
+    """
+    threshold = item['low_stock_threshold']
+    was_alerted = bool(item.get('low_stock_alerted'))
+    is_low = new_qty <= threshold
+    if is_low and not was_alerted:
+        cur.execute(f"UPDATE {table} SET low_stock_alerted=1 WHERE id=%s", (item['id'],))
+        conn.commit()
+        return True
+    if not is_low and was_alerted:
+        cur.execute(f"UPDATE {table} SET low_stock_alerted=0 WHERE id=%s", (item['id'],))
+        conn.commit()
+        return False
+    return False
 
 def send_overdue_email(bag, cleaner):
     """Send overdue alert to cleaner + CC housekeeping manager."""
@@ -2219,16 +2246,31 @@ def recalculate_amenity_thresholds():
 def flag_supply_low():
     """Lets any staff member proactively alert Sarah that something looks
     like it's running low — regardless of what the tracked quantity says.
-    Independent of the automatic threshold-based alert; this is for when
-    someone notices it before the numbers catch up."""
+    Shares the same one-time-until-restocked dedup state as the automatic
+    threshold alert (low_stock_alerted on hk_supply_items): if the item is
+    already flagged/alerted, this won't send a second email — that only
+    happens again once the item's been restocked back above threshold."""
     data = request.json or {}
     item_name = (data.get('item_name') or '').strip()
     flagged_by = (data.get('flagged_by') or '').strip() or 'Unknown'
     notes = (data.get('notes') or '').strip()
     if not item_name:
         return jsonify({'error': 'item_name is required'}), 400
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
+    item = cur.fetchone()
     body = f"{flagged_by} flagged '{item_name}' as running low.\n" + (f"Notes: {notes}" if notes else "No additional notes.")
-    sent = send_email(f"LOW STOCK FLAGGED: {item_name}", body, to=SARAH_EMAIL)
+    sent = False
+    if item:
+        if not item.get('low_stock_alerted'):
+            sent = send_email(f"LOW STOCK FLAGGED: {item_name}", body, to=SARAH_EMAIL)
+            cur.execute("UPDATE hk_supply_items SET low_stock_alerted=1 WHERE id=%s", (item['id'],))
+            conn.commit()
+    else:
+        # No exact name match in hk_supply_items — send anyway rather than
+        # silently dropping a flag we can't tie to a tracked item.
+        sent = send_email(f"LOW STOCK FLAGGED: {item_name}", body, to=SARAH_EMAIL)
+    cur.close(); conn.close()
     return jsonify({'success': True, 'alert_sent': sent})
 
 @app.route('/api/check-pickup-deadline', methods=['POST'])
@@ -2658,7 +2700,7 @@ def supply_transaction(sid):
     cur.execute("UPDATE supply_items SET quantity=%s WHERE id=%s",(new_qty,sid))
     cur.execute("INSERT INTO supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,%s,%s,%s,%s,%s,%s)",(sid,action,qty,new_qty,performed,now_central(),notes))
     conn.commit(); alert_sent=False
-    if new_qty<=item['low_stock_threshold']:
+    if should_send_low_stock_alert(conn, cur, 'supply_items', item, new_qty):
         body=f"Low stock alert for '{item['name']}'.\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
         alert_sent=send_email(f"LOW STOCK: {item['name']}",body,to=SARAH_EMAIL)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
@@ -2764,7 +2806,7 @@ def hk_supply_transaction(sid):
     cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s",(new_qty,sid))
     cur.execute("INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,%s,%s,%s,%s,%s,%s)",(sid,action,qty,new_qty,performed,now_central(),notes))
     conn.commit(); alert_sent=False
-    if new_qty<=item['low_stock_threshold']:
+    if should_send_low_stock_alert(conn, cur, 'hk_supply_items', item, new_qty):
         body=f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
         # Kitchen Amenity Boxes goes to Jennifer Sims instead of Sarah —
         # everything else in Housekeeping Supplies still goes to Sarah.
@@ -4008,8 +4050,12 @@ NEW_STORE_ITEMS_BATCH_20260824 = [
 
 @app.route('/api/store/items', methods=['GET'])
 def get_store_items():
+    archived = request.args.get('archived') == '1'
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM store_items ORDER BY category, name")
+    if archived:
+        cur.execute("SELECT * FROM store_items WHERE active=0 ORDER BY name")
+    else:
+        cur.execute("SELECT * FROM store_items WHERE active=1 ORDER BY name")
     rows=cur.fetchall(); cur.close(); conn.close()
     return jsonify(rows)
 
@@ -4061,12 +4107,56 @@ def update_store_item(sid):
     log_audit('StoreCentral', 'Edited store item', data.get('name',''), resolve_performer(data))
     return jsonify({'success':True})
 
+@app.route('/api/store/items/<int:sid>', methods=['DELETE'])
+def archive_store_item(sid):
+    """Admin-only 'delete' for a store item. This archives rather than
+    hard-deletes: store_transactions rows reference item_id via a foreign
+    key, so a real DELETE would either fail (if the item has any checkout
+    or restock history) or silently erase that history. Archiving sets
+    active=0, which hides the item from the store view and blocks new
+    checkout/restock/count actions on it, while keeping every past
+    transaction intact and letting an admin restore it later if needed."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM store_items WHERE id=%s", (sid,))
+    item = cur.fetchone()
+    if not item:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Item not found'}), 404
+    cur.execute("UPDATE store_items SET active=0 WHERE id=%s", (sid,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Archived store item', item['name'], resolve_performer(data))
+    return jsonify({'success': True})
+
+@app.route('/api/store/items/<int:sid>/restore', methods=['POST'])
+def restore_store_item(sid):
+    """Admin-only: brings an archived store item back into the active list."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin',''))):
+        return jsonify({'error':'Admin PIN required'}), 403
+    conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM store_items WHERE id=%s", (sid,))
+    item = cur.fetchone()
+    if not item:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Item not found'}), 404
+    cur.execute("UPDATE store_items SET active=1 WHERE id=%s", (sid,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('StoreCentral', 'Restored archived store item', item['name'], resolve_performer(data))
+    return jsonify({'success': True})
+
 @app.route('/api/store/items/<int:sid>/restock', methods=['POST'])
 def restock_store_item(sid):
     """Increase quantity on an existing store item, with an audit trail entry."""
     data=request.json or {}
     roles=resolve_roles(str(data.get('pin','')))
-    if not any(r in ('admin','maintenance','coordinator') for r in roles): return jsonify({'error':'Access denied'}),403
+    # Store tab access (see TABS in index.html) is warehouse/inspector/store_manager/admin —
+    # this allow-list previously only had admin/maintenance/coordinator, none of whom
+    # (besides admin) can actually reach the Store tab, so restocks from the people who
+    # do this day-to-day were silently rejected. maintenance/coordinator kept for safety.
+    if not any(r in ('admin','maintenance','coordinator','warehouse','inspector','store_manager') for r in roles): return jsonify({'error':'Access denied'}),403
     qty=int(data.get('quantity',0))
     performed_by=(data.get('performed_by') or '').strip()
     notes=(data.get('notes') or '').strip() or None
@@ -4078,6 +4168,8 @@ def restock_store_item(sid):
         cur.execute("SELECT * FROM store_items WHERE id=%s",(sid,))
         item=cur.fetchone()
         if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+        if not item.get('active', 1):
+            cur.close(); conn.close(); return jsonify({'error':'This item has been archived — restore it first'}), 400
         new_qty = item['quantity'] + qty
         cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, sid))
         cur.execute("""INSERT INTO store_transactions
@@ -4092,13 +4184,15 @@ def restock_store_item(sid):
 
     cur.close(); conn.close()
     log_audit('StoreCentral', 'Restocked item', item['name'], resolve_performer(data), f'+{qty} -> {new_qty}')
-    if new_qty <= item['low_stock_threshold']:
+    conn2=get_db(); cur2=conn2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if should_send_low_stock_alert(conn2, cur2, 'store_items', item, new_qty):
         try:
             send_email(f"LOW STOCK (Store): {item['name']}",
                        f"Low stock alert for '{item['name']}' (StoreCentral).\nCurrent qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\nStill low even after a restock of +{qty}.",
                        to=SARAH_EMAIL)
         except Exception as e:
             print(f'[STORE LOW STOCK EMAIL ERROR] {e}', flush=True)
+    cur2.close(); conn2.close()
     return jsonify({'success':True,'new_quantity':new_qty})
 
 @app.route('/api/store/items/<int:sid>/set-count', methods=['POST'])
@@ -4109,7 +4203,11 @@ def set_store_item_count(sid):
     hand, instead of leaving a variance for someone to fix by hand later."""
     data=request.json or {}
     roles=resolve_roles(str(data.get('pin','')))
-    if not any(r in ('admin','maintenance','coordinator') for r in roles): return jsonify({'error':'Access denied'}),403
+    # Same fix as restock_store_item above — this is the endpoint the Store
+    # Count flow calls on finalize to write counted quantities back to
+    # inventory, so it needs to accept the roles that actually run store
+    # counts (warehouse/inspector/store_manager), not just admin.
+    if not any(r in ('admin','maintenance','coordinator','warehouse','inspector','store_manager') for r in roles): return jsonify({'error':'Access denied'}),403
     qty=int(data.get('quantity',0))
     performed_by=(data.get('performed_by') or '').strip()
     notes=(data.get('notes') or '').strip() or None
@@ -4121,6 +4219,8 @@ def set_store_item_count(sid):
         cur.execute("SELECT * FROM store_items WHERE id=%s",(sid,))
         item=cur.fetchone()
         if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+        if not item.get('active', 1):
+            cur.close(); conn.close(); return jsonify({'error':'This item has been archived — restore it first'}), 400
         new_qty = qty
         cur.execute("UPDATE store_items SET quantity=%s WHERE id=%s",(new_qty, sid))
         cur.execute("""INSERT INTO store_transactions
@@ -4135,13 +4235,15 @@ def set_store_item_count(sid):
 
     cur.close(); conn.close()
     log_audit('StoreCentral', 'Count adjustment', item['name'], resolve_performer(data), f'set to {new_qty}')
-    if new_qty <= item['low_stock_threshold']:
+    conn2=get_db(); cur2=conn2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if should_send_low_stock_alert(conn2, cur2, 'store_items', item, new_qty):
         try:
             send_email(f"LOW STOCK (Store): {item['name']}",
                        f"Low stock alert for '{item['name']}' (StoreCentral).\nCurrent qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\nFound during a physical count.",
                        to=SARAH_EMAIL)
         except Exception as e:
             print(f'[STORE LOW STOCK EMAIL ERROR] {e}', flush=True)
+    cur2.close(); conn2.close()
     return jsonify({'success':True,'new_quantity':new_qty})
 
 @app.route('/api/store/checkout', methods=['POST'])
@@ -4169,6 +4271,8 @@ def store_checkout():
         cur.execute("SELECT * FROM store_items WHERE id=%s",(item_id,))
         item=cur.fetchone()
         if not item: cur.close(); conn.close(); return jsonify({'error':'Item not found'}), 404
+        if not item.get('active', 1):
+            cur.close(); conn.close(); return jsonify({'error':'This item has been archived — restore it first'}), 400
         if item['quantity'] < qty:
             cur.close(); conn.close()
             return jsonify({'error':f'Only {item["quantity"]} in stock'}), 400
@@ -4256,7 +4360,7 @@ This item has been marked as sold out and will remain at the property. Please bi
     # Low-stock alert — same pattern used for amenity/warehouse supplies,
     # so a checked-out item that's now running low doesn't go unnoticed the
     # way it did before (store items had no alerting at all until now).
-    if new_qty <= item['low_stock_threshold']:
+    if should_send_low_stock_alert(conn, cur, 'store_items', item, new_qty):
         try:
             alert_body = (f"Low stock alert for '{item['name']}' (StoreCentral).\n"
                           f"Current qty: {new_qty}\nThreshold: {item['low_stock_threshold']}\n"
@@ -4352,6 +4456,7 @@ def seed_store():
 
 SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
 JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert recipient for Kitchen Amenity Boxes specifically, instead of Sarah
+KRISTIN_EMAIL = 'kristin@sandersbeachrentals.com'  # inventory count notes ("new item to add", etc.) go straight to Kristin
 
 # Linen items tracked in the daily Damage Log. Sheet sets are broken out per
 # bed size AND per component (Kristin's request) — a damaged fitted sheet
@@ -4798,11 +4903,10 @@ def box_packing():
         'ingredients': ingredients
     })
 
-@app.route('/api/forecast/email-sarah', methods=['POST'])
-def email_sarah_forecast():
-    """Email Sarah the forecast shortfall report."""
-    date_from = request.json.get('from') if request.json else None
-    date_to = request.json.get('to') if request.json else None
+def send_forecast_email_to_sarah(date_from=None, date_to=None):
+    """Builds and sends the housekeeping supply forecast email to Sarah.
+    Shared by the manual 'Email Sarah' button and the automatic weekly job.
+    Returns (sent: bool, shortfall_count: int)."""
     conn = get_db()
     try:
         result = run_forecast(conn, date_from, date_to)
@@ -4857,8 +4961,45 @@ def email_sarah_forecast():
     </div>"""
 
     sent = send_email(subject, body_text, to=SARAH_EMAIL, html_body=html)
-    log_audit('ForecastCentral', 'Emailed Sarah forecast', f'{len(shortfalls)} shortfalls', resolve_performer(request.json or {}))
-    return jsonify({'success': True, 'email_sent': sent, 'shortfalls': len(shortfalls)})
+    return sent, len(shortfalls)
+
+@app.route('/api/forecast/email-sarah', methods=['POST'])
+def email_sarah_forecast():
+    """Email Sarah the forecast shortfall report (manual trigger)."""
+    date_from = request.json.get('from') if request.json else None
+    date_to = request.json.get('to') if request.json else None
+    sent, shortfall_count = send_forecast_email_to_sarah(date_from, date_to)
+    log_audit('ForecastCentral', 'Emailed Sarah forecast', f'{shortfall_count} shortfalls', resolve_performer(request.json or {}))
+    return jsonify({'success': True, 'email_sent': sent, 'shortfalls': shortfall_count})
+
+WEEKLY_FORECAST_DAY = 0  # Monday (Python weekday(): Monday=0 ... Sunday=6). Change this to move the day.
+
+def run_weekly_forecast_email_check(force=False):
+    """Sends Sarah the 30-day housekeeping supply forecast once a week.
+    Only ever sends once per calendar week — checks daily_alert_log first
+    (keyed by ISO year-week), same dedup pattern as the pickup deadline
+    check. `force=True` skips the day-of-week gate for manual testing."""
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    if not force and now.weekday() != WEEKLY_FORECAST_DAY:
+        return {'sent': False, 'reason': 'not forecast day'}
+
+    week_key = now.strftime('%G-W%V')  # ISO year-week, e.g. "2026-W35"
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='weekly_forecast' AND log_date=%s", (week_key,))
+    already_sent = cur.fetchone() is not None
+    if already_sent:
+        cur.close(); conn.close()
+        return {'sent': False, 'reason': 'already sent this week'}
+
+    date_from = now.strftime('%Y-%m-%d')
+    date_to = (now + timedelta(days=30)).strftime('%Y-%m-%d')
+    sent, shortfall_count = send_forecast_email_to_sarah(date_from, date_to)
+
+    cur.execute("INSERT INTO daily_alert_log (alert_type,log_date,sent_at) VALUES ('weekly_forecast',%s,%s) ON CONFLICT DO NOTHING",
+                (week_key, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('ForecastCentral', 'Auto-emailed Sarah weekly forecast', f'{shortfall_count} shortfalls', 'System')
+    return {'sent': sent, 'shortfalls': shortfall_count}
 
 
 # ── PackCentral (stub — deduction trigger) ────────────────────────────────────
@@ -4911,16 +5052,109 @@ def pack_home():
 @app.route('/api/inventory-counts', methods=['GET'])
 def get_inventory_counts():
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,areas,started_at,item_count,variances,created_at,performed_by FROM inventory_counts ORDER BY created_at DESC LIMIT 50")
+    cur.execute("SELECT id,areas,started_at,item_count,variances,created_at,performed_by,notes FROM inventory_counts ORDER BY created_at DESC LIMIT 50")
     rows=cur.fetchall(); cur.close(); conn.close(); return jsonify(rows)
+
+def send_inventory_summary_email_to_sarah(areas, started_at, item_count, variances_count, details_json, performed_by):
+    """Emails Sarah a full expected/found/discrepancy summary every time an
+    inventory count is run — automatic, no button click required. Lists
+    every item counted (not just the ones with variances) so it reads as a
+    complete summary rather than just an exceptions list."""
+    try:
+        details = json.loads(details_json or '{}')
+    except (TypeError, ValueError):
+        details = {}
+    items = details.get('items', [])
+    counts = details.get('counts', {})
+
+    lines = ['SBR Linens — Inventory Count Summary', '=' * 40,
+             f"Date: {started_at}", f"Areas counted: {areas}",
+             f"Counted by: {performed_by or 'Not recorded'}",
+             f"Total items counted: {item_count}", f"Variances found: {variances_count}", '']
+    row_html = []
+    if items:
+        lines.append('ITEM-BY-ITEM SUMMARY:')
+        for item in items:
+            counted = counts.get(item.get('id'))
+            if item.get('type') == 'loaner':
+                found_label = 'Found' if counted == 1 else 'Missing' if counted is not None else 'Not counted'
+                is_diff = found_label == 'Missing'
+                lines.append(f"  {item.get('label')}: expected {item.get('expectedLabel','1')}, found {found_label}")
+                found_disp, expected_disp = found_label, item.get('expectedLabel', '1')
+            else:
+                expected = item.get('expected', 0)
+                unit = item.get('unit', '')
+                c = counted if counted is not None else None
+                if c is None:
+                    lines.append(f"  {item.get('label')}: expected {expected} {unit}, not counted")
+                    found_disp, expected_disp, is_diff = 'Not counted', f"{expected} {unit}", True
+                else:
+                    diff = c - expected
+                    is_diff = diff != 0
+                    tail = '' if diff == 0 else f"  ({'+' if diff>0 else ''}{diff})"
+                    lines.append(f"  {item.get('label')}: expected {expected} {unit}, found {c} {unit}{tail}")
+                    found_disp, expected_disp = f"{c} {unit}", f"{expected} {unit}"
+            row_html.append(
+                f'<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">{item.get("label","")}</td>'
+                f'<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{expected_disp}</td>'
+                f'<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{found_disp}</td>'
+                f'<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;{"color:#c0392b;font-weight:700" if is_diff else "color:#2d7a4f"}">{"Discrepancy" if is_diff else "Match"}</td></tr>')
+    else:
+        lines.append('No item detail on file for this count.')
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:700px;margin:0 auto;padding:20px">
+      <div style="background:#95B9B8;padding:16px 20px;border-radius:8px 8px 0 0">
+        <h2 style="color:#fff;margin:0;font-size:18px">Inventory Count Summary</h2>
+        <p style="color:#fff;margin:4px 0 0;font-size:13px;opacity:0.9">Sanders Beach Rentals · SandersCentral</p>
+      </div>
+      <div style="background:#fff;border:1px solid #ddd;border-top:none;padding:20px;border-radius:0 0 8px 8px">
+        <p style="color:#444;margin:0 0 16px"><strong>Date:</strong> {started_at} &nbsp;·&nbsp; <strong>Areas:</strong> {areas} &nbsp;·&nbsp; <strong>Counted by:</strong> {performed_by or 'Not recorded'}</p>
+        <p style="color:#444;margin:0 0 16px"><strong>{item_count}</strong> items counted, <strong style="color:{'#c0392b' if variances_count else '#2d7a4f'}">{variances_count}</strong> discrepancies.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr style="background:#f5f5f5"><th style="padding:6px 8px;text-align:left">Item</th><th style="padding:6px 8px">Expected</th><th style="padding:6px 8px">Found</th><th style="padding:6px 8px">Status</th></tr>
+          {''.join(row_html)}
+        </table>
+        <p style="margin:16px 0 0;font-size:12px;color:#aaa;text-align:center">SandersCentral · Inventory</p>
+      </div>
+    </div>"""
+
+    return send_email(f"Inventory Count Summary — {started_at}", '\n'.join(lines), to=SARAH_EMAIL, html_body=html)
 
 @app.route('/api/inventory-counts', methods=['POST'])
 def save_inventory_count():
     data=request.json or {}
+    areas = data.get('areas','')
+    started_at = data.get('started_at','')
+    item_count = int(data.get('item_count',0))
+    variances_count = int(data.get('variances',0))
+    details_json = data.get('details','{}')
+    performed_by = data.get('performed_by','').strip() or None
+    notes = (data.get('notes') or '').strip() or None
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("INSERT INTO inventory_counts (areas,started_at,item_count,variances,details,created_at,performed_by) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-        (data.get('areas',''), data.get('started_at',''), int(data.get('item_count',0)), int(data.get('variances',0)), data.get('details','{}'), now_central(), data.get('performed_by','').strip() or None))
-    row=cur.fetchone(); conn.commit(); cur.close(); conn.close(); return jsonify({'id':row['id']})
+    cur.execute("INSERT INTO inventory_counts (areas,started_at,item_count,variances,details,created_at,performed_by,notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (areas, started_at, item_count, variances_count, details_json, now_central(), performed_by, notes))
+    row=cur.fetchone(); conn.commit(); cur.close(); conn.close()
+    try:
+        send_inventory_summary_email_to_sarah(areas, started_at, item_count, variances_count, details_json, performed_by)
+    except Exception as e:
+        print(f'[INVENTORY SUMMARY EMAIL ERROR] {e}', flush=True)
+    # A note left on a count is almost always something Kristin needs to act
+    # on directly (a new item to add, something to double-check) rather than
+    # Sarah's usual stock summary, so it gets its own separate email to Kristin.
+    if notes:
+        try:
+            note_body = (f"A note was left on an inventory count.\n\n"
+                        f"Areas: {areas}\nDate: {started_at}\nLeft by: {performed_by or 'Not recorded'}\n\n"
+                        f"Note:\n{notes}")
+            note_html = (f'<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">'
+                        f'<h2 style="color:#95B9B8">Inventory Count — Note to Review</h2>'
+                        f'<p><strong>Areas:</strong> {areas} &nbsp;·&nbsp; <strong>Date:</strong> {started_at} &nbsp;·&nbsp; <strong>Left by:</strong> {performed_by or "Not recorded"}</p>'
+                        f'<div style="background:#f5f5f5;border-left:3px solid #95B9B8;padding:12px 16px;margin-top:12px;white-space:pre-wrap">{notes}</div></div>')
+            send_email(f"Inventory Count Note — {areas} ({started_at})", note_body, to=KRISTIN_EMAIL, html_body=note_html)
+        except Exception as e:
+            print(f'[INVENTORY NOTE EMAIL ERROR] {e}', flush=True)
+    return jsonify({'id':row['id']})
 
 @app.route('/api/inventory-counts/<int:cid>', methods=['GET'])
 def get_inventory_count(cid):
@@ -6527,7 +6761,7 @@ def pack_property():
                 # Packing is what most often actually brings something low —
                 # so this needs the same low-stock alert manual Take/Restock
                 # transactions already trigger, not just those.
-                if new_qty <= item['low_stock_threshold']:
+                if should_send_low_stock_alert(conn, cur, 'hk_supply_items', item, new_qty):
                     alert_body = (f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\n"
                                   f"Current qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}\n"
                                   f"Triggered by packing: {address}")
@@ -6899,6 +7133,12 @@ def background_overdue_loop():
                 print(f"[Overdue Scheduler] Pickup deadline alert sent to Cassie: {result['still_staged_count']} bag(s) still staged", flush=True)
         except Exception as e:
             print(f"[Overdue Scheduler] Pickup deadline check failed: {e}", flush=True)
+        try:
+            result = run_weekly_forecast_email_check()
+            if result['sent']:
+                print(f"[Overdue Scheduler] Weekly forecast emailed to Sarah: {result['shortfalls']} shortfalls", flush=True)
+        except Exception as e:
+            print(f"[Overdue Scheduler] Weekly forecast check failed: {e}", flush=True)
         time.sleep(OVERDUE_CHECK_INTERVAL_SECONDS)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
