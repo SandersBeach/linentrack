@@ -1298,7 +1298,7 @@ function _stale(gen) { return gen !== undefined && gen !== _tabGeneration; }
 async function renderWarehouseHome(gen, opts) {
   const isAdmin = !!(opts && opts.admin);
   const today = await getServerToday();
-  const [week, shortages, bundles, goals, shiftNotes, dailyLog, inv, adminData] = await Promise.all([
+  const [week, shortages, bundles, goals, shiftNotes, dailyLog, inv, pickupStatus, adminData] = await Promise.all([
     fetch('/api/pack-list/week').then(r => r.json()),
     fetch('/api/pack-list/shortages').then(r => r.json()),
     fetch('/api/pack-list/bundles?days=5').then(r => r.json()),
@@ -1306,6 +1306,7 @@ async function renderWarehouseHome(gen, opts) {
     fetch('/api/warehouse-notes').then(r => r.json()),
     fetch(`/api/warehouse-daily-log?from=${today}&to=${today}`).then(r => r.json()),
     fetch('/api/inventory').then(r => r.json()),
+    fetch('/api/pickup-deadline-status').then(r => r.json()),
     isAdmin ? fetch('/api/admin-dashboard').then(r => r.json()) : Promise.resolve(null)
   ]);
   if (_stale(gen)) return;
@@ -1337,7 +1338,10 @@ async function renderWarehouseHome(gen, opts) {
   const _now = new Date();
   const lateBags = inv.filter(b => b.status === 'out' && b.picked_up_at && (_now - new Date(b.picked_up_at)) / 3600000 >= 24).length;
   // Packed and staged but nobody has collected it yet — drives the 10:30 nudge.
-  const stagedNotPickedUp = inv.filter(b => b.status === 'staged').length;
+  // Scoped to bags actually needed for TODAY's clean (see
+  // get_bags_still_staged_for_todays_clean on the backend), not every staged
+  // bag in the system regardless of date — that was the source of inflated counts.
+  const stagedNotPickedUp = pickupStatus.count || 0;
   // Ready-to-go amenity boxes vs. what the next 5 days actually need — the
   // two numbers used to live on separate screens with nothing comparing
   // them, so a real shortfall could go unnoticed until someone was mid-pack.
@@ -1456,10 +1460,11 @@ async function renderWarehouseHome(gen, opts) {
 }
 
 // ── 10:30 staged-pickup nudge ─────────────────────────────────────────────
-// At or after 10:30am, anything packed for today that is still sitting staged
-// has most likely been forgotten. This is a nudge on top of the existing email,
-// never a replacement for it. Dismissed once, it stays gone for the rest of the
-// day. NOTE: mocked here for design — wire to real staged/pickup state in app.
+// At or after 10:30am, anything packed for TODAY's clean that is still sitting
+// staged has most likely been forgotten. This is a nudge on top of the existing
+// email, never a replacement for it. Dismissed once, it stays gone for the rest
+// of the day. Count comes from /api/pickup-deadline-status, the same scoping
+// the email alert uses — not a raw count of every staged bag in the system.
 function maybeShowStagedPickupNudge(stagedCount, today) {
   if (!stagedCount) return;
   const now = new Date();
@@ -5464,10 +5469,15 @@ async function submitDailyLog() {
   const laundry_bins_unpacked = document.getElementById('dt-bins-unpacked').value;
   const laundry_bins_out = document.getElementById('dt-bins-out').value;
   const amenity_boxes_assembled = document.getElementById('dt-boxes-assembled').value;
-  await fetch('/api/warehouse-daily-log', {
+  const res = await fetch('/api/warehouse-daily-log', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out, amenity_boxes_assembled })
   });
+  const result = await res.json().catch(() => ({}));
+  if (result.shortfalls && result.shortfalls.length) {
+    const names = result.shortfalls.map(s => s.item).join(', ');
+    notify(`Assembled, but ran short on: ${names} — supply now at 0, restock needed.`, 'error');
+  }
   showTab('daily_tasks');
 }
 
