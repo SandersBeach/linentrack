@@ -1375,6 +1375,7 @@ async function renderWarehouseHome(gen, opts) {
   if (missedCount) problems.push(`${missedCount} missed packed bag${missedCount === 1 ? '' : 's'}`);
   if (shortages.length) problems.push(`${shortages.length} packed item${shortages.length === 1 ? '' : 's'} short`);
   if (checklistRemaining) problems.push(`${checklistRemaining} checklist item${checklistRemaining === 1 ? '' : 's'} left`);
+  if (isAdmin && adminData && adminData.scheduling_issues) problems.push(`${adminData.scheduling_issues} scheduling issue${adminData.scheduling_issues === 1 ? '' : 's'} to review`);
   const headline = problems.length
     ? problems.join(', ').replace(/, ([^,]*)$/, ' and $1')
     : 'Nothing needs your attention right now.';
@@ -1445,6 +1446,7 @@ async function renderWarehouseHome(gen, opts) {
       ${tile('', 'Orders pending', adminData.orders_pending, adminData.orders_pending > 0 ? 'Awaiting receipt' : 'Nothing outstanding', 'var(--teal-dark)', "_ordersViewMode='pending';showTab('orders')")}
       ${tile('', 'Low stock', adminData.low_stock_count || 0, (adminData.low_stock_count || 0) > 0 ? 'At or below reorder point' : 'Everything above reorder point', (adminData.low_stock_count || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "_hkAutoOpenLowStock=true;showTab('amenities_inventory')")}
       ${tile('', 'Open flags', adminData.unresolved_flags || 0, (adminData.unresolved_flags || 0) > 0 ? 'Reported by staff, unresolved' : 'Nothing reported', (adminData.unresolved_flags || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_flags')")}
+      ${tile('', 'Scheduling issues', adminData.scheduling_issues || 0, (adminData.scheduling_issues || 0) > 0 ? 'Missing or mismatched cleans' : 'Nothing to review', (adminData.scheduling_issues || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('missing_cleans')")}
     </div>` : ''}
     <div class="card" style="margin-bottom:2rem">
       <div class="card-title">Notes for the next shift</div>
@@ -5190,17 +5192,28 @@ async function renderMissingCleans(gen) {
   if (_stale(gen)) return;
   let html = `<div style="margin-bottom:0.85rem">
     <div style="font-family:var(--font-serif);font-size:22px;color:var(--gray-900)">Missing Cleans</div>
-    <div class="eyebrow" style="margin-top:2px">Checkouts with an arrival coming soon and no clean scheduled yet</div>
+    <div class="eyebrow" style="margin-top:2px">Checkouts with no clean lined up, or a clean scheduled that doesn't match the checkout</div>
   </div>`;
   if (!issues.length) {
     html += `<div class="empty">Nothing to review right now.</div>`;
   } else {
-    html += issues.map(i => `
+    html += issues.map(i => {
+      if (i.issue_type === 'date_mismatch') {
+        return `
+      <div class="card" style="margin-bottom:10px;background:var(--coral-light);border-color:var(--coral)">
+        <div class="row-title">${i.address}</div>
+        <div class="row-sub" style="font-weight:600;color:var(--coral-dark)">Date mismatch — a clean is scheduled, but it doesn't line up with this checkout</div>
+        <div class="row-sub">Checkout: ${humanDate(i.checkout_date)} · Clean scheduled: ${humanDate(i.mismatched_clean_date)}${i.mismatched_cleaner_name ? ' · ' + i.mismatched_cleaner_name : ''}${i.next_arrival_date ? ' · Next arrival: ' + humanDate(i.next_arrival_date) : ' · No next arrival on file yet'}</div>
+        <div class="row-sub" style="margin-top:4px;font-style:italic">Fix the checkout or clean date in Breezeway — this clears itself automatically once they line up.</div>
+      </div>`;
+      }
+      return `
       <div class="card" style="margin-bottom:10px;background:var(--coral-light);border-color:var(--coral)">
         <div class="row-title">${i.address}</div>
         <div class="row-sub">Checkout: ${humanDate(i.checkout_date)} · Next arrival: ${humanDate(i.next_arrival_date)} (${i.days_until_arrival} day${i.days_until_arrival !== 1 ? 's' : ''} away)</div>
         <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="ackMissingClean('${i.address}','${i.next_arrival_date}')">Reviewed — dismiss</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
   document.getElementById('main-content').innerHTML = html;
 }
