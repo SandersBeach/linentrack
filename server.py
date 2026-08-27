@@ -4515,8 +4515,8 @@ SUPPLY_MAP = {
 # SUPPLY_MAP above, so re-adding them here would double-count them.
 BOX_CONTENTS = {
     'Kitchen Trash Bags':      5,
-    'Round Coffee Filters':    3,  # "Basket" coffee filters
-    '#4 Cone Coffee Filters':  3,
+    'Round Coffee Filters':    5,  # "Basket" coffee filters
+    '#4 Cone Coffee Filters':  5,
     'Amavida Coffee Packs':    1,
     '3oz Palmolive Bottles':   2,
     'Dishwasher Pod Packs':    2,
@@ -4524,6 +4524,43 @@ BOX_CONTENTS = {
     '10oz Tide Bottles':       1,
     'Kitchen Amenity Boxes':   1,
 }
+
+def deduct_amenity_box_contents(conn, cur, boxes_assembled, performed_by, ts):
+    """Deduct the raw ingredients (BOX_CONTENTS) that go into assembling
+    Kitchen Amenity Boxes, at the moment they're actually assembled rather
+    than later when a home's pack list is staged. This is what physically
+    happens — the warehouse pulls coffee, sponges, dishwasher pods, etc. off
+    the shelf when they build the box, not when a specific home gets packed
+    — so inventory should reflect that instead of lagging behind. Mirrors
+    the pack-time deduction pattern (floor at zero, log a transaction, fire
+    low-stock alerts on threshold crossings). Returns a list of shortfalls
+    for anything that ran short.
+    """
+    shortfalls = []
+    for item_name, per_box in BOX_CONTENTS.items():
+        qty_needed = per_box * boxes_assembled
+        if not qty_needed: continue
+        cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
+        item = cur.fetchone()
+        if not item: continue
+        new_qty = item['quantity'] - qty_needed
+        if new_qty < 0:
+            shortfalls.append({'item': item_name, 'needed': qty_needed, 'available': item['quantity']})
+            new_qty = 0
+        cur.execute("UPDATE hk_supply_items SET quantity=%s WHERE id=%s", (new_qty, item['id']))
+        cur.execute(
+            "INSERT INTO hk_supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,'assembly_deduct',%s,%s,%s,%s,%s)",
+            (item['id'], qty_needed, new_qty, performed_by, ts, f'Assembled {boxes_assembled} Kitchen Amenity Box(es)')
+        )
+        if should_send_low_stock_alert(conn, cur, 'hk_supply_items', item, new_qty):
+            alert_body = (f"Low stock alert for '{item['name']}' (Housekeeping Supplies).\n"
+                          f"Current qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}\n"
+                          f"Triggered by amenity box assembly.")
+            # Kitchen Amenity Boxes goes to Jennifer Sims instead of Sarah —
+            # everything else here still goes to Sarah, same as elsewhere.
+            alert_to = JENNIFER_EMAIL if item['name'] == 'Kitchen Amenity Boxes' else SARAH_EMAIL
+            send_email(f"LOW STOCK (Housekeeping): {item['name']}", alert_body, to=alert_to)
+    return shortfalls
 
 def parse_pack_list_csv(content):
     """Parse pack list CSV → {address: {supply_name: qty}}"""
@@ -6145,15 +6182,22 @@ def add_warehouse_daily_log():
     bins_unpacked = int(data.get('laundry_bins_unpacked', 0) or 0)
     bins_out = int(data.get('laundry_bins_out', 0) or 0)
     boxes_assembled = int(data.get('amenity_boxes_assembled', 0) or 0)
-    conn = get_db(); cur = conn.cursor()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    ts = now_central()
     cur.execute("""INSERT INTO warehouse_daily_log
                    (log_date,staff_name,laundry_bins_received,laundry_bins_unpacked,laundry_bins_out,amenity_boxes_assembled,logged_at)
                    VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                (log_date, staff_name, bins_received, bins_unpacked, bins_out, boxes_assembled, now_central()))
+                (log_date, staff_name, bins_received, bins_unpacked, bins_out, boxes_assembled, ts))
+    shortfalls = []
     if boxes_assembled:
         cur.execute("UPDATE amenity_box_stock SET quantity = quantity + %s WHERE id=1", (boxes_assembled,))
+        # Pulls the raw ingredients (coffee, sponges, dishwasher pods, the
+        # empty box itself, etc.) out of Housekeeping Supplies right now,
+        # since that's when they actually leave the shelf — not later when
+        # a specific home gets packed. See deduct_amenity_box_contents().
+        shortfalls = deduct_amenity_box_contents(conn, cur, boxes_assembled, staff_name, ts)
     conn.commit(); cur.close(); conn.close()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'shortfalls': shortfalls})
 
 @app.route('/api/warehouse-daily-log', methods=['GET'])
 def get_warehouse_daily_log():
@@ -6746,6 +6790,12 @@ def pack_property():
         if fpl and fpl['supplies']:
             for item_name, qty_needed in fpl['supplies'].items():
                 if not qty_needed: continue
+                if item_name in BOX_CONTENTS:
+                    # Now deducted at amenity-box-assembly time instead (see
+                    # deduct_amenity_box_contents) — these ingredients leave
+                    # the shelf when the box is built, not when a specific
+                    # home is packed, so deducting again here would double-count.
+                    continue
                 cur.execute("SELECT * FROM hk_supply_items WHERE name=%s", (item_name,))
                 item = cur.fetchone()
                 if not item: continue
@@ -7031,40 +7081,28 @@ def set_inventory_reminder_setting():
         set_setting('inventory_reminder_day', str(int(data['day'])))
     return jsonify({'success': True})
 
-def run_pickup_deadline_check(force=False):
-    """At/after 10:30am Central, alerts Cassie if any property being cleaned
-    TODAY still has bags sitting staged (not yet picked up by the cleaner).
-    Only ever sends once per day — checks daily_alert_log first, and the
-    unique constraint on it means even if two worker threads raced to send
-    this at the same moment, only one email could ever actually go out.
-    `force=True` skips the time-of-day gate — only used by the manual admin
-    test endpoint, never by the automatic scheduler."""
+def get_bags_still_staged_for_todays_clean(cur):
+    """Bags packed for a property whose actual clean is TODAY, still sitting
+    in 'staged' status (not yet scanned out by the cleaner). Shared by the
+    10:30am email alert and the dashboard nudge popup, so both always agree
+    on the same number — this used to be duplicated (the popup counted
+    every staged bag in the system, for any date, which is what caused the
+    inflated counts).
+
+    Normal turnovers are packed the day BEFORE the clean (see
+    compute_pack_schedule: pack_date = clean_date - 1 day), and the cleaner
+    grabs the bags the morning of the actual clean — i.e. today. So "packed
+    for today's clean" means pack_date = yesterday, not today. Emergency
+    same-day adds are the exception and keep the same-day check.
+    """
     now = datetime.now(pytz.utc).astimezone(CENTRAL)
-    if not force and (now.hour, now.minute) < (10, 30):
-        return {'checked': 0, 'alerted': False, 'reason': 'before 10:30am Central'}
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = (now.date() - timedelta(days=1)).isoformat()
 
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='pickup_deadline' AND log_date=%s", (today_str,))
-    if cur.fetchone():
-        cur.close(); conn.close()
-        return {'checked': 0, 'alerted': False, 'reason': 'already sent today'}
-
-    # Normal turnovers are packed the day BEFORE the clean (see
-    # compute_pack_schedule: pack_date = clean_date - 1 day), and the
-    # cleaner grabs the bags the morning of the actual clean — i.e. today.
-    # So "packed for today's clean" means pack_date = yesterday, not today.
-    # Checking pack_date=today here used to catch everything packed for
-    # TOMORROW's clean instead, which naturally sits untouched at 10:30am
-    # and was the source of the false-alarm flood.
     cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
                    WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (yesterday_str,))
     rows = cur.fetchall()
 
-    # Last-Minute/emergency adds: how far ahead these get packed relative to
-    # pickup isn't confirmed yet, so they keep the original same-day check
-    # (pack_date=today) rather than assuming the day-ahead offset applies.
     cur.execute("SELECT LOWER(TRIM(address)) AS address FROM pack_emergency_adds WHERE pack_date=%s", (today_str,))
     emergency_addresses = [r['address'] for r in cur.fetchall()]
     if emergency_addresses:
@@ -7082,6 +7120,38 @@ def run_pickup_deadline_check(force=False):
         for b in cur.fetchall():
             if b['status'] == 'staged':
                 still_staged.append({'address': r['address'], 'bag_id': b['id'], 'cleaner_name': b['cleaner_name'] or 'Unknown cleaner'})
+    return still_staged
+
+@app.route('/api/pickup-deadline-status', methods=['GET'])
+def get_pickup_deadline_status():
+    """Lightweight, read-only version of the same scoping used by the 10:30am
+    email — powers the dashboard nudge popup so it shows the same count as
+    the email, not a raw count of every staged bag regardless of date."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    still_staged = get_bags_still_staged_for_todays_clean(cur)
+    cur.close(); conn.close()
+    return jsonify({'count': len(still_staged), 'bags': still_staged})
+
+def run_pickup_deadline_check(force=False):
+    """At/after 10:30am Central, alerts Cassie if any property being cleaned
+    TODAY still has bags sitting staged (not yet picked up by the cleaner).
+    Only ever sends once per day — checks daily_alert_log first, and the
+    unique constraint on it means even if two worker threads raced to send
+    this at the same moment, only one email could ever actually go out.
+    `force=True` skips the time-of-day gate — only used by the manual admin
+    test endpoint, never by the automatic scheduler."""
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    if not force and (now.hour, now.minute) < (10, 30):
+        return {'checked': 0, 'alerted': False, 'reason': 'before 10:30am Central'}
+    today_str = now.strftime('%Y-%m-%d')
+
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='pickup_deadline' AND log_date=%s", (today_str,))
+    if cur.fetchone():
+        cur.close(); conn.close()
+        return {'checked': 0, 'alerted': False, 'reason': 'already sent today'}
+
+    still_staged = get_bags_still_staged_for_todays_clean(cur)
 
     if not still_staged:
         cur.close(); conn.close()
