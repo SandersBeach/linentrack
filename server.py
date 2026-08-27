@@ -5695,11 +5695,13 @@ def compute_pack_schedule(window_start, window_end):
             next_arrival = next((a for a in arrivals if a > checkout), None)
 
             match = None
+            mismatched = []  # cleans that exist for this address but fall outside the valid window
             for c in cleans:
                 c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
                 if c_date >= checkout and (next_arrival is None or c_date <= next_arrival):
                     match = c
                     break
+                mismatched.append((c, c_date))
 
             if match:
                 c_date = datetime.strptime(match['assignment_date'], '%Y-%m-%d').date()
@@ -5712,6 +5714,30 @@ def compute_pack_schedule(window_start, window_end):
                     'cleaner_name': match['cleaner_name'] if match['cleaner_id'] else None,
                     'assigned': bool(match['cleaner_id']),
                 })
+            elif mismatched:
+                # A clean IS scheduled for this address — it just doesn't line
+                # up with this checkout (e.g. rescheduled to fall before the
+                # checkout date, or after the next guest's arrival). Before
+                # this, a case like that vanished from the pack list entirely
+                # with nothing pointing at it, because the old logic only
+                # flagged "no clean found at all, and arrival is imminent."
+                # This flags it immediately, regardless of arrival timing,
+                # since a real scheduling conflict is actionable the moment
+                # it exists. Not tied to the ack table (next_arrival_date is
+                # NOT NULL there) — it doesn't need manual dismissal, since
+                # it clears itself the moment the dates are corrected and a
+                # real match is found.
+                nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days))
+                mismatched_clean, mismatched_date = nearest
+                issues.append({
+                    'address': address,
+                    'checkout_date': checkout.isoformat(),
+                    'next_arrival_date': next_arrival.isoformat() if next_arrival else None,
+                    'days_until_arrival': (next_arrival - today_dt).days if next_arrival else None,
+                    'issue_type': 'date_mismatch',
+                    'mismatched_clean_date': mismatched_date.isoformat(),
+                    'mismatched_cleaner_name': mismatched_clean['cleaner_name'],
+                })
             elif next_arrival:
                 days_until = (next_arrival - today_dt).days
                 if days_until <= 2 and (address, next_arrival.isoformat()) not in acked:
@@ -5720,6 +5746,7 @@ def compute_pack_schedule(window_start, window_end):
                         'checkout_date': checkout.isoformat(),
                         'next_arrival_date': next_arrival.isoformat(),
                         'days_until_arrival': days_until,
+                        'issue_type': 'no_clean_scheduled',
                     })
 
     # Task-only fallback: Bay House (262 WRM Cir) is used by SBR Team &
@@ -5751,13 +5778,22 @@ def compute_pack_schedule(window_start, window_end):
 
 @app.route('/api/pack-list/missing-cleans', methods=['GET'])
 def get_missing_clean_issues():
-    """Admin review queue: checkouts with an arrival coming within 2 days
-    and no clean scheduled at all."""
+    """Admin review queue. Two kinds of issue, both real scheduling problems
+    that used to be able to disappear with no trace:
+      - 'no_clean_scheduled': a checkout with an arrival coming within 2
+        days and no clean scheduled at all yet.
+      - 'date_mismatch': a clean IS scheduled for the address, but its date
+        doesn't line up with this checkout (e.g. moved earlier than the
+        checkout itself, or later than the next guest's arrival) — shown
+        regardless of how far off the next arrival is, since this is
+        actionable immediately.
+    Sorted most-urgent first; date_mismatch issues with no arrival on file
+    sort to the very top since there's no natural deadline to rely on."""
     today_str = today_central()
     today_dt = datetime.strptime(today_str, '%Y-%m-%d').date()
     window_end = today_dt + timedelta(days=14)
     _, issues = compute_pack_schedule(today_dt.isoformat(), window_end.isoformat())
-    return jsonify(sorted(issues, key=lambda i: i['days_until_arrival']))
+    return jsonify(sorted(issues, key=lambda i: i['days_until_arrival'] if i['days_until_arrival'] is not None else -1))
 
 @app.route('/api/pack-list/missing-cleans/ack', methods=['POST'])
 def ack_missing_clean_issue():
@@ -6128,6 +6164,14 @@ def admin_dashboard():
     # Unresolved supply flags
     cur.execute("SELECT COUNT(*) AS c FROM pack_flags WHERE resolved=0")
     data['unresolved_flags'] = cur.fetchone()['c']
+
+    # Scheduling issues — checkouts with no clean lined up, or a clean
+    # scheduled that doesn't line up with its checkout (date_mismatch).
+    # This used to be able to vanish from the pack list with no trace at
+    # all; now it's always counted here so it can't go unnoticed again.
+    today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
+    _, schedule_issues = compute_pack_schedule(today_dt.isoformat(), (today_dt + timedelta(days=14)).isoformat())
+    data['scheduling_issues'] = len(schedule_issues)
 
     # Properties with no packing formula, among this week's actual needed properties
     cur.execute("SELECT address FROM pack_list_formula")
