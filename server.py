@@ -3033,9 +3033,18 @@ def sync_breezeway_properties(token):
     now = now_central()
     count = 0
     skipped_inactive = 0
+    skipped_details = []  # (name, raw_status) for anything not kept — printed
+    # below so a property silently missing from the schedule can actually be
+    # diagnosed, instead of just vanishing with no trace. A property is
+    # dropped here for ANY status string other than exactly 'active' — if
+    # Breezeway ever uses a different word, blank, or inconsistent casing
+    # for a genuinely-active property, this is where it falls out, and
+    # every reservation for it gets silently skipped downstream too.
     for p in all_items:
-        if (p.get('status') or '').lower() != 'active':
+        raw_status = p.get('status') or ''
+        if raw_status.lower() != 'active':
             skipped_inactive += 1
+            skipped_details.append((p.get('name') or p.get('property_name') or p.get('address1') or p.get('address') or '(no name)', raw_status or '(blank)'))
             continue
         pid = p.get('id') or p.get('property_id')
         address = (p.get('address1') or p.get('address') or p.get('name') or '').lower()
@@ -3048,6 +3057,11 @@ def sync_breezeway_properties(token):
         """, (int(pid), address.strip(), name.strip(), now))
         count += 1
     conn.commit(); cur.close(); conn.close()
+    if skipped_details:
+        print(f"[Breezeway Sync] {skipped_inactive} properties skipped as non-active — "
+              f"check these are genuinely inactive, not just an unexpected status string:", flush=True)
+        for nm, st in skipped_details:
+            print(f"    - {nm}: status={st!r}", flush=True)
     print(f"[Breezeway Sync] {count} active properties kept, {skipped_inactive} inactive skipped", flush=True)
     return count
 
@@ -3126,10 +3140,13 @@ def sync_breezeway_reservations(token):
 
     now = now_central()
     count = 0
+    skipped_no_address = []  # property_ids from Breezeway with no matching breezeway_properties row —
+    # every reservation for these gets silently thrown away below unless logged.
     for r in all_items:
         pid = r.get('property_id') or r.get('home_id')
         address = addr_by_id.get(int(pid)) if pid else None
         if not address:
+            skipped_no_address.append(pid)
             continue
         arrive = r.get('checkin_date') or r.get('arrival_date') or ''
         depart = r.get('checkout_date') or r.get('departure_date') or ''
@@ -3150,6 +3167,14 @@ def sync_breezeway_reservations(token):
         """, (str(r.get('id') or r.get('reservation_id') or ''), to_mdy(arrive), to_mdy(depart), address, '', now))
         count += 1
     conn.commit(); cur.close(); cur2.close(); conn.close()
+    if skipped_no_address:
+        from collections import Counter
+        counts = Counter(skipped_no_address)
+        print(f"[Breezeway Sync] {len(skipped_no_address)} reservations dropped — "
+              f"property_id not found in breezeway_properties (likely filtered out as "
+              f"non-active above, or genuinely missing from the property list):", flush=True)
+        for pid, n in counts.items():
+            print(f"    - property_id={pid}: {n} reservation(s) dropped", flush=True)
     return count
 
 def sync_breezeway_cleaner_assignments(token):
@@ -4525,6 +4550,25 @@ BOX_CONTENTS = {
     'Kitchen Amenity Boxes':   1,
 }
 
+# Reminder-only line(s) for the "Pack Amenity Box" checklist — real items
+# that go in the box, but NOT deducted from hk_supply_items. Kitchen Towels
+# here is the reusable laundered linen (Damage Log), not a purchased
+# consumable, so there's no on-hand count for it to deduct from — same
+# treatment as sheet set bundles and towel bags elsewhere in the app.
+AMENITY_BOX_REMINDERS = {
+    'Kitchen Towels': 2,
+}
+
+@app.route('/api/amenity-box-recipe', methods=['GET'])
+def get_amenity_box_recipe():
+    """Powers the 'Pack Amenity Box' checklist popup — same BOX_CONTENTS
+    used for the actual deduction, so the checklist can never drift out of
+    sync with what's really taken out of inventory."""
+    return jsonify({
+        'deducted': [{'name': k, 'qty': v} for k, v in BOX_CONTENTS.items() if k != 'Kitchen Amenity Boxes'],
+        'reminders': [{'name': k, 'qty': v} for k, v in AMENITY_BOX_REMINDERS.items()],
+    })
+
 def deduct_amenity_box_contents(conn, cur, boxes_assembled, performed_by, ts):
     """Deduct the raw ingredients (BOX_CONTENTS) that go into assembling
     Kitchen Amenity Boxes, at the moment they're actually assembled rather
@@ -5684,12 +5728,27 @@ def compute_pack_schedule(window_start, window_end):
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
     schedule = {}
     issues = []
+    clean_address_keys = list(cleans_by_address.keys())
 
     for address, stays in by_address.items():
         checkouts = sorted(set(s['depart_d'] for s in stays))
         checkouts = [c for c in checkouts if (address, c.isoformat()) not in cancelled_pairs]
         arrivals = sorted(set(s['arrive_d'] for s in stays))
         cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
+
+        # Nothing at all under this exact address string in the cleaning-task
+        # feed. Rather than reporting that as a problem, check whether the
+        # cleaning feed just spells this address slightly differently (e.g.
+        # 'Ct' vs 'Court', a missing suffix, a typo) than the reservation
+        # feed does — same fuzzy-match approach already used for bag
+        # scanning. If a variant is found, just use its cleans directly so
+        # this matches and lands on the pack list normally, with nothing to
+        # review. Only falls through to the normal no-clean/mismatch logic
+        # below if no variant exists either.
+        if not cleans and clean_address_keys:
+            variant = fuzzy_match_address(address, clean_address_keys)
+            if variant and variant != address:
+                cleans = sorted(cleans_by_address[variant], key=lambda c: c['assignment_date'])
 
         for checkout in checkouts:
             next_arrival = next((a for a in arrivals if a > checkout), None)
@@ -5714,7 +5773,7 @@ def compute_pack_schedule(window_start, window_end):
                     'cleaner_name': match['cleaner_name'] if match['cleaner_id'] else None,
                     'assigned': bool(match['cleaner_id']),
                 })
-            elif mismatched:
+            elif mismatched and (today_dt - checkout).days <= 3:
                 # A clean IS scheduled for this address — it just doesn't line
                 # up with this checkout (e.g. rescheduled to fall before the
                 # checkout date, or after the next guest's arrival). Before
@@ -5727,6 +5786,16 @@ def compute_pack_schedule(window_start, window_end):
                 # NOT NULL there) — it doesn't need manual dismissal, since
                 # it clears itself the moment the dates are corrected and a
                 # real match is found.
+                #
+                # Guarded to checkouts from the last 3 days or sooner: a
+                # checkout further in the past than that is very likely one
+                # that was already handled outside of what this app tracks
+                # as "packed," and just never got purged from
+                # forecast_reservations (see sync_breezeway_reservations —
+                # past checkouts are kept indefinitely unless a matching
+                # pack_list_status row exists). Comparing a real, current
+                # clean against a stale leftover like that produced false
+                # mismatches that had nothing to do with an actual problem.
                 nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days))
                 mismatched_clean, mismatched_date = nearest
                 issues.append({
@@ -5786,7 +5855,15 @@ def get_missing_clean_issues():
         doesn't line up with this checkout (e.g. moved earlier than the
         checkout itself, or later than the next guest's arrival) — shown
         regardless of how far off the next arrival is, since this is
-        actionable immediately.
+        actionable immediately. Only for checkouts within the last 3 days
+        or sooner, so a stale unpacked reservation from weeks ago can't
+        generate a false alarm against an unrelated, current clean.
+    A third case — the cleaning feed spelling an address differently than
+    the reservation feed (e.g. 'Ct' vs 'Court') — is no longer reported as
+    an issue at all. It's resolved automatically via the same fuzzy address
+    matching already used for bag scanning: if a variant is found, its
+    cleans are used directly so the property lands on the pack list with
+    nothing to review.
     Sorted most-urgent first; date_mismatch issues with no arrival on file
     sort to the very top since there's no natural deadline to rely on."""
     today_str = today_central()
@@ -7059,6 +7136,16 @@ def add_pack_emergency():
     if not address or not pack_date or not added_by:
         return jsonify({'error': 'address, pack_date, and added_by are required'}), 400
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # A double-click on "Send alert" (or a slow network retry) used to create
+    # two identical rows with nothing stopping it — same address, same date,
+    # no way to tell them apart or delete one. If this exact address/date is
+    # already on file, just return the existing one instead of adding another.
+    cur.execute("SELECT id FROM pack_emergency_adds WHERE LOWER(TRIM(address))=%s AND pack_date=%s",
+                (address.lower(), pack_date))
+    existing = cur.fetchone()
+    if existing:
+        cur.close(); conn.close()
+        return jsonify({'success': True, 'id': existing['id'], 'duplicate': True})
     ts = now_central()
     cur.execute(
         "INSERT INTO pack_emergency_adds (address,notes,pack_date,added_by,added_at) VALUES (%s,%s,%s,%s,%s) RETURNING id",
@@ -7068,6 +7155,21 @@ def add_pack_emergency():
     conn.commit(); cur.close(); conn.close()
     log_audit('PackListCentral', 'Last-minute add', address, added_by, pack_date)
     return jsonify({'success': True, 'id': eid})
+
+@app.route('/api/pack-list/emergency/<int:eid>', methods=['DELETE'])
+def delete_pack_emergency(eid):
+    data = request.json or {}
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT address, pack_date FROM pack_emergency_adds WHERE id=%s", (eid,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Not found'}), 404
+    cur.execute("DELETE FROM pack_emergency_acks WHERE emergency_id=%s", (eid,))
+    cur.execute("DELETE FROM pack_emergency_adds WHERE id=%s", (eid,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Removed last-minute add', row['address'], resolve_performer(data), row['pack_date'])
+    return jsonify({'success': True})
 
 @app.route('/api/pack-list/emergency/<int:eid>/ack', methods=['POST'])
 def ack_pack_emergency(eid):
