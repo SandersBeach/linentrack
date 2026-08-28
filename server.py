@@ -7304,13 +7304,13 @@ def set_inventory_reminder_setting():
         set_setting('inventory_reminder_day', str(int(data['day'])))
     return jsonify({'success': True})
 
-def get_bags_still_staged_for_todays_clean(cur):
-    """Bags packed for a property whose actual clean is TODAY, still sitting
-    in 'staged' status (not yet scanned out by the cleaner). Shared by the
-    10:30am email alert and the dashboard nudge popup, so both always agree
-    on the same number — this used to be duplicated (the popup counted
-    every staged bag in the system, for any date, which is what caused the
-    inflated counts).
+def get_bags_for_todays_clean(cur):
+    """Every bag packed for a property whose actual clean is TODAY —
+    regardless of current status (staged or already picked up). This is
+    the shared base for both 'still waiting on pickup' checks (filter to
+    staged) and the full 'To Be Picked Up Today' browse list (show
+    everything, so warehouse staff can see the whole picture: what's
+    already left vs. what's still sitting there).
 
     Normal turnovers are packed the day BEFORE the clean (see
     compute_pack_schedule: pack_date = clean_date - 1 day), and the cleaner
@@ -7334,16 +7334,59 @@ def get_bags_still_staged_for_todays_clean(cur):
                     (today_str, emergency_addresses))
         rows += cur.fetchall()
 
-    still_staged = []  # [{address, bag_id, cleaner_name}]
+    all_bags = []  # [{address, bag_id, status, cleaner_name}]
     for r in rows:
         bag_ids = [b.strip() for b in r['staged_bag_ids'].split(',') if b.strip()]
         if not bag_ids: continue
         cur.execute("""SELECT b.id, b.status, c.name AS cleaner_name FROM bags b
                        LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id = ANY(%s)""", (bag_ids,))
         for b in cur.fetchall():
-            if b['status'] == 'staged':
-                still_staged.append({'address': r['address'], 'bag_id': b['id'], 'cleaner_name': b['cleaner_name'] or 'Unknown cleaner'})
-    return still_staged
+            all_bags.append({'address': r['address'], 'bag_id': b['id'], 'status': b['status'], 'cleaner_name': b['cleaner_name'] or 'Unknown cleaner'})
+    return all_bags
+
+def get_bags_still_staged_for_todays_clean(cur):
+    """Bags packed for a property whose actual clean is TODAY, still sitting
+    in 'staged' status (not yet scanned out by the cleaner). Shared by the
+    10:30am email alert and the dashboard nudge popup, so both always agree
+    on the same number — this used to be duplicated (the popup counted
+    every staged bag in the system, for any date, which is what caused the
+    inflated counts).
+    """
+    return [b for b in get_bags_for_todays_clean(cur) if b['status'] == 'staged']
+
+@app.route('/api/pickup-today', methods=['GET'])
+def get_pickup_today():
+    """'To Be Picked Up Today' — everything expected to leave the warehouse
+    today, grouped by property, showing which bags have already left
+    (status='out') vs. which are still sitting there. Requested by the
+    warehouse team specifically to see the full picture at a glance, not
+    just the narrow 'still waiting, past deadline' alert."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    all_bags = get_bags_for_todays_clean(cur)
+
+    cur.execute("SELECT address, property_name FROM pack_list_formula")
+    names_by_address = {r['address']: r['property_name'] for r in cur.fetchall()}
+    cur.close(); conn.close()
+
+    by_address = {}
+    for b in all_bags:
+        by_address.setdefault(b['address'], []).append(b)
+
+    properties = []
+    for address, bags in by_address.items():
+        picked_up = sum(1 for b in bags if b['status'] == 'out')
+        cleaner_names = sorted(set(b['cleaner_name'] for b in bags))
+        properties.append({
+            'address': address,
+            'property_name': names_by_address.get(address) or address,
+            'cleaner_names': cleaner_names,
+            'total_bags': len(bags),
+            'picked_up_count': picked_up,
+            'all_picked_up': picked_up == len(bags),
+            'bags': [{'bag_id': b['bag_id'], 'status': b['status']} for b in sorted(bags, key=lambda x: x['bag_id'])],
+        })
+    properties.sort(key=lambda p: (p['all_picked_up'], p['property_name'].lower()))
+    return jsonify({'properties': properties})
 
 @app.route('/api/pickup-deadline-status', methods=['GET'])
 def get_pickup_deadline_status():
