@@ -6496,6 +6496,41 @@ def get_warehouse_daily_log():
     cur.close(); conn.close()
     return jsonify({'totals': totals, 'entries': entries, 'amenity_box_stock': stock_row['quantity'] if stock_row else 0})
 
+@app.route('/api/amenity-box-stock/adjust', methods=['POST'])
+def adjust_amenity_box_stock():
+    """Admin-only manual correction to the ready-to-go amenity box stock
+    count — for fixing things like a double-tapped submit that overstated
+    the count. Does NOT touch warehouse_daily_log (that stays an accurate
+    record of what was actually submitted); the correction itself is
+    recorded in the audit log so there's a clear trail of what happened."""
+    data = request.json or {}
+    if not is_admin_pin(str(data.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    action = data.get('action', '')
+    if action not in ('add', 'subtract', 'set'):
+        return jsonify({'error': 'Invalid action'}), 400
+    qty = int(data.get('quantity', 0) or 0)
+    if action == 'set':
+        if qty < 0: return jsonify({'error': 'Quantity cannot be negative'}), 400
+    else:
+        if qty <= 0: return jsonify({'error': 'Quantity must be positive'}), 400
+    performed = resolve_performer(data)
+    notes = (data.get('notes') or '').strip()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT quantity FROM amenity_box_stock WHERE id=1")
+    row = cur.fetchone(); current = row['quantity'] if row else 0
+    if action == 'set':
+        new_qty = qty
+    elif action == 'add':
+        new_qty = current + qty
+    else:
+        new_qty = max(0, current - qty)
+    cur.execute("UPDATE amenity_box_stock SET quantity=%s WHERE id=1", (new_qty,))
+    conn.commit()
+    log_audit('AmenityBox', f'Manual stock correction ({action} {qty})', f'{current} -> {new_qty}', performed, notes)
+    cur.close(); conn.close()
+    return jsonify({'success': True, 'new_quantity': new_qty})
+
 
 def _thu_wed_week_bounds(for_date=None):
     """Thursday-through-Wednesday week containing for_date (defaults to
