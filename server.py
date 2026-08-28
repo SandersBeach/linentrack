@@ -2977,11 +2977,20 @@ BREEZEWAY_SYNC_INTERVAL_SECONDS = 4 * 60 * 60  # every 4 hours — safety-net re
 BREEZEWAY_WEBHOOK_SECRET = os.environ.get('BREEZEWAY_WEBHOOK_SECRET', '')
 APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://sbrlinens.up.railway.app')
 
-def get_breezeway_token():
+def get_breezeway_token(retries=2):
     """Get a fresh access token. Breezeway access tokens last 24 hours, but
     since this syncs at most every few hours, we just request a brand-new
     token each sync run rather than tracking/refreshing one — far simpler,
-    and nowhere near the auth endpoint's 1-request-per-minute limit."""
+    and nowhere near the auth endpoint's 1-request-per-minute limit under
+    normal operation.
+
+    The one time this DOES get hit: the background sync loop runs
+    immediately on every app startup (see background_breezeway_loop), not
+    just on the 4-hour schedule. Two Railway deploys landing within about a
+    minute of each other — or a deploy landing close to a scheduled run —
+    can trigger two token requests inside that same minute and get a 429.
+    Since that's a genuinely transient collision, retry with a bit over a
+    minute's wait rather than letting the whole sync fail outright."""
     if not BREEZEWAY_CLIENT_ID or not BREEZEWAY_CLIENT_SECRET:
         raise RuntimeError('BREEZEWAY_CLIENT_ID / BREEZEWAY_CLIENT_SECRET not set in Railway variables')
     payload = json.dumps({'client_id': BREEZEWAY_CLIENT_ID, 'client_secret': BREEZEWAY_CLIENT_SECRET}).encode()
@@ -2989,9 +2998,18 @@ def get_breezeway_token():
         f'{BREEZEWAY_BASE}/auth/v1/', data=payload,
         headers={'accept': 'application/json', 'content-type': 'application/json'}, method='POST'
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode())
-    return data['access_token']
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            return data['access_token']
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < retries:
+                print(f"[Breezeway Sync] Auth rate-limited (429) — waiting 65s before retry "
+                      f"{attempt + 1}/{retries}", flush=True)
+                time.sleep(65)
+                continue
+            raise
 
 def breezeway_get(path, token, params=None):
     """GET helper against the Breezeway API — handles the JWT header and
@@ -7301,7 +7319,7 @@ def run_pickup_deadline_check(force=False):
 
     if not still_staged:
         cur.close(); conn.close()
-        return {'checked': len(rows), 'alerted': False, 'reason': 'nothing still staged'}
+        return {'checked': len(still_staged), 'alerted': False, 'reason': 'nothing still staged'}
 
     # Look up Cassie's email dynamically from her staff profile, rather than
     # hardcoding it, so it stays correct if it's ever updated there.
@@ -7327,7 +7345,7 @@ def run_pickup_deadline_check(force=False):
     conn.commit(); cur.close(); conn.close()
     if not cassie_email:
         print(f"[Pickup Deadline Alert] {len(still_staged)} bag(s) still staged, but no email on file for Cassie — nothing sent.", flush=True)
-    return {'checked': len(rows), 'alerted': alert_sent, 'still_staged_count': len(still_staged)}
+    return {'checked': len(still_staged), 'alerted': alert_sent, 'still_staged_count': len(still_staged)}
 
 def background_overdue_loop():
     while True:
