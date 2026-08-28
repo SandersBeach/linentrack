@@ -1513,6 +1513,10 @@ async function renderScan(gen) {
         <button class="btn ${scanState.mode==='out'?'btn-primary':'btn-ghost'}" style="flex:1" onclick="setMode('out')">Stage bags for pickup</button>
         <button class="btn ${scanState.mode==='in'?'btn-blue':'btn-ghost'}" style="flex:1" onclick="setMode('in')">Checking bags back in</button>
       </div>
+      <div style="margin-bottom:12px">
+        <button class="btn ${scanState.mode==='undo'?'btn-danger':'btn-ghost'}" style="width:100%" onclick="setMode('undo')">Undo a mistaken pickup scan</button>
+      </div>
+      <div id="undo-help" style="${scanState.mode==='undo'?'':'display:none'}margin:-6px 0 12px;font-size:12px;color:var(--gray-400)">For a bag scanned "picked up" by mistake — puts it back to staged, still assigned to the same cleaner, without treating it as a return.</div>
       <div id="cleaner-row" style="${scanState.mode==='out'?'':'display:none'}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <label style="margin-bottom:0">Cleaner for this batch</label>
@@ -1552,7 +1556,7 @@ function renderSessionLog() {
   const errors = log.filter(l=>l.error).length;
   let html = `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="card-title" style="margin-bottom:0">This session</div><div style="display:flex;gap:6px"><span class="badge badge-count">${log.length} scanned</span>${errors?`<span class="badge badge-out">${errors} errors</span>`:''}</div></div>`;
   [...log].reverse().forEach(l => {
-    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':'In'}</span></div>`;
+    html += `<div class="row"><div class="row-main"><div class="row-title"><span class="tag">${l.id}</span> · ${l.home}</div><div class="row-sub" style="color:${l.error?'var(--coral)':'var(--gray-400)'}">${l.msg}</div></div><span class="badge ${l.error?'badge-out':l.action==='out'?'badge-out':l.action==='undo'?'badge-count':'badge-in'}">${l.error?'Error':l.action==='out'?'Out':l.action==='undo'?'Undone':'In'}</span></div>`;
   });
   html += '</div>';
   const el = document.getElementById('session-log');
@@ -1581,6 +1585,13 @@ async function processScan() {
       if (r.ok) { const cname = scanState.cleaners.find(c=>c.id==cleaner_id)?.name||''; scanState.sessionLog.push({id, home:data.home, msg:`Staged for ${cname} — awaiting pickup`, error:false, action:'out'}); }
       else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'out'}); }
     } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'out'}); }
+  } else if (scanState.mode === 'undo') {
+    try {
+      const r = await fetch(`/api/bag/${encodeURIComponent(id)}/undo-pickup`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({staff_name: _currentStaffName}) });
+      const data = await r.json();
+      if (r.ok) { scanState.sessionLog.push({id, home:data.home, msg:`Pickup undone — back to staged for ${data.cleaner}`, error:false, action:'undo'}); }
+      else { const br = await fetch('/api/bag/'+encodeURIComponent(id)); const bag = await br.json(); scanState.sessionLog.push({id, home:bag.home_name||'—', msg:data.error, error:true, action:'undo'}); }
+    } catch(e) { scanState.sessionLog.push({id, home:'—', msg:'Connection error', error:true, action:'undo'}); }
   } else {
     try {
       const r = await fetch(`/api/bag/${encodeURIComponent(id)}/checkin`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({notes:'', staff_name: _currentStaffName}) });
