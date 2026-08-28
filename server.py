@@ -2002,6 +2002,34 @@ def pickup_bag(bag_id):
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True,'home':bag['home_name'],'cleaner':cleaner['name']})
 
+@app.route('/api/bag/<path:bag_id>/undo-pickup', methods=['POST'])
+def undo_bag_pickup(bag_id):
+    """Reverses a mistaken pickup scan (status: out → staged). This is NOT
+    the same as checkin() — the bag never actually left the warehouse, so
+    this shouldn't be logged as a return, and the cleaner assignment
+    shouldn't be cleared, since it's still correctly staged for that
+    cleaner's real pickup later. Only checkin() (a genuine return from the
+    field) clears cleaner_id and wipes staging.
+    Used for cases like: a cleaner scans pickup for the wrong day's bags by
+    mistake (e.g. a Sunday clean scanned early) — the bags are still
+    physically sitting in the warehouse, just marked 'out' incorrectly."""
+    data = request.json or {}; staff_name = data.get('staff_name', '').strip()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT b.*,h.name AS home_name,c.name AS cleaner_name FROM bags b JOIN homes h ON h.id=b.home_id LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id=%s", (bag_id.upper(),))
+    bag = cur.fetchone()
+    if not bag: cur.close(); conn.close(); return jsonify({'error': 'Bag not found'}), 404
+    if bag['status'] != 'out':
+        cur.close(); conn.close()
+        return jsonify({'error': f"Bag is currently '{bag['status']}', not 'out' — nothing to undo"}), 400
+    ts = now_central()
+    cur.execute("UPDATE bags SET status='staged',picked_up_at=NULL,overdue_alerted=0 WHERE id=%s", (bag_id.upper(),))
+    cur.execute(
+        "INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,staff_name) VALUES (%s,%s,%s,'Pickup reversed (mistaken scan)',%s,%s)",
+        (bag_id.upper(), bag['home_id'], bag['cleaner_id'], ts, staff_name or None)
+    )
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'home': bag['home_name'], 'cleaner': bag['cleaner_name'] or '—'})
+
 @app.route('/api/bags/pickup-skipped', methods=['GET'])
 def get_pickup_skipped():
     """Recent instances where a bag was checked in without ever being
@@ -5741,6 +5769,16 @@ def compute_pack_schedule(window_start, window_end):
 
     cur.execute("SELECT address, checkout_date FROM pack_cancelled_reservations")
     cancelled_pairs = {(r['address'], r['checkout_date']) for r in cur.fetchall()}
+
+    # For deciding whether an old, unmatched checkout is still a genuine gap
+    # or was already handled some other way: same definition already used by
+    # sync_breezeway_reservations to decide whether a past checkout is safe
+    # to purge — packed on or after the checkout date. Grouped by address so
+    # a mismatch check doesn't need a query per-checkout.
+    cur.execute("SELECT address, pack_date FROM pack_list_status")
+    packed_dates_by_address = {}
+    for r in cur.fetchall():
+        packed_dates_by_address.setdefault(r['address'], []).append(r['pack_date'])
     cur.close(); conn.close()
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
@@ -5791,9 +5829,14 @@ def compute_pack_schedule(window_start, window_end):
                     'cleaner_name': match['cleaner_name'] if match['cleaner_id'] else None,
                     'assigned': bool(match['cleaner_id']),
                 })
-            elif mismatched and (today_dt - checkout).days <= 3:
-                # A clean IS scheduled for this address — it just doesn't line
-                # up with this checkout (e.g. rescheduled to fall before the
+                continue
+
+            nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days)) if mismatched else None
+            already_packed = any(pd >= checkout.isoformat() for pd in packed_dates_by_address.get(address, []))
+            if nearest and abs((nearest[1] - checkout).days) <= 7 and not already_packed:
+                # A clean IS scheduled for this address, close enough in time
+                # that it's very likely meant for THIS checkout but just got
+                # moved a few days off (e.g. rescheduled to fall before the
                 # checkout date, or after the next guest's arrival). Before
                 # this, a case like that vanished from the pack list entirely
                 # with nothing pointing at it, because the old logic only
@@ -5805,16 +5848,22 @@ def compute_pack_schedule(window_start, window_end):
                 # it clears itself the moment the dates are corrected and a
                 # real match is found.
                 #
-                # Guarded to checkouts from the last 3 days or sooner: a
-                # checkout further in the past than that is very likely one
-                # that was already handled outside of what this app tracks
-                # as "packed," and just never got purged from
-                # forecast_reservations (see sync_breezeway_reservations —
-                # past checkouts are kept indefinitely unless a matching
-                # pack_list_status row exists). Comparing a real, current
-                # clean against a stale leftover like that produced false
-                # mismatches that had nothing to do with an actual problem.
-                nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days))
+                # Two guards, both needed:
+                #   - Within 7 days of the checkout: most properties are
+                #     booked weeks ahead, and Breezeway simply hasn't created
+                #     a cleaning task yet for something 3+ weeks out — that's
+                #     normal, not a mismatch. Comparing a far-future checkout
+                #     against whatever OTHER unrelated clean happens to exist
+                #     for that address produced a flood of false positives.
+                #   - Not already packed: a genuinely stale, already-handled
+                #     checkout should stay quiet. This used to be a flat "no
+                #     more than 3 days in the past" cutoff, but that was
+                #     wrong — it silently suppressed real, unresolved gaps
+                #     for any turnover with a longer-than-3-day checkout-to-
+                #     clean gap (e.g. an owner stay with the clean scheduled
+                #     a week later), which is exactly how 369 Spartina went
+                #     unnoticed. Age alone was never the right signal —
+                #     whether it was actually packed is.
                 mismatched_clean, mismatched_date = nearest
                 issues.append({
                     'address': address,
