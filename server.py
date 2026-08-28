@@ -355,6 +355,8 @@ def init_db():
             notes TEXT,
             UNIQUE(address, checkout_date)
         );
+        ALTER TABLE pack_cancelled_reservations ADD COLUMN IF NOT EXISTS possible_rebooking INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE pack_cancelled_reservations ADD COLUMN IF NOT EXISTS possible_rebooking_seen_at TEXT;
         CREATE TABLE IF NOT EXISTS breezeway_properties (
             breezeway_property_id INTEGER PRIMARY KEY,
             address TEXT NOT NULL,
@@ -3203,6 +3205,20 @@ def sync_breezeway_reservations(token):
         except Exception:
             depart_iso = None
         if depart_iso and (address.lower().strip(), depart_iso) in cancelled_pairs:
+            # Breezeway is currently showing this address + checkout as an
+            # active, upcoming reservation — even though it's on file here as
+            # cancelled. That's exactly what a rebooking looks like (a guest
+            # cancels, the same dates get booked again by someone else), and
+            # it's common enough that it shouldn't rely on someone remembering
+            # to check the Cancelled Reservations screen. Flag it so it
+            # surfaces on its own; still doesn't auto-restore, since staff
+            # should confirm it's a real rebooking and not Breezeway just
+            # being slow to reflect a genuine cancellation.
+            cur2.execute(
+                "UPDATE pack_cancelled_reservations SET possible_rebooking=1, possible_rebooking_seen_at=%s "
+                "WHERE LOWER(TRIM(address))=%s AND checkout_date=%s",
+                (now, address.lower().strip(), depart_iso)
+            )
             continue
         def to_mdy(d):
             try: return datetime.strptime(d[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -3224,9 +3240,18 @@ def sync_breezeway_reservations(token):
     return count
 
 def sync_breezeway_cleaner_assignments(token):
-    """Pulls housekeeping tasks per property for the next 10 days, resolves
+    """Pulls housekeeping tasks per property for the next 21 days, resolves
     each task's assignee to a real cleaner via the existing alias/matching
-    system, and upserts into pack_cleaner_assignments."""
+    system, and upserts into pack_cleaner_assignments.
+
+    21 days, not the original 10: a checkout-to-clean gap of a week or more
+    is normal for some bookings (e.g. an owner stay with the clean
+    scheduled well after checkout), and a 10-day window meant a clean
+    scheduled further out than that simply never got synced in at all until
+    it happened to fall inside the shrinking window — during which time the
+    property would show no clean scheduled, with nothing pointing at why.
+    Same number of API calls either way (one per property), just a wider
+    date range on each, so this doesn't add sync load."""
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT breezeway_property_id, address FROM breezeway_properties")
     properties = cur.fetchall()
@@ -3236,7 +3261,7 @@ def sync_breezeway_cleaner_assignments(token):
     aliases = {r['breezeway_name'].lower(): r['cleaner_name'] for r in cur.fetchall()}
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
-    window_end = today_dt + timedelta(days=10)
+    window_end = today_dt + timedelta(days=21)
     date_range = f'{today_dt.isoformat()},{window_end.isoformat()}'
 
     cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -5998,10 +6023,16 @@ def resolve_home_address():
 
 def _find_pack_date_for_checkout(address, checkout_date_iso):
     """Given an address and a checkout (depart) date, find the pack_date
-    that checkout actually maps to (clean date minus 1), if any."""
+    that checkout actually maps to (clean date minus 1), if any. Used to
+    warn before cancelling a reservation that's already been packed — a
+    too-narrow window here means that warning could silently fail to fire
+    for a longer-than-usual checkout-to-clean gap (e.g. an owner stay with
+    the clean scheduled a week or more later), letting someone cancel
+    something already packed with no heads-up at all. 30 days is generous
+    enough to cover that without being an expensive query."""
     checkout_dt = datetime.strptime(checkout_date_iso, '%Y-%m-%d').date()
     window_start = (checkout_dt - timedelta(days=3)).isoformat()
-    window_end = (checkout_dt + timedelta(days=3)).isoformat()
+    window_end = (checkout_dt + timedelta(days=30)).isoformat()
     schedule, _ = compute_pack_schedule(window_start, window_end)
     for pd, entries in schedule.items():
         for e in entries:
@@ -6066,6 +6097,46 @@ def cancel_reservation():
     log_audit('PackListCentral', 'Cancelled reservation', addr_key, performer,
               f'checkout {checkout_date}' + (f' — already packed by {packed_info["packed_by"]}' if packed_info else ''))
     return jsonify({'success': True, 'was_already_packed': bool(packed_info)})
+
+@app.route('/api/pack-list/cancelled-reservations', methods=['GET'])
+def get_cancelled_reservations():
+    """Admin/Manager-only: every cancellation on file. This exists because
+    pack_cancelled_reservations rows are never deleted automatically — a
+    cancellation permanently blocks that exact (address, checkout_date)
+    pair from ever appearing on the pack schedule again, even years later.
+    That's fine for a genuine one-off cancellation, but if a guest cancels
+    and later rebooks the SAME dates, the rebooking would silently vanish
+    with nothing pointing at it — there was previously no way to even see
+    that a cancellation existed, let alone undo it. Sorted most recent
+    first so a fresh cancellation is easy to find and reverse if needed."""
+    pin = str(request.args.get('pin', ''))
+    if not is_manager_or_admin_pin(pin):
+        return jsonify({'error': 'Admin or Manager PIN required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM pack_cancelled_reservations ORDER BY cancelled_at DESC")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/pack-list/cancelled-reservations/<int:cid>', methods=['DELETE'])
+def restore_cancelled_reservation(cid):
+    """Admin/Manager-only: un-cancel — removes the block so this address +
+    checkout_date pair can appear on the pack schedule again if a matching
+    reservation exists (or reappears via the next Breezeway sync)."""
+    data = request.json or {}
+    pin = str(data.get('pin') or '')
+    if not is_manager_or_admin_pin(pin):
+        return jsonify({'error': 'Admin or Manager PIN required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT address, checkout_date FROM pack_cancelled_reservations WHERE id=%s", (cid,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Not found'}), 404
+    cur.execute("DELETE FROM pack_cancelled_reservations WHERE id=%s", (cid,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('PackListCentral', 'Restored cancelled reservation', row['address'], resolve_performer(data), f"checkout {row['checkout_date']}")
+    return jsonify({'success': True})
 
 @app.route('/api/pack-list', methods=['GET'])
 def get_pack_list():
@@ -6326,6 +6397,14 @@ def admin_dashboard():
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
     _, schedule_issues = compute_pack_schedule(today_dt.isoformat(), (today_dt + timedelta(days=14)).isoformat())
     data['scheduling_issues'] = len(schedule_issues)
+
+    # Cancellations where Breezeway is now showing an active reservation for
+    # the exact same address + checkout date — very likely a guest cancelled
+    # and the same dates got rebooked. Never auto-restored (staff should
+    # confirm it's real), but always counted here so it surfaces on its own
+    # rather than depending on someone remembering to check that screen.
+    cur.execute("SELECT COUNT(*) AS c FROM pack_cancelled_reservations WHERE possible_rebooking=1")
+    data['possible_rebookings'] = cur.fetchone()['c']
 
     # Properties with no packing formula, among this week's actual needed properties
     cur.execute("SELECT address FROM pack_list_formula")
