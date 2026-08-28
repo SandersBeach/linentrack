@@ -5557,7 +5557,7 @@ async function renderDailyTasks(gen) {
         <div><label>Laundry bins unpacked</label><input type="number" id="dt-bins-unpacked" value="0" min="0"></div>
         <div><label>Laundry bins out</label><input type="number" id="dt-bins-out" value="0" min="0"></div>
       </div>
-      <button class="btn btn-primary btn-full" onclick="submitDailyLog()">Submit</button>
+      <button class="btn btn-primary btn-full" onclick="submitDailyLog(this)">Submit</button>
     </div>
     <div class="card" style="margin-bottom:1rem;text-align:center">
       <div class="card-title"><i class="ic" data-lucide="package-plus"></i> Pack Amenity Box</div>
@@ -5570,23 +5570,44 @@ async function renderDailyTasks(gen) {
       ${metricCard('Bins out today', t.bins_out, false)}
       ${metricCard('Boxes assembled today', t.boxes_assembled, false)}
     </div>
-    ${userRoles.includes('admin') ? `<div class="card">
+    ${userRoles.includes('admin') ? `<div class="card" style="margin-bottom:1rem">
       <div class="card-title">Today's log entries</div>
       ${data.entries.length ? data.entries.map(e => `<div class="row"><div class="row-main"><div class="row-title">${e.staff_name}</div><div class="row-sub">${e.laundry_bins_received} received · ${e.laundry_bins_unpacked} unpacked · ${e.laundry_bins_out} out · ${e.amenity_boxes_assembled} boxes assembled · ${e.logged_at}</div></div></div>`).join('') : '<div class="empty">No entries logged yet today.</div>'}
+    </div>
+    <div class="card">
+      <div class="card-title">Correct amenity box stock (admin)</div>
+      <div class="row-sub" style="margin-bottom:10px">For fixing mistakes — like a double-tapped submit — without touching the log entries above. Current: ${data.amenity_box_stock}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label>Action</label>
+          <select id="abs-action">
+            <option value="subtract">Subtract</option>
+            <option value="add">Add</option>
+            <option value="set">Set exact count</option>
+          </select>
+        </div>
+        <div><label>Amount</label><input type="number" id="abs-qty" value="0" min="0"></div>
+      </div>
+      <div style="margin-bottom:10px"><label>Note (why)</label><input type="text" id="abs-notes" placeholder="e.g. Kim's submit double-fired, correcting duplicate"></div>
+      <button class="btn btn-primary btn-full" onclick="submitAmenityStockCorrection(this)">Apply correction</button>
     </div>` : ''}`;
   document.getElementById('main-content').innerHTML = html;
 }
 
-async function submitDailyLog() {
+async function submitDailyLog(btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; }
   const laundry_bins_received = document.getElementById('dt-bins-received').value;
   const laundry_bins_unpacked = document.getElementById('dt-bins-unpacked').value;
   const laundry_bins_out = document.getElementById('dt-bins-out').value;
-  const res = await fetch('/api/warehouse-daily-log', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out })
-  });
-  await res.json().catch(() => ({}));
-  showTab('daily_tasks');
+  try {
+    const res = await fetch('/api/warehouse-daily-log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out })
+    });
+    await res.json().catch(() => ({}));
+    showTab('daily_tasks');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function showPackAmenityBoxModal() {
@@ -5604,25 +5625,52 @@ async function showPackAmenityBoxModal() {
     <input type="number" id="pab-count" value="0" min="0">
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="document.getElementById('modal-pack-amenity-box').remove()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAmenityBoxAssembly()">Log boxes</button>
+      <button class="btn btn-primary" onclick="submitAmenityBoxAssembly(this)">Log boxes</button>
     </div>
   </div>`;
   document.body.appendChild(modal);
 }
 
-async function submitAmenityBoxAssembly() {
+async function submitAmenityBoxAssembly(btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Logging...'; }
   const amenity_boxes_assembled = document.getElementById('pab-count').value;
-  const res = await fetch('/api/warehouse-daily-log', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ staff_name: _currentStaffName, amenity_boxes_assembled })
-  });
-  const result = await res.json().catch(() => ({}));
-  document.getElementById('modal-pack-amenity-box')?.remove();
-  if (result.shortfalls && result.shortfalls.length) {
-    const names = result.shortfalls.map(s => s.item).join(', ');
-    notify(`Assembled, but ran short on: ${names} — supply now at 0, restock needed.`, 'error');
+  try {
+    const res = await fetch('/api/warehouse-daily-log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_name: _currentStaffName, amenity_boxes_assembled })
+    });
+    const result = await res.json().catch(() => ({}));
+    document.getElementById('modal-pack-amenity-box')?.remove();
+    if (result.shortfalls && result.shortfalls.length) {
+      const names = result.shortfalls.map(s => s.item).join(', ');
+      notify(`Assembled, but ran short on: ${names} — supply now at 0, restock needed.`, 'error');
+    }
+    showTab('daily_tasks');
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Log boxes'; }
   }
-  showTab('daily_tasks');
+}
+
+async function submitAmenityStockCorrection(btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; }
+  const action = document.getElementById('abs-action').value;
+  const quantity = document.getElementById('abs-qty').value;
+  const notes = document.getElementById('abs-notes').value;
+  try {
+    const res = await fetch('/api/amenity-box-stock/adjust', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, action, quantity, notes })
+    });
+    const result = await res.json().catch(() => ({}));
+    if (result.success) {
+      notify(`Amenity box stock corrected to ${result.new_quantity}.`, 'ok');
+      showTab('daily_tasks');
+    } else {
+      notify(result.error || 'Correction failed', 'error');
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
