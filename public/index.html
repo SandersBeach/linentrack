@@ -864,13 +864,13 @@ let _ordersViewMode = 'pending';
 let _placeOrderItems = [];
 
 const TABS = {
-  warehouse: ['warehouse_home', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
+  warehouse: ['warehouse_home', 'pickup_today', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
   manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
-  admin: ['admin_dashboard', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
   warehouse_home: 'Daily Priorities',
@@ -889,6 +889,7 @@ const TAB_LABELS = {
   forecast: 'Forecast',
   store: 'SBR Store',
   pack_list: 'Pack List',
+  pickup_today: 'To Be Picked Up Today',
   daily_tasks: 'Daily Tasks',
   damage_log: 'Damage Log',
   warehouse_dashboard: 'Dashboard',
@@ -1232,6 +1233,7 @@ const MODULE_NAMES = {
   forecast: 'Forecast',
   store: 'Inventory Counts',
   pack_list: 'Warehouse',
+  pickup_today: 'Warehouse',
   missing_cleans: 'Warehouse',
   daily_tasks: 'Warehouse',
   warehouse_dashboard: 'Warehouse',
@@ -1268,6 +1270,7 @@ function showTab(t) {
     forecast: renderForecast,
     store: renderStore,
     pack_list: renderPackList,
+    pickup_today: renderPickupToday,
     daily_tasks: renderDailyTasks,
     damage_log: renderDamageLog,
     warehouse_dashboard: renderWarehouseDashboard,
@@ -5137,6 +5140,7 @@ function bundlesDayRow(d, isMissed) {
 }
 
 let _bundlesRefreshTimer = null;
+let _pickupTodayRefreshTimer = null;
 
 function renderBundlesBody(data) {
   const totalTowelBags = data.missed.towel_bags_needed + data.days.reduce((s, d) => s + d.towel_bags_needed, 0);
@@ -5197,6 +5201,48 @@ async function renderBundlesNeeded(gen) {
 }
 
 function setBundlesDays(n) { _bundlesDays = n; showTab('bundles_needed'); }
+
+async function renderPickupToday(gen) {
+  const data = await fetch('/api/pickup-today').then(r => r.json());
+  if (_stale(gen)) return;
+  renderPickupTodayBody(data);
+
+  if (_pickupTodayRefreshTimer) clearInterval(_pickupTodayRefreshTimer);
+  _pickupTodayRefreshTimer = setInterval(async () => {
+    if (currentTab !== 'pickup_today') { clearInterval(_pickupTodayRefreshTimer); _pickupTodayRefreshTimer = null; return; }
+    try {
+      const freshData = await fetch('/api/pickup-today').then(r => r.json());
+      renderPickupTodayBody(freshData);
+    } catch (e) { /* silent — next tick will retry */ }
+  }, 30000);
+}
+
+function renderPickupTodayBody(data) {
+  const props = data.properties || [];
+  const fullyGone = props.filter(p => p.all_picked_up).length;
+  let html = `<div style="margin-bottom:0.85rem">
+    <div style="font-family:var(--font-serif);font-size:22px;color:var(--gray-900)">To Be Picked Up Today</div>
+    <div class="eyebrow" style="margin-top:2px">Everything packed for today's clean — ${fullyGone} of ${props.length} properties fully picked up</div>
+  </div>`;
+  if (!props.length) {
+    html += `<div class="empty">Nothing packed for today's clean yet.</div>`;
+  } else {
+    html += props.map(p => `
+      <div class="card" style="margin-bottom:10px${p.all_picked_up ? ';opacity:0.6' : ''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div>
+            <div class="row-title">${p.property_name}</div>
+            <div class="row-sub">${p.cleaner_names.join(', ')} · ${p.picked_up_count} of ${p.total_bags} bag${p.total_bags !== 1 ? 's' : ''} picked up</div>
+          </div>
+          <span class="badge ${p.all_picked_up ? 'badge-ok' : 'badge-out'}">${p.all_picked_up ? 'All picked up' : 'Still here'}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+          ${p.bags.map(b => `<span class="badge ${b.status === 'out' ? 'badge-ok' : 'badge-out'}">${b.bag_id}${b.status === 'out' ? ' — picked up' : ' — still here'}</span>`).join('')}
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('main-content').innerHTML = html;
+}
 
 async function renderMissingCleans(gen) {
   const issues = await fetch('/api/pack-list/missing-cleans').then(r => r.json());
