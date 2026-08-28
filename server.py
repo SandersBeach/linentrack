@@ -5829,6 +5829,16 @@ def compute_pack_schedule(window_start, window_end):
                     'cleaner_name': match['cleaner_name'] if match['cleaner_id'] else None,
                     'assigned': bool(match['cleaner_id']),
                 })
+                # A clean can only ever belong to one checkout. Remove it from
+                # the pool so a LATER checkout for this same address can't
+                # also see it and misreport it as "the nearest mismatched
+                # clean" — that's what happened with 86 Sunset Ridge Ln: the
+                # Sept 7 clean correctly matched the Sept 7 checkout right
+                # here, but without this, the Sept 14 checkout's loop would
+                # still find that same already-used Sept 7 clean, decide it
+                # was the closest available option, and falsely report a
+                # mismatch against a checkout it has nothing to do with.
+                cleans.remove(match)
                 continue
 
             nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days)) if mismatched else None
