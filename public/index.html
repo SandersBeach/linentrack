@@ -5456,13 +5456,17 @@ async function renderDailyTasks(gen) {
     </div>
     <div class="card" style="margin-bottom:1rem">
       <div class="card-title">Log today's numbers</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
         <div><label>Laundry bins received</label><input type="number" id="dt-bins-received" value="0" min="0"></div>
         <div><label>Laundry bins unpacked</label><input type="number" id="dt-bins-unpacked" value="0" min="0"></div>
         <div><label>Laundry bins out</label><input type="number" id="dt-bins-out" value="0" min="0"></div>
-        <div><label>Amenity boxes assembled</label><input type="number" id="dt-boxes-assembled" value="0" min="0"></div>
       </div>
       <button class="btn btn-primary btn-full" onclick="submitDailyLog()">Submit</button>
+    </div>
+    <div class="card" style="margin-bottom:1rem;text-align:center">
+      <div class="card-title"><i class="ic" data-lucide="package-plus"></i> Pack Amenity Box</div>
+      <div class="row-sub" style="margin-bottom:10px">Shows what goes in the box, then log how many you completed</div>
+      <button class="btn btn-primary btn-full" onclick="showPackAmenityBoxModal()">Pack Amenity Box</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1rem">
       ${metricCard('Bins received today', t.bins_received, false)}
@@ -5481,12 +5485,43 @@ async function submitDailyLog() {
   const laundry_bins_received = document.getElementById('dt-bins-received').value;
   const laundry_bins_unpacked = document.getElementById('dt-bins-unpacked').value;
   const laundry_bins_out = document.getElementById('dt-bins-out').value;
-  const amenity_boxes_assembled = document.getElementById('dt-boxes-assembled').value;
   const res = await fetch('/api/warehouse-daily-log', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out, amenity_boxes_assembled })
+    body: JSON.stringify({ staff_name: _currentStaffName, laundry_bins_received, laundry_bins_unpacked, laundry_bins_out })
+  });
+  await res.json().catch(() => ({}));
+  showTab('daily_tasks');
+}
+
+async function showPackAmenityBoxModal() {
+  const recipe = await fetch('/api/amenity-box-recipe').then(r => r.json());
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay'; modal.id = 'modal-pack-amenity-box';
+  modal.innerHTML = `<div class="modal-box" style="max-width:420px">
+    <h3>Pack Amenity Box</h3>
+    <div class="row-sub" style="margin-bottom:10px">Goes in each box:</div>
+    <ul style="margin:0 0 12px 1.1rem;padding:0;line-height:1.7">
+      ${recipe.deducted.map(i => `<li>${i.qty} ${i.name}</li>`).join('')}
+      ${recipe.reminders.map(i => `<li>${i.qty} ${i.name}</li>`).join('')}
+    </ul>
+    <label>How many boxes did you complete?</label>
+    <input type="number" id="pab-count" value="0" min="0">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-pack-amenity-box').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAmenityBoxAssembly()">Log boxes</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitAmenityBoxAssembly() {
+  const amenity_boxes_assembled = document.getElementById('pab-count').value;
+  const res = await fetch('/api/warehouse-daily-log', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ staff_name: _currentStaffName, amenity_boxes_assembled })
   });
   const result = await res.json().catch(() => ({}));
+  document.getElementById('modal-pack-amenity-box')?.remove();
   if (result.shortfalls && result.shortfalls.length) {
     const names = result.shortfalls.map(s => s.item).join(', ');
     notify(`Assembled, but ran short on: ${names} — supply now at 0, restock needed.`, 'error');
@@ -6254,22 +6289,38 @@ async function renderPackEmergency(gen) {
         ${homeOptions}
       </select>
       <label>Notes for Kim &amp; April</label><input id="pe-notes" placeholder="Optional">
-      <button class="btn btn-danger" style="width:100%;margin-top:10px" onclick="submitPackEmergency()"><i class="ic" data-lucide="zap"></i> Send alert</button>
+      <button class="btn btn-danger" id="pe-submit-btn" style="width:100%;margin-top:10px" onclick="submitPackEmergency()"><i class="ic" data-lucide="zap"></i> Send alert</button>
     </div>
     <div class="card"><div class="card-title">This date's adds (${rows.length})</div>
-    ${rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title"><i class="ic" data-lucide="zap"></i> ${r.address}</div><div class="row-sub">${r.added_by} · ${r.added_at}${r.notes ? ' · ' + r.notes : ''} · Acked: ${r.acked_by.length ? r.acked_by.join(', ') : 'Pending'}</div></div></div>`).join('') : '<div class="empty">No last-minute adds for this date.</div>'}
+    ${rows.length ? rows.map(r => `<div class="row"><div class="row-main"><div class="row-title"><i class="ic" data-lucide="zap"></i> ${r.address}</div><div class="row-sub">${r.added_by} · ${r.added_at}${r.notes ? ' · ' + r.notes : ''} · Acked: ${r.acked_by.length ? r.acked_by.join(', ') : 'Pending'}</div></div><button class="btn btn-ghost btn-sm" onclick="deletePackEmergency(${r.id},'${r.address.replace(/'/g,"\\'")}')">Delete</button></div>`).join('') : '<div class="empty">No last-minute adds for this date.</div>'}
     </div>`;
 }
 async function submitPackEmergency() {
   const address = document.getElementById('pe-address').value.trim();
   const notes = document.getElementById('pe-notes').value.trim();
   if (!address) { notify('Select a property'); return; }
-  const res = await fetch('/api/pack-list/emergency', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, notes, pack_date: packListState.date, added_by: _currentStaffName })
+  const btn = document.getElementById('pe-submit-btn');
+  btn.disabled = true;  // guards against a double-click creating two identical adds
+  try {
+    const res = await fetch('/api/pack-list/emergency', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, notes, pack_date: packListState.date, added_by: _currentStaffName })
+    });
+    const data = await res.json();
+    if (!res.ok) { notify(data.error || 'Error'); btn.disabled = false; return; }
+    showTab('pack_emergency');
+  } catch (e) {
+    btn.disabled = false;
+  }
+}
+
+async function deletePackEmergency(eid, address) {
+  const ok = await confirmModal(`Remove the last-minute add for ${address}?`, { confirmLabel: 'Remove', danger: true });
+  if (!ok) return;
+  await fetch(`/api/pack-list/emergency/${eid}`, {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ staff_name: _currentStaffName })
   });
-  const data = await res.json();
-  if (!res.ok) { notify(data.error || 'Error'); return; }
   showTab('pack_emergency');
 }
 
