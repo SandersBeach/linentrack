@@ -867,10 +867,10 @@ const TABS = {
   warehouse: ['warehouse_home', 'pickup_today', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
-  manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency'],
+  manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency', 'cancelled_reservations'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
-  admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
+  admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'cancelled_reservations', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
   warehouse_home: 'Daily Priorities',
@@ -890,6 +890,7 @@ const TAB_LABELS = {
   store: 'SBR Store',
   pack_list: 'Pack List',
   pickup_today: 'To Be Picked Up Today',
+  cancelled_reservations: 'Cancelled Reservations',
   daily_tasks: 'Daily Tasks',
   damage_log: 'Damage Log',
   warehouse_dashboard: 'Dashboard',
@@ -1234,6 +1235,7 @@ const MODULE_NAMES = {
   store: 'Inventory Counts',
   pack_list: 'Warehouse',
   pickup_today: 'Warehouse',
+  cancelled_reservations: 'Warehouse',
   missing_cleans: 'Warehouse',
   daily_tasks: 'Warehouse',
   warehouse_dashboard: 'Warehouse',
@@ -1271,6 +1273,7 @@ function showTab(t) {
     store: renderStore,
     pack_list: renderPackList,
     pickup_today: renderPickupToday,
+    cancelled_reservations: renderCancelledReservations,
     daily_tasks: renderDailyTasks,
     damage_log: renderDamageLog,
     warehouse_dashboard: renderWarehouseDashboard,
@@ -1379,6 +1382,7 @@ async function renderWarehouseHome(gen, opts) {
   if (shortages.length) problems.push(`${shortages.length} packed item${shortages.length === 1 ? '' : 's'} short`);
   if (checklistRemaining) problems.push(`${checklistRemaining} checklist item${checklistRemaining === 1 ? '' : 's'} left`);
   if (isAdmin && adminData && adminData.scheduling_issues) problems.push(`${adminData.scheduling_issues} scheduling issue${adminData.scheduling_issues === 1 ? '' : 's'} to review`);
+  if (isAdmin && adminData && adminData.possible_rebookings) problems.push(`${adminData.possible_rebookings} possible rebooking${adminData.possible_rebookings === 1 ? '' : 's'} on cancelled reservations`);
   const headline = problems.length
     ? problems.join(', ').replace(/, ([^,]*)$/, ' and $1')
     : 'Nothing needs your attention right now.';
@@ -1450,6 +1454,7 @@ async function renderWarehouseHome(gen, opts) {
       ${tile('', 'Low stock', adminData.low_stock_count || 0, (adminData.low_stock_count || 0) > 0 ? 'At or below reorder point' : 'Everything above reorder point', (adminData.low_stock_count || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "_hkAutoOpenLowStock=true;showTab('amenities_inventory')")}
       ${tile('', 'Open flags', adminData.unresolved_flags || 0, (adminData.unresolved_flags || 0) > 0 ? 'Reported by staff, unresolved' : 'Nothing reported', (adminData.unresolved_flags || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('pack_flags')")}
       ${tile('', 'Scheduling issues', adminData.scheduling_issues || 0, (adminData.scheduling_issues || 0) > 0 ? 'Missing or mismatched cleans' : 'Nothing to review', (adminData.scheduling_issues || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('missing_cleans')")}
+      ${tile('', 'Possible rebookings', adminData.possible_rebookings || 0, (adminData.possible_rebookings || 0) > 0 ? 'Cancelled, but Breezeway shows active' : 'Nothing to review', (adminData.possible_rebookings || 0) > 0 ? 'var(--coral-dark)' : 'var(--teal-dark)', "showTab('cancelled_reservations')")}
     </div>` : ''}
     <div class="card" style="margin-bottom:2rem">
       <div class="card-title">Notes for the next shift</div>
@@ -5242,6 +5247,40 @@ function renderPickupTodayBody(data) {
       </div>`).join('');
   }
   document.getElementById('main-content').innerHTML = html;
+}
+
+async function renderCancelledReservations(gen) {
+  const rows = await fetch(`/api/pack-list/cancelled-reservations?pin=${encodeURIComponent(_currentPin)}`).then(r => r.json());
+  if (_stale(gen)) return;
+  let html = `<div style="margin-bottom:0.85rem">
+    <div style="font-family:var(--font-serif);font-size:22px;color:var(--gray-900)">Cancelled Reservations</div>
+    <div class="eyebrow" style="margin-top:2px">Once cancelled, this exact address + checkout date is blocked from the pack schedule forever — even if the same dates get rebooked later. Restore one here if that happens.</div>
+  </div>`;
+  if (!rows.length || rows.error) {
+    html += `<div class="empty">No cancelled reservations on file.</div>`;
+  } else {
+    const sorted = [...rows].sort((a, b) => (b.possible_rebooking || 0) - (a.possible_rebooking || 0));
+    html += sorted.map(r => `
+      <div class="card" style="margin-bottom:10px${r.possible_rebooking ? ';background:var(--coral-light);border-color:var(--coral)' : ''}">
+        ${r.possible_rebooking ? `<div class="row-sub" style="font-weight:600;color:var(--coral-dark);margin-bottom:4px">Possible rebooking — Breezeway currently shows an active reservation for this exact address and checkout date</div>` : ''}
+        <div class="row-title">${r.address}</div>
+        <div class="row-sub">Checkout: ${humanDate(r.checkout_date)} · Cancelled by ${r.cancelled_by} on ${r.cancelled_at}${r.notes ? ' · ' + r.notes : ''}</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="restoreCancelledReservation(${r.id},'${(r.address||'').replace(/'/g,"\\'")}')">Restore (un-cancel)</button>
+      </div>`).join('');
+  }
+  document.getElementById('main-content').innerHTML = html;
+}
+
+async function restoreCancelledReservation(id, address) {
+  const ok = await confirmModal(`Restore this cancellation for ${address}? It'll be eligible to appear on the pack schedule again.`, { confirmLabel: 'Restore' });
+  if (!ok) return;
+  const res = await fetch(`/api/pack-list/cancelled-reservations/${id}`, {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { notify(data.error || 'Could not restore this'); return; }
+  showTab('cancelled_reservations');
 }
 
 async function renderMissingCleans(gen) {
