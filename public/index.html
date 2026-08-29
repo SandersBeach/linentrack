@@ -5303,11 +5303,16 @@ async function renderMissingCleans(gen) {
         <div class="row-sub" style="margin-top:4px;font-style:italic">Fix the checkout or clean date in Breezeway — this clears itself automatically once they line up.</div>
       </div>`;
       }
+      // Addresses can contain literal quote characters (e.g. Steve "Bay House"),
+      // which would otherwise break the double-quoted onclick attribute (HTML)
+      // and/or the single-quoted string argument (JS) it wraps. Escape both, same
+      // fix already applied to the pack-list cards themselves (packCard).
+      const addrJs = (i.address || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
       return `
       <div class="card" style="margin-bottom:10px;background:var(--coral-light);border-color:var(--coral)">
         <div class="row-title">${i.address}</div>
         <div class="row-sub">Checkout: ${humanDate(i.checkout_date)} · Next arrival: ${humanDate(i.next_arrival_date)} (${i.days_until_arrival} day${i.days_until_arrival !== 1 ? 's' : ''} away)</div>
-        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="ackMissingClean('${i.address}','${i.next_arrival_date}')">Reviewed — dismiss</button>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="ackMissingClean('${addrJs}','${i.next_arrival_date}')">Reviewed — dismiss</button>
       </div>`;
     }).join('');
   }
@@ -6638,13 +6643,18 @@ function renderManageFormulasList() {
   const q = (document.getElementById('mf-search')?.value || '').toLowerCase().trim();
   const formulas = q ? _allFormulas.filter(f => f.property_name.toLowerCase().includes(q)) : _allFormulas;
   const missing = q ? _homesWithoutFormula.filter(h => h.name.toLowerCase().includes(q)) : _homesWithoutFormula;
+  // Addresses/names can contain literal quote characters (e.g. Steve "Bay House"),
+  // which would otherwise break the double-quoted onclick attribute (HTML)
+  // and/or the single-quoted string argument (JS) it wraps. Escape both, same
+  // fix already applied to the pack-list cards themselves (packCard).
+  const escJs = (s) => (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   let html = '';
   if (missing.length) {
     html += `<div style="font-size:12px;font-weight:600;color:var(--coral-dark);margin:10px 0 4px">No formula yet (${missing.length})</div>`;
-    html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${h.name}')">+ Add</button></div>`).join('');
+    html += missing.map(h => `<div class="row"><div class="row-main"><div class="row-title">${h.name}</div></div><button class="btn btn-primary btn-sm" onclick="openAddFormulaModal('${escJs(h.name)}')">+ Add</button></div>`).join('');
   }
   html += `<div style="font-size:12px;font-weight:600;color:var(--gray-700);margin:14px 0 4px">Has a formula (${formulas.length})</div>`;
-  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${formulaSummaryLine(f)}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${f.address}')"><i class="ic" data-lucide="pencil"></i> Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
+  html += formulas.length ? formulas.map(f => `<div class="row"><div class="row-main"><div class="row-title">${f.property_name}</div><div class="row-sub">${formulaSummaryLine(f)}</div></div><button class="btn btn-ghost btn-sm" onclick="openEditFormulaModal('${escJs(f.address)}')"><i class="ic" data-lucide="pencil"></i> Edit</button></div>`).join('') : '<div class="empty">No matches.</div>';
   el.innerHTML = html;
 }
 
