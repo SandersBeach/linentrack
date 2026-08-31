@@ -233,6 +233,7 @@ def init_db():
             created_at TEXT NOT NULL, qr_code TEXT
         );
         ALTER TABLE supply_items ADD COLUMN IF NOT EXISTS low_stock_alerted INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE supply_items ADD COLUMN IF NOT EXISTS alert_on_low_stock INTEGER NOT NULL DEFAULT 1;
         CREATE TABLE IF NOT EXISTS supply_transactions (
             id SERIAL PRIMARY KEY, supply_id INTEGER NOT NULL REFERENCES supply_items(id),
             action TEXT NOT NULL, quantity INTEGER NOT NULL, quantity_after INTEGER NOT NULL,
@@ -2680,10 +2681,11 @@ def add_supply():
     name=data.get('name','').strip(); category=data.get('category','General').strip()
     quantity=int(data.get('quantity',0)); threshold=int(data.get('low_stock_threshold',5))
     unit=data.get('unit','units').strip()
+    alert_on_low_stock=1 if data.get('alert_on_low_stock',True) else 0
     if not name: return jsonify({'error':'Name required'}),400
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        cur.execute("INSERT INTO supply_items (name,category,quantity,low_stock_threshold,unit,created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central()))
+        cur.execute("INSERT INTO supply_items (name,category,quantity,low_stock_threshold,unit,created_at,alert_on_low_stock) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",(name,category,quantity,threshold,unit,now_central(),alert_on_low_stock))
         sid=cur.fetchone()['id']; qr=make_supply_qr(sid)
         cur.execute("UPDATE supply_items SET qr_code=%s WHERE id=%s",(qr,sid))
         conn.commit(); cur.close(); conn.close()
@@ -2697,7 +2699,7 @@ def update_supply(sid):
     data=request.json or {}
     if not is_admin_pin(str(data.get('pin',''))): return jsonify({'error':'Admin PIN required'}),403
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("UPDATE supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),sid))
+    cur.execute("UPDATE supply_items SET name=%s,category=%s,low_stock_threshold=%s,unit=%s,alert_on_low_stock=%s WHERE id=%s",(data.get('name'),data.get('category'),int(data.get('low_stock_threshold',5)),data.get('unit','units'),1 if data.get('alert_on_low_stock',True) else 0,sid))
     cur.execute("SELECT qr_code FROM supply_items WHERE id=%s",(sid,)); row=cur.fetchone()
     if row and not row['qr_code']:
         qr = make_supply_qr(sid)
@@ -2730,9 +2732,9 @@ def supply_transaction(sid):
     cur.execute("UPDATE supply_items SET quantity=%s WHERE id=%s",(new_qty,sid))
     cur.execute("INSERT INTO supply_transactions (supply_id,action,quantity,quantity_after,performed_by,timestamp,notes) VALUES (%s,%s,%s,%s,%s,%s,%s)",(sid,action,qty,new_qty,performed,now_central(),notes))
     conn.commit(); alert_sent=False
-    if should_send_low_stock_alert(conn, cur, 'supply_items', item, new_qty):
+    if item.get('alert_on_low_stock', 1) and should_send_low_stock_alert(conn, cur, 'supply_items', item, new_qty):
         body=f"Low stock alert for '{item['name']}'.\nCurrent qty: {new_qty} {item['unit']}\nThreshold: {item['low_stock_threshold']}"
-        alert_sent=send_email(f"LOW STOCK: {item['name']}",body,to=SARAH_EMAIL)
+        alert_sent=send_email(f"LOW STOCK: {item['name']}",body,to=JESSICA_EMAIL)
     cur.close(); conn.close(); return jsonify({'success':True,'new_quantity':new_qty,'alert_sent':alert_sent})
 
 @app.route('/api/pickup-qr', methods=['GET'])
@@ -3889,6 +3891,7 @@ def reveal_staff_pins():
 # used to backfill staff_members.email so overdue-loan alerts keep working
 # once StoreCentral switches to login-based attribution.
 KNOWN_STAFF_EMAILS = {
+    "Jessica": "jessica@sandersbeachrentals.com",
     "Laura Durrance": "laura@sandersbeachrentals.com",
     "Stephanie Pierantoni": "stephanie@sandersbeachrentals.com",
     "Alexis Rains": "alexis@sandersbeachrentals.com",
@@ -4552,6 +4555,7 @@ def seed_store():
 
 SARAH_EMAIL = 'sarahelizabeth@sandersbeachrentals.com'
 JENNIFER_EMAIL = 'jennifer.sims@sandersbeachrentals.com'  # low-stock alert recipient for Kitchen Amenity Boxes specifically, instead of Sarah
+JESSICA_EMAIL = 'jessica@sandersbeachrentals.com'  # low-stock alert recipient for maintenance supplies (SupplyCentral / supply_items), instead of Sarah
 KRISTIN_EMAIL = 'kristin@sandersbeachrentals.com'  # inventory count notes ("new item to add", etc.) go straight to Kristin
 
 # Linen items tracked in the daily Damage Log. Sheet sets are broken out per
