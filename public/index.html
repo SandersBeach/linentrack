@@ -538,6 +538,10 @@
     <input id="supply-unit" type="text" placeholder="e.g. packs, bulbs, rolls">
     <label>Low-stock alert below</label>
     <input id="supply-threshold" type="number" min="0" value="5">
+    <div id="supply-alert-row" style="margin:6px 0 10px;display:flex;align-items:center;gap:8px">
+      <input id="supply-alert-toggle" type="checkbox" style="width:auto" checked>
+      <label for="supply-alert-toggle" style="margin:0;font-weight:normal;font-size:13px">Send low-stock alert emails for this item</label>
+    </div>
     <div id="supply-qty-row">
       <label>Starting quantity</label>
       <input id="supply-init-qty" type="number" min="0" value="0">
@@ -2732,7 +2736,7 @@ function renderSupplyCards() {
       <div class="supply-cat">${item.category}</div>
       <div class="supply-qty" style="color:${low?'var(--coral-dark)':'var(--gray-900)'}">${item.quantity}</div>
       <div class="supply-unit">${item.unit}</div>
-      <div class="supply-threshold">Alert below ${item.low_stock_threshold}</div>
+      <div class="supply-threshold">${item.alert_on_low_stock===0||item.alert_on_low_stock===false ? 'No low-stock alerts (ordered per-home)' : `Alert below ${item.low_stock_threshold}`}</div>
       <div class="supply-actions">
         <button class="btn btn-danger" onclick="showSupplyTxModal(${item.id},'take')"><i class="ic" data-lucide="arrow-up-from-line"></i> Take</button>
         <button class="btn btn-primary" style="background:var(--green);border-color:var(--green-dark);color:var(--green-dark)" onclick="showSupplyTxModal(${item.id},'restock')"><i class="ic" data-lucide="arrow-down-to-line"></i> Restock</button>
@@ -2778,6 +2782,8 @@ function showAddSupplyModal() {
   document.getElementById('supply-threshold').value = 5;
   document.getElementById('supply-init-qty').value = 0;
   document.getElementById('supply-qty-row').style.display = 'block';
+  document.getElementById('supply-alert-row').style.display = 'flex';
+  document.getElementById('supply-alert-toggle').checked = true;
   const cats = [...new Set(_supplies.map(s=>s.category))].sort();
   document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('modal-supply-item').dataset.target = 'supply';
@@ -2792,6 +2798,8 @@ function showEditSupplyModal(id) {
   document.getElementById('supply-unit').value = item.unit;
   document.getElementById('supply-threshold').value = item.low_stock_threshold;
   document.getElementById('supply-qty-row').style.display = 'none';
+  document.getElementById('supply-alert-row').style.display = 'flex';
+  document.getElementById('supply-alert-toggle').checked = item.alert_on_low_stock !== 0 && item.alert_on_low_stock !== false;
   document.getElementById('modal-supply-item').dataset.target = 'supply';
   document.getElementById('modal-supply-item').style.display = 'flex';
 }
@@ -2801,6 +2809,7 @@ async function saveSupplyItem() {
   const target = document.getElementById('modal-supply-item').dataset.target || 'supply';
   const endpoint = target === 'hk' ? '/api/hk-supplies' : '/api/supplies';
   const body = { pin:_currentPin, name:document.getElementById('supply-name').value.trim(), category:document.getElementById('supply-category').value.trim()||'General', unit:document.getElementById('supply-unit').value.trim()||'units', low_stock_threshold:parseInt(document.getElementById('supply-threshold').value), quantity:parseInt(document.getElementById('supply-init-qty').value||'0') };
+  if (target === 'supply') body.alert_on_low_stock = document.getElementById('supply-alert-toggle').checked;
   if (!body.name) { notify('Please enter an item name.'); return; }
   const res = editId
     ? await fetch(`${endpoint}/${editId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
@@ -3656,6 +3665,7 @@ function showAddHKModal() {
   document.getElementById('supply-threshold').value = 5;
   document.getElementById('supply-init-qty').value = 0;
   document.getElementById('supply-qty-row').style.display = 'block';
+  document.getElementById('supply-alert-row').style.display = 'none';
   const cats = [...new Set(_hkSupplies.map(s=>s.category))].sort();
   document.getElementById('supply-cat-list').innerHTML = cats.map(c=>`<option value="${c}">`).join('');
   document.getElementById('modal-supply-item').dataset.target = 'hk';
@@ -3670,6 +3680,7 @@ function showEditHKModal(id) {
   document.getElementById('supply-unit').value = item.unit;
   document.getElementById('supply-threshold').value = item.low_stock_threshold;
   document.getElementById('supply-qty-row').style.display = 'none';
+  document.getElementById('supply-alert-row').style.display = 'none';
   document.getElementById('modal-supply-item').dataset.target = 'hk';
   document.getElementById('modal-supply-item').style.display = 'flex';
 }
