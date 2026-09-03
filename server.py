@@ -5808,35 +5808,17 @@ def compute_pack_schedule(window_start, window_end):
     packed_dates_by_address = {}
     for r in cur.fetchall():
         packed_dates_by_address.setdefault(r['address'], []).append(r['pack_date'])
-
-    # Same idea, for the OTHER way a pack date gets handled: a manual
-    # Emergency Add. That table doesn't touch pack_list_status at all, so an
-    # address+date already emergency-added needs its own check — otherwise
-    # the orphan-clean fallback below has no way to know it was already
-    # taken care of and re-surfaces it as if it were new.
-    cur.execute("SELECT LOWER(TRIM(address)) AS address, pack_date FROM pack_emergency_adds")
-    emergency_pairs = {(r['address'], r['pack_date']) for r in cur.fetchall()}
     cur.close(); conn.close()
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
-    window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
-    window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
     schedule = {}
     issues = []
     clean_address_keys = list(cleans_by_address.keys())
-    # Tracks which (address_key, assignment_date) cleans have already been
-    # accounted for by the checkout-matching loop below — either landed a
-    # real match, or got claimed as the "nearest" candidate for a
-    # date_mismatch issue — so the general orphan-clean fallback after the
-    # loop knows not to touch them again.
-    matched_keys = set()
-    flagged_keys = set()
 
     for address, stays in by_address.items():
         checkouts = sorted(set(s['depart_d'] for s in stays))
         checkouts = [c for c in checkouts if (address, c.isoformat()) not in cancelled_pairs]
         arrivals = sorted(set(s['arrive_d'] for s in stays))
-        source_key = address
         cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
 
         # Nothing at all under this exact address string in the cleaning-task
@@ -5852,7 +5834,6 @@ def compute_pack_schedule(window_start, window_end):
             variant = fuzzy_match_address(address, clean_address_keys)
             if variant and variant != address:
                 cleans = sorted(cleans_by_address[variant], key=lambda c: c['assignment_date'])
-                source_key = variant
 
         for checkout in checkouts:
             next_arrival = next((a for a in arrivals if a > checkout), None)
@@ -5887,7 +5868,6 @@ def compute_pack_schedule(window_start, window_end):
                 # was the closest available option, and falsely report a
                 # mismatch against a checkout it has nothing to do with.
                 cleans.remove(match)
-                matched_keys.add((source_key, match['assignment_date']))
                 continue
 
             nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days)) if mismatched else None
@@ -5933,7 +5913,6 @@ def compute_pack_schedule(window_start, window_end):
                     'mismatched_clean_date': mismatched_date.isoformat(),
                     'mismatched_cleaner_name': mismatched_clean['cleaner_name'],
                 })
-                flagged_keys.add((source_key, mismatched_clean['assignment_date']))
             elif next_arrival:
                 days_until = (next_arrival - today_dt).days
                 if days_until <= 2 and (address, next_arrival.isoformat()) not in acked:
@@ -5945,71 +5924,14 @@ def compute_pack_schedule(window_start, window_end):
                         'issue_type': 'no_clean_scheduled',
                     })
 
-    # General orphan-clean fallback: any cleaning task that never matched a
-    # checkout — a construction block with no bookable reservation behind
-    # it (e.g. 22 Flatwood, Sept 2026), an owner stay Breezeway never fed
-    # into the reservation pull, a mid-stay clean on a long reservation that
-    # falls nowhere near that stay's actual checkout — still needs a bag
-    # packed. Previously these vanished with nothing to review: not on the
-    # pack list, not flagged as an issue, only recoverable via a manual
-    # Emergency Add. Rather than silently dropping them, derive pack_date
-    # straight from the task's own scheduled date, same principle as the
-    # long-standing Bay House fallback below, just generalized to any
-    # address instead of one hardcoded name.
-    #
-    # Skipped deliberately:
-    #   - cleans already consumed as a real checkout match (matched_keys)
-    #   - cleans already claimed as the "nearest" candidate for a
-    #     date_mismatch issue (flagged_keys) — that's a likely-real
-    #     scheduling conflict a person should look at, not something to
-    #     silently auto-schedule out from under the review queue
-    #   - TASK_ONLY_PROPERTIES addresses, handled by their own dedicated
-    #     block right below with proper address-name translation
-    for addr_key, clean_rows in cleans_by_address.items():
-        if addr_key in TASK_ONLY_PROPERTIES:
-            continue
-        for c in clean_rows:
-            key = (addr_key, c['assignment_date'])
-            if key in matched_keys or key in flagged_keys:
-                continue
-            c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
-            if not (window_start_dt <= c_date <= window_end_dt):
-                continue
-            pack_date = (c_date - timedelta(days=1)).isoformat()
-            # Same guard the checkout-matching loop already relies on: skip
-            # anything actually handled already, whether through the normal
-            # pack flow (pack_list_status) or a manual Emergency Add — not a
-            # hard age cutoff. This is what was missing the first time: a
-            # 30-day lookback window (used by the week view) combined with
-            # cleaning-task rows that never get pruned meant every old,
-            # already-resolved task with no reservation left to re-match
-            # against came back as if it were new.
-            if pack_date in packed_dates_by_address.get(addr_key, []):
-                continue
-            if (addr_key, pack_date) in emergency_pairs:
-                continue
-            already_there = any(
-                e['address'] == addr_key and e.get('clean_date') == c['assignment_date']
-                for e in schedule.get(pack_date, [])
-            )
-            if already_there:
-                continue
-            schedule.setdefault(pack_date, []).append({
-                'address': addr_key,
-                'checkout_date': None,
-                'clean_date': c['assignment_date'],
-                'cleaner_id': c['cleaner_id'],
-                'cleaner_name': c['cleaner_name'] if c['cleaner_id'] else None,
-                'assigned': bool(c['cleaner_id']),
-            })
-
     # Task-only fallback: Bay House (262 WRM Cir) is used by SBR Team &
     # Facilities, not booked guests, so it has Breezeway cleaning tasks but
     # never a reservation to anchor a pack_date to via the loop above. For
     # this address specifically, derive pack_date straight from the task's
-    # own scheduled clean date instead — kept as its own block since it
-    # needs the bw_address -> canonical_address name translation that the
-    # general fallback above doesn't do.
+    # own scheduled clean date instead. Scoped to just this address for
+    # now — not a general rule for every task-only property.
+    window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
+    window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
     for bw_address, canonical_address in TASK_ONLY_PROPERTIES.items():
         if bw_address in by_address or canonical_address in by_address:
             continue  # has real reservations now — normal path handles it
