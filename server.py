@@ -5808,6 +5808,14 @@ def compute_pack_schedule(window_start, window_end):
     packed_dates_by_address = {}
     for r in cur.fetchall():
         packed_dates_by_address.setdefault(r['address'], []).append(r['pack_date'])
+
+    # Same idea, for the OTHER way a pack date gets handled: a manual
+    # Emergency Add. That table doesn't touch pack_list_status at all, so an
+    # address+date already emergency-added needs its own check — otherwise
+    # the orphan-clean fallback below has no way to know it was already
+    # taken care of and re-surfaces it as if it were new.
+    cur.execute("SELECT LOWER(TRIM(address)) AS address, pack_date FROM pack_emergency_adds")
+    emergency_pairs = {(r['address'], r['pack_date']) for r in cur.fetchall()}
     cur.close(); conn.close()
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
@@ -5968,6 +5976,18 @@ def compute_pack_schedule(window_start, window_end):
             if not (window_start_dt <= c_date <= window_end_dt):
                 continue
             pack_date = (c_date - timedelta(days=1)).isoformat()
+            # Same guard the checkout-matching loop already relies on: skip
+            # anything actually handled already, whether through the normal
+            # pack flow (pack_list_status) or a manual Emergency Add — not a
+            # hard age cutoff. This is what was missing the first time: a
+            # 30-day lookback window (used by the week view) combined with
+            # cleaning-task rows that never get pruned meant every old,
+            # already-resolved task with no reservation left to re-match
+            # against came back as if it were new.
+            if pack_date in packed_dates_by_address.get(addr_key, []):
+                continue
+            if (addr_key, pack_date) in emergency_pairs:
+                continue
             already_there = any(
                 e['address'] == addr_key and e.get('clean_date') == c['assignment_date']
                 for e in schedule.get(pack_date, [])
