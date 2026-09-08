@@ -2002,6 +2002,23 @@ def pickup_bag(bag_id):
     ts=now_central()
     cur.execute("UPDATE bags SET status='out',picked_up_at=%s,overdue_alerted=0 WHERE id=%s",(ts,bag_id.upper()))
     cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp) VALUES (%s,%s,%s,'Picked up',%s)",(bag_id.upper(),bag['home_id'],cleaner['id'],ts))
+    # Once a bag is out the door, it can't be topped off anymore — if it
+    # shipped short an item, that's just how it went out. "Packed Bag Short"
+    # is for the window between packing and pickup where a top-off is still
+    # possible; past that, an entry sitting there is just asking for
+    # something that will never happen. Clear whatever's open for whichever
+    # pack date staged this specific bag, same lookup get_staged_bags already
+    # uses to find a bag's pack_date from its staged_bag_ids record.
+    cur.execute("""SELECT pls.pack_date FROM pack_list_status pls
+                   WHERE pls.cleaner_id=%s
+                     AND %s = ANY(string_to_array(pls.staged_bag_ids, ','))
+                   ORDER BY pls.pack_date DESC LIMIT 1""", (cleaner['id'], bag_id.upper()))
+    pd_row = cur.fetchone()
+    if pd_row:
+        cur.execute(
+            "UPDATE pack_bag_shortages SET resolved=1 WHERE address=%s AND pack_date=%s AND resolved=0",
+            (bag['home_name'].lower().strip(), pd_row['pack_date'])
+        )
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True,'home':bag['home_name'],'cleaner':cleaner['name']})
 
@@ -5808,17 +5825,35 @@ def compute_pack_schedule(window_start, window_end):
     packed_dates_by_address = {}
     for r in cur.fetchall():
         packed_dates_by_address.setdefault(r['address'], []).append(r['pack_date'])
+
+    # Same idea, for the OTHER way a pack date gets handled: a manual
+    # Emergency Add. That table doesn't touch pack_list_status at all, so an
+    # address+date already emergency-added needs its own check — otherwise
+    # the orphan-clean fallback below has no way to know it was already
+    # taken care of and re-surfaces it as if it were new.
+    cur.execute("SELECT LOWER(TRIM(address)) AS address, pack_date FROM pack_emergency_adds")
+    emergency_pairs = {(r['address'], r['pack_date']) for r in cur.fetchall()}
     cur.close(); conn.close()
 
     today_dt = datetime.strptime(today_central(), '%Y-%m-%d').date()
+    window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
+    window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
     schedule = {}
     issues = []
     clean_address_keys = list(cleans_by_address.keys())
+    # Tracks which (address_key, assignment_date) cleans have already been
+    # accounted for by the checkout-matching loop below — either landed a
+    # real match, or got claimed as the "nearest" candidate for a
+    # date_mismatch issue — so the general orphan-clean fallback after the
+    # loop knows not to touch them again.
+    matched_keys = set()
+    flagged_keys = set()
 
     for address, stays in by_address.items():
         checkouts = sorted(set(s['depart_d'] for s in stays))
         checkouts = [c for c in checkouts if (address, c.isoformat()) not in cancelled_pairs]
         arrivals = sorted(set(s['arrive_d'] for s in stays))
+        source_key = address
         cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
 
         # Nothing at all under this exact address string in the cleaning-task
@@ -5834,6 +5869,7 @@ def compute_pack_schedule(window_start, window_end):
             variant = fuzzy_match_address(address, clean_address_keys)
             if variant and variant != address:
                 cleans = sorted(cleans_by_address[variant], key=lambda c: c['assignment_date'])
+                source_key = variant
 
         for checkout in checkouts:
             next_arrival = next((a for a in arrivals if a > checkout), None)
@@ -5868,6 +5904,7 @@ def compute_pack_schedule(window_start, window_end):
                 # was the closest available option, and falsely report a
                 # mismatch against a checkout it has nothing to do with.
                 cleans.remove(match)
+                matched_keys.add((source_key, match['assignment_date']))
                 continue
 
             nearest = min(mismatched, key=lambda pair: abs((pair[1] - checkout).days)) if mismatched else None
@@ -5913,6 +5950,7 @@ def compute_pack_schedule(window_start, window_end):
                     'mismatched_clean_date': mismatched_date.isoformat(),
                     'mismatched_cleaner_name': mismatched_clean['cleaner_name'],
                 })
+                flagged_keys.add((source_key, mismatched_clean['assignment_date']))
             elif next_arrival:
                 days_until = (next_arrival - today_dt).days
                 if days_until <= 2 and (address, next_arrival.isoformat()) not in acked:
@@ -5924,14 +5962,71 @@ def compute_pack_schedule(window_start, window_end):
                         'issue_type': 'no_clean_scheduled',
                     })
 
+    # General orphan-clean fallback: any Breezeway cleaning task that never
+    # matched a checkout — mid-stay cleans on a long reservation, construction
+    # blocks, owner stays Breezeway doesn't feed into the reservation pull —
+    # still needs a bag packed. If it's a clean in Breezeway, it needs to be
+    # in the app. Derives pack_date straight from the task's own scheduled
+    # date, same principle as the long-standing Bay House fallback below,
+    # generalized to any address instead of one hardcoded name.
+    #
+    # Hard floor at today (fallback_start_dt), independent of whatever window
+    # the caller passed in: this function is also called with wide historical
+    # lookbacks (e.g. the 30-day "missed" check), and SBR wasn't tracking
+    # every pack in pack_list_status before go-live — there's no reliable way
+    # to tell "genuinely missed" apart from "handled off-system" for anything
+    # before now. Rather than guess, nothing before today is ever considered
+    # here, no matter which screen or lookback is asking.
+    #
+    # Skipped deliberately:
+    #   - cleans already consumed as a real checkout match (matched_keys)
+    #   - cleans already claimed as the "nearest" candidate for a
+    #     date_mismatch issue (flagged_keys) — an actual person should look
+    #     at those, not have them silently auto-scheduled out from under
+    #     the review queue
+    #   - anything already packed (pack_list_status) or already handled via
+    #     a manual Emergency Add (pack_emergency_adds) — same principle used
+    #     just above: whether it was actually handled, not how old it is
+    #   - TASK_ONLY_PROPERTIES addresses, handled by their own dedicated
+    #     block right below with proper address-name translation
+    fallback_start_dt = max(window_start_dt, today_dt)
+    for addr_key, clean_rows in cleans_by_address.items():
+        if addr_key in TASK_ONLY_PROPERTIES:
+            continue
+        for c in clean_rows:
+            key = (addr_key, c['assignment_date'])
+            if key in matched_keys or key in flagged_keys:
+                continue
+            c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
+            if not (fallback_start_dt <= c_date <= window_end_dt):
+                continue
+            pack_date = (c_date - timedelta(days=1)).isoformat()
+            if pack_date in packed_dates_by_address.get(addr_key, []):
+                continue
+            if (addr_key, pack_date) in emergency_pairs:
+                continue
+            already_there = any(
+                e['address'] == addr_key and e.get('clean_date') == c['assignment_date']
+                for e in schedule.get(pack_date, [])
+            )
+            if already_there:
+                continue
+            schedule.setdefault(pack_date, []).append({
+                'address': addr_key,
+                'checkout_date': None,
+                'clean_date': c['assignment_date'],
+                'cleaner_id': c['cleaner_id'],
+                'cleaner_name': c['cleaner_name'] if c['cleaner_id'] else None,
+                'assigned': bool(c['cleaner_id']),
+            })
+
     # Task-only fallback: Bay House (262 WRM Cir) is used by SBR Team &
     # Facilities, not booked guests, so it has Breezeway cleaning tasks but
     # never a reservation to anchor a pack_date to via the loop above. For
     # this address specifically, derive pack_date straight from the task's
-    # own scheduled clean date instead. Scoped to just this address for
-    # now — not a general rule for every task-only property.
-    window_start_dt = datetime.strptime(window_start, '%Y-%m-%d').date() if isinstance(window_start, str) else window_start
-    window_end_dt = datetime.strptime(window_end, '%Y-%m-%d').date() if isinstance(window_end, str) else window_end
+    # own scheduled clean date instead — kept as its own block since it
+    # needs the bw_address -> canonical_address name translation that the
+    # general fallback above doesn't do.
     for bw_address, canonical_address in TASK_ONLY_PROPERTIES.items():
         if bw_address in by_address or canonical_address in by_address:
             continue  # has real reservations now — normal path handles it
