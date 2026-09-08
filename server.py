@@ -3466,7 +3466,7 @@ def pack_list_debug_address():
     cur.execute("""SELECT address, pack_date, packed_by, packed_at FROM pack_list_status
                    WHERE LOWER(address) LIKE %s ORDER BY pack_date DESC LIMIT 15""", (q,))
     packed = cur.fetchall()
-    cur.execute("""SELECT address, pack_date, reported_by, reported_at FROM pack_emergency_adds
+    cur.execute("""SELECT address, pack_date, added_by, added_at FROM pack_emergency_adds
                    WHERE LOWER(address) LIKE %s ORDER BY pack_date DESC LIMIT 15""", (q,))
     emergency = cur.fetchall()
     cur.execute("""SELECT unit_address, arrive, depart FROM forecast_reservations
