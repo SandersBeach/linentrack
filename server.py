@@ -529,6 +529,7 @@ def init_db():
         "ALTER TABLE pack_list_formula ADD COLUMN IF NOT EXISTS red_bag_cleaner INTEGER DEFAULT 1",
         "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
         "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS breezeway_task_id TEXT",
+        "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS task_title TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -3314,6 +3315,7 @@ def sync_breezeway_cleaner_assignments(token):
                 continue
             date_str = scheduled[:10]
             task_id = str(t.get('id') or t.get('task_id') or '') or None
+            task_title = (t.get('name') or '').strip() or None
             assignees = t.get('assignments') or []
             raw_names = []
             for a in (assignees if isinstance(assignees, list) else [assignees]):
@@ -3324,13 +3326,14 @@ def sync_breezeway_cleaner_assignments(token):
             raw_assignee = '; '.join(n for n in raw_names if n)
             cleaner = match_cleaner_name(raw_assignee, cleaners, aliases)
             cur2.execute("""
-                INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at,breezeway_task_id)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                INSERT INTO pack_cleaner_assignments (address,assignment_date,cleaner_id,cleaner_name,raw_assignee,updated_at,breezeway_task_id,task_title)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (address,assignment_date) DO UPDATE SET
                     cleaner_id=EXCLUDED.cleaner_id, cleaner_name=EXCLUDED.cleaner_name,
-                    raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at, breezeway_task_id=EXCLUDED.breezeway_task_id
+                    raw_assignee=EXCLUDED.raw_assignee, updated_at=EXCLUDED.updated_at,
+                    breezeway_task_id=EXCLUDED.breezeway_task_id, task_title=EXCLUDED.task_title
             """, (prop['address'], date_str, cleaner['id'] if cleaner else None,
-                  cleaner['name'] if cleaner else None, raw_assignee, now, task_id))
+                  cleaner['name'] if cleaner else None, raw_assignee, now, task_id, task_title))
             count += 1
 
             # Did this task's date actually move since we last saw it? If so,
@@ -3439,6 +3442,47 @@ def breezeway_debug_raw():
         except Exception as e:
             out['task_sample_error'] = str(e)
     return jsonify(out)
+
+@app.route('/api/pack-list/debug-address', methods=['GET'])
+def pack_list_debug_address():
+    """Admin-only diagnostic: shows exactly what each of the three tables
+    involved in pack scheduling thinks an address is spelled/stored as, for
+    a given search substring. Built to trace cases where the already_packed
+    guard should have matched something and silently didn't — usually a
+    quiet spelling/whitespace mismatch between where a clean got synced in
+    under one address string and where it got marked packed under a
+    slightly different one. Query with ?pin=<admin pin>&q=<substring>, e.g.
+    q=needlerush."""
+    if not is_admin_pin(str(request.args.get('pin', ''))):
+        return jsonify({'error': 'Admin PIN required'}), 403
+    q = f"%{request.args.get('q', '').strip().lower()}%"
+    if q == '%%':
+        return jsonify({'error': 'Provide ?q=<part of the address>'}), 400
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT address, assignment_date, task_title, breezeway_task_id
+                   FROM pack_cleaner_assignments WHERE LOWER(address) LIKE %s
+                   ORDER BY assignment_date DESC LIMIT 15""", (q,))
+    assignments = cur.fetchall()
+    cur.execute("""SELECT address, pack_date, packed_by, packed_at FROM pack_list_status
+                   WHERE LOWER(address) LIKE %s ORDER BY pack_date DESC LIMIT 15""", (q,))
+    packed = cur.fetchall()
+    cur.execute("""SELECT address, pack_date, reported_by, reported_at FROM pack_emergency_adds
+                   WHERE LOWER(address) LIKE %s ORDER BY pack_date DESC LIMIT 15""", (q,))
+    emergency = cur.fetchall()
+    cur.execute("""SELECT unit_address, arrive, depart FROM forecast_reservations
+                   WHERE LOWER(unit_address) LIKE %s ORDER BY depart DESC LIMIT 15""", (q,))
+    reservations = cur.fetchall()
+    cur.execute("""SELECT address, property_name FROM pack_list_formula
+                   WHERE LOWER(address) LIKE %s""", (q,))
+    formula = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify({
+        'pack_cleaner_assignments': assignments,
+        'pack_list_status': packed,
+        'pack_emergency_adds': emergency,
+        'forecast_reservations': reservations,
+        'pack_list_formula': formula,
+    })
 
 @app.route('/api/breezeway/properties', methods=['GET'])
 def list_breezeway_properties():
@@ -5777,6 +5821,20 @@ TASK_ONLY_PROPERTIES = {'262 wrm cir': 'steve "bay house"'}  # Bay House — use
 # must be lowercase/stripped to match how addresses are keyed everywhere
 # else in this function.
 
+# Breezeway task titles (their 'name' field) that are real housekeeping-
+# department tasks but never need a bag: a callback means the cleaner is
+# going back to fix something on an already-finished clean, not starting a
+# fresh turnover, mid-stay clean, or construction-block clean. Used only by
+# the orphan-clean fallback below — a callback that happens to also match a
+# real checkout is left alone either way, since that path doesn't consult
+# this list. Confirmed from an actual "Cleaner Callback" task (446 Western
+# Lake Drive, Sept 2026) that showed up as a false "missed pack" before this
+# existed. Add to this list if another non-turnover task type turns up the
+# same way — deny-list, not an allow-list, since we don't know every real
+# turnover-clean title used across all properties, but "any clean needs
+# packing" is still the default.
+NON_PACK_TASK_TITLES = {'cleaner callback'}
+
 def compute_pack_schedule(window_start, window_end):
     """Single source of truth for pack scheduling: pack_date = scheduled
     clean date minus 1 day, NOT checkout date directly. For each address,
@@ -5805,7 +5863,7 @@ def compute_pack_schedule(window_start, window_end):
     for r in cur.fetchall():
         by_address.setdefault(r['unit_address'].lower().strip(), []).append(r)
 
-    cur.execute("SELECT address, assignment_date, cleaner_name, cleaner_id FROM pack_cleaner_assignments")
+    cur.execute("SELECT address, assignment_date, cleaner_name, cleaner_id, task_title FROM pack_cleaner_assignments")
     cleans_by_address = {}
     for r in cur.fetchall():
         cleans_by_address.setdefault(r['address'].lower().strip(), []).append(r)
@@ -5996,6 +6054,8 @@ def compute_pack_schedule(window_start, window_end):
         for c in clean_rows:
             key = (addr_key, c['assignment_date'])
             if key in matched_keys or key in flagged_keys:
+                continue
+            if (c.get('task_title') or '').strip().lower() in NON_PACK_TASK_TITLES:
                 continue
             c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
             if not (fallback_start_dt <= c_date <= window_end_dt):
