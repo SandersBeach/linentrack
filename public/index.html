@@ -3929,7 +3929,7 @@ function renderOrderItemRows() {
         <div><label>Unit label</label><input type="text" value="${row.unit_label}" oninput="updateOrderItem(${idx},'unit_label',this.value)" placeholder="e.g. rolls, bottles"></div>
         <div><label>Price (optional)</label><input type="number" min="0" step="0.01" value="${row.price}" oninput="updateOrderItem(${idx},'price',this.value)" placeholder="$0.00"></div>
       </div>
-      <div style="font-size:13px;font-weight:600;color:var(--teal-dark);background:var(--teal-light);padding:8px 12px;border-radius:var(--radius-sm)">
+      <div id="order-item-summary-${idx}" style="font-size:13px;font-weight:600;color:var(--teal-dark);background:var(--teal-light);padding:8px 12px;border-radius:var(--radius-sm)">
         = ${expected || 0} ${row.unit_label || 'units'} expected
       </div>
     </div>`;
@@ -3953,7 +3953,12 @@ function removeOrderItemRow(idx) {
 }
 function updateOrderItem(idx, field, value) {
   _placeOrderItems[idx][field] = value;
-  renderOrderItemRows();
+  // Avoid a full re-render on every keystroke (it destroys focus).
+  // Just update the "expected units" summary line for this row in place.
+  const row = _placeOrderItems[idx];
+  const expected = (parseFloat(row.cases_ordered)||0) * (parseFloat(row.units_per_case)||0);
+  const summaryEl = document.getElementById(`order-item-summary-${idx}`);
+  if (summaryEl) summaryEl.textContent = `= ${expected || 0} ${row.unit_label || 'units'} expected`;
 }
 function onOrderItemMatch(idx, supplyId) {
   _placeOrderItems[idx].matched_supply_id = supplyId;
