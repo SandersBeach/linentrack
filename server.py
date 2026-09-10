@@ -536,6 +536,36 @@ def init_db():
         except Exception as e:
             print(f'Migration note: {e}')
             conn.rollback()
+    # One-time-per-startup backfill: bags that already completed a real
+    # out-and-back cycle under the OLD check-in code (before
+    # mark_bag_completed_for_active_cycle existed) never got tagged into
+    # completed_bag_ids, so they'd sit stuck on "To Be Picked Up Today"
+    # forever since there's no future check-in left to trigger the tag.
+    # Cheap and idempotent — only touches today's/yesterday's rows, only a
+    # handful of bags at most, safe to run every startup.
+    try:
+        now = datetime.now(pytz.utc).astimezone(CENTRAL)
+        today_str = now.strftime('%Y-%m-%d')
+        yesterday_str = (now.date() - timedelta(days=1)).isoformat()
+        cur.execute("""SELECT id, staged_bag_ids, completed_bag_ids FROM pack_list_status
+                       WHERE pack_date IN (%s,%s) AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""",
+                    (yesterday_str, today_str))
+        rows = cur.fetchall()  # plain tuple cursor here: (id, staged_bag_ids, completed_bag_ids)
+        for row_id, row_staged, row_completed in rows:
+            staged_ids = [b.strip() for b in (row_staged or '').split(',') if b.strip()]
+            completed_ids = [b.strip() for b in (row_completed or '').split(',') if b.strip()]
+            still_uncompleted = [b for b in staged_ids if b not in completed_ids]
+            if not still_uncompleted: continue
+            cur.execute("SELECT id, status FROM bags WHERE id = ANY(%s)", (still_uncompleted,))
+            already_back = [bid for bid, bstatus in cur.fetchall() if bstatus == 'in']
+            if not already_back: continue
+            completed_ids.extend(already_back)
+            cur.execute("UPDATE pack_list_status SET completed_bag_ids=%s WHERE id=%s",
+                        (','.join(completed_ids), row_id))
+        conn.commit()
+    except Exception as e:
+        print(f'Completed-bag backfill note: {e}')
+        conn.rollback()
     # Known Breezeway/SandersCentral name mismatches — safe to insert repeatedly.
     try:
         cur.execute(
