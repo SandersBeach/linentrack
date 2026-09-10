@@ -530,6 +530,7 @@ def init_db():
         "ALTER TABLE hk_supply_items ADD COLUMN IF NOT EXISTS bucket TEXT",
         "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS breezeway_task_id TEXT",
         "ALTER TABLE pack_cleaner_assignments ADD COLUMN IF NOT EXISTS task_title TEXT",
+        "ALTER TABLE pack_list_status ADD COLUMN IF NOT EXISTS completed_bag_ids TEXT",
     ]:
         try: cur.execute(col_sql)
         except Exception as e:
@@ -2083,6 +2084,8 @@ def checkin(bag_id):
     action = 'Returned (pickup scan skipped)' if pickup_skipped else 'Returned'
     ts=now_central()
     cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,%s,%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],action,ts,notes,staff_name or None))
+    if bag['status'] == 'out':
+        mark_bag_completed_for_active_cycle(cur, bag_id.upper())
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—','pickup_skipped':pickup_skipped})
@@ -2200,6 +2203,7 @@ def warehouse_cleaner_checkin_bag():
         cur.close(); conn.close(); return jsonify({'error': 'This bag is not checked out to you.'}), 403
     ts = now_central()
     cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp) VALUES (%s,%s,%s,'Returned (self, warehouse-verified)',%s)", (bag_id, bag['home_id'], cleaner_id, ts))
+    mark_bag_completed_for_active_cycle(cur, bag_id)
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s", (bag_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success': True, 'home': bag['home_name']})
@@ -7577,6 +7581,34 @@ def set_inventory_reminder_setting():
         set_setting('inventory_reminder_day', str(int(data['day'])))
     return jsonify({'success': True})
 
+def mark_bag_completed_for_active_cycle(cur, bag_id):
+    """Called when a bag that had genuinely gone out (status='out') gets
+    checked back in. Check-in wipes cleaner_id/picked_up_at, which makes a
+    bag that already made its round trip today look identical to one that
+    was never picked up at all. To stop it from reappearing on 'To Be Picked
+    Up Today', tag it as done against whichever pack_list_status row is
+    driving that list right now (pack_date = yesterday for a normal
+    turnover, or today for an emergency same-day add) — see
+    get_bags_for_todays_clean. A future clean for this same bag lives under
+    a different pack_date row with its own (empty) completed_bag_ids, so it
+    shows up normally when that day comes."""
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    today_str = now.strftime('%Y-%m-%d')
+    yesterday_str = (now.date() - timedelta(days=1)).isoformat()
+    cur.execute("""SELECT id, staged_bag_ids, completed_bag_ids FROM pack_list_status
+                   WHERE pack_date IN (%s,%s) AND staged_bag_ids IS NOT NULL""",
+                (yesterday_str, today_str))
+    for row in cur.fetchall():
+        staged_ids = [b.strip() for b in (row['staged_bag_ids'] or '').split(',') if b.strip()]
+        if bag_id not in staged_ids:
+            continue
+        completed_ids = [b.strip() for b in (row['completed_bag_ids'] or '').split(',') if b.strip()]
+        if bag_id in completed_ids:
+            continue
+        completed_ids.append(bag_id)
+        cur.execute("UPDATE pack_list_status SET completed_bag_ids=%s WHERE id=%s",
+                    (','.join(completed_ids), row['id']))
+
 def get_bags_for_todays_clean(cur):
     """Every bag packed for a property whose actual clean is TODAY —
     regardless of current status (staged or already picked up). This is
@@ -7595,21 +7627,22 @@ def get_bags_for_todays_clean(cur):
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = (now.date() - timedelta(days=1)).isoformat()
 
-    cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
+    cur.execute("""SELECT address, staged_bag_ids, completed_bag_ids FROM pack_list_status
                    WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (yesterday_str,))
     rows = cur.fetchall()
 
     cur.execute("SELECT LOWER(TRIM(address)) AS address FROM pack_emergency_adds WHERE pack_date=%s", (today_str,))
     emergency_addresses = [r['address'] for r in cur.fetchall()]
     if emergency_addresses:
-        cur.execute("""SELECT address, staged_bag_ids FROM pack_list_status
+        cur.execute("""SELECT address, staged_bag_ids, completed_bag_ids FROM pack_list_status
                        WHERE pack_date=%s AND address = ANY(%s) AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""",
                     (today_str, emergency_addresses))
         rows += cur.fetchall()
 
     all_bags = []  # [{address, bag_id, status, cleaner_name}]
     for r in rows:
-        bag_ids = [b.strip() for b in r['staged_bag_ids'].split(',') if b.strip()]
+        completed_ids = set(b.strip() for b in (r['completed_bag_ids'] or '').split(',') if b.strip())
+        bag_ids = [b.strip() for b in r['staged_bag_ids'].split(',') if b.strip() and b.strip() not in completed_ids]
         if not bag_ids: continue
         cur.execute("""SELECT b.id, b.status, c.name AS cleaner_name FROM bags b
                        LEFT JOIN cleaners c ON c.id=b.cleaner_id WHERE b.id = ANY(%s)""", (bag_ids,))
