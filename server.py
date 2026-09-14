@@ -2114,8 +2114,18 @@ def checkin(bag_id):
     action = 'Returned (pickup scan skipped)' if pickup_skipped else 'Returned'
     ts=now_central()
     cur.execute("INSERT INTO transactions (bag_id,home_id,cleaner_id,action,timestamp,notes,staff_name) VALUES (%s,%s,%s,%s,%s,%s,%s)",(bag_id.upper(),bag['home_id'],bag['cleaner_id'],action,ts,notes,staff_name or None))
-    if bag['status'] == 'out':
-        mark_bag_completed_for_active_cycle(cur, bag_id.upper())
+    # Mark it done regardless of whether the outbound scan happened.
+    # "Pickup scan skipped" only means the cleaner didn't scan it on the way
+    # out — the check-in scan happening at all means staff physically has
+    # it back, which is the only thing that actually matters for "does this
+    # still need to be picked up." Originally this only fired for
+    # status=='out', on the assumption that a skipped pickup scan meant the
+    # bag never left — but a skipped scan and a genuine return are two
+    # different things, and gating on 'out' left 'staged'-to-checked-in bags
+    # (e.g. 260 Needlerush Dr, HOME-50-4/5, over a weekend) stuck showing
+    # "still here" forever with no future check-in left to fix it, same as
+    # the original bug this was built to solve.
+    mark_bag_completed_for_active_cycle(cur, bag_id.upper())
     cur.execute("UPDATE bags SET status='in',cleaner_id=NULL,staged_at=NULL,picked_up_at=NULL,checked_out=NULL,overdue_alerted=0 WHERE id=%s",(bag_id.upper(),))
     conn.commit(); cur.close(); conn.close()
     return jsonify({'success':True,'home':bag['home_name'],'cleaner':bag['cleaner_name'] or '—','pickup_skipped':pickup_skipped})
@@ -5942,8 +5952,9 @@ def compute_pack_schedule(window_start, window_end):
     flagged_keys = set()
 
     for address, stays in by_address.items():
-        checkouts = sorted(set(s['depart_d'] for s in stays))
-        checkouts = [c for c in checkouts if (address, c.isoformat()) not in cancelled_pairs]
+        all_checkouts = sorted(set(s['depart_d'] for s in stays))
+        cancelled_checkouts = [c for c in all_checkouts if (address, c.isoformat()) in cancelled_pairs]
+        checkouts = [c for c in all_checkouts if c not in cancelled_checkouts]
         arrivals = sorted(set(s['arrive_d'] for s in stays))
         source_key = address
         cleans = sorted(cleans_by_address.get(address, []), key=lambda c: c['assignment_date'])
@@ -6053,6 +6064,32 @@ def compute_pack_schedule(window_start, window_end):
                         'days_until_arrival': days_until,
                         'issue_type': 'no_clean_scheduled',
                     })
+
+        # A cancelled reservation's checkout is deliberately excluded from
+        # the loop above (no schedule entry, no mismatch/no-clean issue —
+        # cancelling means don't pack it). But cancelling only updates our
+        # own records — Breezeway is never told, so its cleaning task for
+        # that same visit is usually still sitting there untouched. Without
+        # this, that leftover task falls through to the general orphan-
+        # clean fallback below and gets packed anyway as if it were a true
+        # orphan (a mid-stay clean, construction block, etc.) — this is
+        # what happened with 9 Running Oak: cancelled 8/31, but Breezeway's
+        # task for it was still live, so it looked ownerless and got packed
+        # on its own schedule on 9/9. Consume any clean that lines up with
+        # a cancelled checkout the same way a real match would (mark it in
+        # matched_keys, remove it from the pool) so it's recognized as
+        # already accounted for, without ever creating a schedule entry.
+        for cancelled_checkout in cancelled_checkouts:
+            next_arrival = next((a for a in arrivals if a > cancelled_checkout), None)
+            match = None
+            for c in cleans:
+                c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
+                if c_date >= cancelled_checkout and (next_arrival is None or c_date <= next_arrival):
+                    match = c
+                    break
+            if match:
+                cleans.remove(match)
+                matched_keys.add((source_key, match['assignment_date']))
 
     # General orphan-clean fallback: any Breezeway cleaning task that never
     # matched a checkout — mid-stay cleans on a long reservation, construction
@@ -7652,14 +7689,27 @@ def get_bags_for_todays_clean(cur):
     grabs the bags the morning of the actual clean — i.e. today. So "packed
     for today's clean" means pack_date = yesterday, not today. Emergency
     same-day adds are the exception and keep the same-day check.
+
+    A reservation cancelled AFTER it was already packed is exactly the kind
+    of thing this needs to filter out: compute_pack_schedule drops it from
+    the pack list the moment it's cancelled (see the cancelled_pairs check
+    there), but the pack_list_status row from when it WAS packed is left in
+    place on purpose (cancel-reservation never deletes it — see that
+    endpoint's docstring), so without this check it would sit on 'To Be
+    Picked Up Today' forever with no real clean behind it. Checkout date is
+    assumed to be pack_date + 1 day for a normal turnover, or pack_date
+    itself for a same-day emergency add.
     """
     now = datetime.now(pytz.utc).astimezone(CENTRAL)
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = (now.date() - timedelta(days=1)).isoformat()
 
+    cur.execute("SELECT address, checkout_date FROM pack_cancelled_reservations")
+    cancelled_pairs = {(r['address'], r['checkout_date']) for r in cur.fetchall()}
+
     cur.execute("""SELECT address, staged_bag_ids, completed_bag_ids FROM pack_list_status
                    WHERE pack_date=%s AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""", (yesterday_str,))
-    rows = cur.fetchall()
+    rows = [r for r in cur.fetchall() if (r['address'], today_str) not in cancelled_pairs]
 
     cur.execute("SELECT LOWER(TRIM(address)) AS address FROM pack_emergency_adds WHERE pack_date=%s", (today_str,))
     emergency_addresses = [r['address'] for r in cur.fetchall()]
@@ -7667,7 +7717,7 @@ def get_bags_for_todays_clean(cur):
         cur.execute("""SELECT address, staged_bag_ids, completed_bag_ids FROM pack_list_status
                        WHERE pack_date=%s AND address = ANY(%s) AND staged_bag_ids IS NOT NULL AND staged_bag_ids != ''""",
                     (today_str, emergency_addresses))
-        rows += cur.fetchall()
+        rows += [r for r in cur.fetchall() if (r['address'], today_str) not in cancelled_pairs]
 
     all_bags = []  # [{address, bag_id, status, cleaner_name}]
     for r in rows:
