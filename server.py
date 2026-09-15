@@ -129,7 +129,15 @@ def staff_role_list(staff):
     if not staff or not staff.get('role'): return []
     return [r.strip() for r in staff['role'].split(',') if r.strip()]
 
-VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager', 'store_manager'}
+VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager', 'store_manager', 'housekeeping_orders'}
+
+# Which order module(s) each non-admin role may place orders for. Admin can
+# always place either module regardless of this map. A role not listed here
+# can view/receive orders but cannot place new ones.
+ROLE_ORDER_MODULES = {
+    'housekeeping_orders': {'housekeeping'},
+    'coordinator': {'maintenance'},
+}
 
 def validate_role_string(role_str):
     """Validate a comma-separated role string like 'warehouse,maintenance'.
@@ -3741,16 +3749,25 @@ def ack_warehouse_alert(alert_id):
 
 @app.route('/api/orders', methods=['POST'])
 def create_order():
-    """Place a new order. Admin-only — everyone else can view/receive orders
-    but only Admin actually places them.
+    """Place a new order. Admin can place either module. Non-admin roles are
+    each scoped to the one module they're allowed to order for (see
+    ROLE_ORDER_MODULES below) — everyone else can view/receive orders but
+    not place them.
     Expects: pin, module, ordered_by, vendor, notes, items[]
     Each item: item_name, matched_supply_id (optional), cases_ordered, units_per_case, unit_label, price (optional)"""
     data = request.json or {}
-    if not is_admin_pin(str(data.get('pin', ''))):
-        return jsonify({'error': 'Only Admin can place orders'}), 403
+    pin = str(data.get('pin', ''))
+    is_admin = is_admin_pin(pin)
+    roles = resolve_roles(pin)
     module = data.get('module')
     if module not in ('housekeeping', 'maintenance'):
         return jsonify({'error':'module must be housekeeping or maintenance'}), 400
+    if not is_admin:
+        allowed_modules = set()
+        for r in roles:
+            allowed_modules |= ROLE_ORDER_MODULES.get(r, set())
+        if module not in allowed_modules:
+            return jsonify({'error': 'Only Admin can place orders'}), 403
     ordered_by = data.get('ordered_by','').strip()
     if not ordered_by:
         return jsonify({'error':'ordered_by is required'}), 400
