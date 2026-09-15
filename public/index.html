@@ -874,6 +874,7 @@ const TABS = {
   manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency', 'cancelled_reservations'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
+  housekeeping_orders: ['orders', 'amenities_inventory', 'cleaning_inventory'],
   admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'cancelled_reservations', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
@@ -938,7 +939,7 @@ async function submitPin() {
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').classList.add('on');
     document.getElementById('app').style.display = '';
-    const ROLE_ICONS = { admin:'Admin', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', warehouse:'Warehouse', manager:'Manager', store_manager:'Store Manager' };
+    const ROLE_ICONS = { admin:'Admin', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', warehouse:'Warehouse', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
     const defaultView = sessionStorage.getItem('defaultView');
@@ -991,7 +992,7 @@ function buildTabs() {
   // Which role's tabs come first shouldn't depend on checkbox display order —
   // always prioritize Admin (broadest view) then Manager (dashboard-first
   // role) ahead of any operational role someone might also have checked.
-  const ROLE_PRIORITY = ['admin', 'manager', 'warehouse', 'maintenance', 'coordinator', 'inspector'];
+  const ROLE_PRIORITY = ['admin', 'manager', 'warehouse', 'maintenance', 'coordinator', 'inspector', 'housekeeping_orders'];
   const orderedRoles = [...userRoles].sort((a, b) => {
     const ai = ROLE_PRIORITY.indexOf(a); const bi = ROLE_PRIORITY.indexOf(b);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
@@ -3609,7 +3610,7 @@ function renderHKCards() {
       <div class="supply-unit">${item.unit}</div>
       <div class="supply-meta">${item.category} · alert below ${item.low_stock_threshold}</div>
       <div class="supply-actions" style="justify-content:space-between;align-items:center">
-        ${_hkBucket !== 'Amenities' ? `<div class="stepper">
+        ${(_hkBucket !== 'Amenities' && (userRoles.includes('admin')||userRoles.includes('warehouse')||userRoles.includes('inspector'))) ? `<div class="stepper">
           <button onclick="hkStep(${item.id},-1)" ${item.quantity<=0?'disabled':''} title="Take one">&minus;</button>
           <div class="stepper-val" id="hkq-${item.id}">${item.quantity}</div>
           <button onclick="hkStep(${item.id},1)" title="Restock one">+</button>
@@ -3636,7 +3637,7 @@ function renderHKLowStockCards() {
     <div class="supply-qty" style="color:var(--coral-dark)">${item.quantity}</div>
     <div class="supply-unit">${item.unit}</div>
     <div class="supply-meta">${item.category} · alert below ${item.low_stock_threshold}</div>
-    ${_hkBucket !== 'Amenities' ? `<div class="supply-actions"><div class="stepper">
+    ${(_hkBucket !== 'Amenities' && (userRoles.includes('admin')||userRoles.includes('warehouse')||userRoles.includes('inspector'))) ? `<div class="supply-actions"><div class="stepper">
       <button onclick="hkStep(${item.id},-1)" ${item.quantity<=0?'disabled':''} title="Take one">&minus;</button>
       <div class="stepper-val" id="hkq-${item.id}">${item.quantity}</div>
       <button onclick="hkStep(${item.id},1)" title="Restock one">+</button>
@@ -3721,7 +3722,7 @@ async function renderOrders() {
     <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="package"></i> ${_ordersModuleFilter === 'housekeeping' ? 'Housekeeping Orders' : 'Maintenance Orders'}</div>
     <div class="subtab-bar">
       <button class="subtab ${_ordersViewMode==='pending'?'active':''}" id="ord-t-pending" onclick="ordersSubtab('pending')"><i class="ic" data-lucide="hourglass"></i> Pending</button>
-      ${(userRoles.includes('admin') || userRoles.includes('coordinator')) ? `<button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>` : ''}
+      ${(userRoles.includes('admin') || userRoles.includes('coordinator') || userRoles.includes('housekeeping_orders')) ? `<button class="subtab ${_ordersViewMode==='place'?'active':''}" id="ord-t-place" onclick="ordersSubtab('place')">+ Place Order</button>` : ''}
       <button class="subtab ${_ordersViewMode==='history'?'active':''}" id="ord-t-history" onclick="ordersSubtab('history')">History</button>
       <button class="subtab ${_ordersViewMode==='discrepancies'?'active':''}" id="ord-t-discrepancies" onclick="ordersSubtab('discrepancies')"><i class="ic" data-lucide="triangle-alert"></i> Discrepancies</button>
     </div>
@@ -3730,7 +3731,7 @@ async function renderOrders() {
 }
 
 function ordersSubtab(mode) {
-  if (mode === 'place' && !userRoles.includes('admin') && !userRoles.includes('coordinator')) mode = 'pending'; // placing orders is Admin/Coordinator
+  if (mode === 'place' && !userRoles.includes('admin') && !userRoles.includes('coordinator') && !userRoles.includes('housekeeping_orders')) mode = 'pending'; // placing orders is Admin/Coordinator/Housekeeping Orders
   _ordersViewMode = mode;
   document.querySelectorAll('.subtab').forEach(b=>b.classList.remove('active'));
   document.getElementById('ord-t-'+mode)?.classList.add('active');
@@ -6908,8 +6909,8 @@ async function loadStaffList() {
     staff = await fetch('/api/staff').then(r=>r.json());
   }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
-  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager', store_manager:'Store Manager' };
-  const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector'];
+  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders' };
+  const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector','housekeeping_orders'];
   const byRole = {};
   staff.forEach(s => {
     (s.role||'').split(',').map(r=>r.trim()).filter(Boolean).forEach(r => {
@@ -6941,7 +6942,7 @@ function roleCheckboxes(selectedRoles) {
     {v:'admin', l:'Admin'}, {v:'manager', l:'Manager (productivity dashboard)'},
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
     {v:'coordinator', l:'Coordinator'}, {v:'store_manager', l:'Store Manager'},
-    {v:'inspector', l:'Inspector'}
+    {v:'inspector', l:'Inspector'}, {v:'housekeeping_orders', l:'Housekeeping Orders (place/receive/history — housekeeping only)'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
