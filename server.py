@@ -5927,6 +5927,21 @@ def compute_pack_schedule(window_start, window_end):
     cur.execute("SELECT address, assignment_date, cleaner_name, cleaner_id, task_title FROM pack_cleaner_assignments")
     cleans_by_address = {}
     for r in cur.fetchall():
+        # Filtered here, at the source, rather than only in the orphan-clean
+        # fallback below: a "Cleaner Callback" (or anything else in
+        # NON_PACK_TASK_TITLES) is a cleaner going back to touch up an
+        # already-finished clean, never the real turnover clean for a
+        # checkout. Previously only the fallback checked this list, so if a
+        # callback's date happened to fall inside a checkout's window (e.g.
+        # the real turnover-clean task was missing from Breezeway), the
+        # checkout-matching loop below picked it up as the match and packed
+        # it anyway — that's what happened at 254 Spartina Circle and 209
+        # Western Lake Drive. Filtering here instead means every path that
+        # reads cleans_by_address (checkout matching, cancelled-checkout
+        # matching, orphan fallback, Bay House task-only block) excludes
+        # callbacks the same way, with nothing left to fall out of sync.
+        if (r['task_title'] or '').strip().lower() in NON_PACK_TASK_TITLES:
+            continue
         cleans_by_address.setdefault(r['address'].lower().strip(), []).append(r)
 
     cur.execute("SELECT address, next_arrival_date FROM pack_missing_clean_acks")
@@ -6143,8 +6158,9 @@ def compute_pack_schedule(window_start, window_end):
             key = (addr_key, c['assignment_date'])
             if key in matched_keys or key in flagged_keys:
                 continue
-            if (c.get('task_title') or '').strip().lower() in NON_PACK_TASK_TITLES:
-                continue
+            # NON_PACK_TASK_TITLES rows are already excluded from
+            # cleans_by_address up above at the source, so nothing here
+            # needs to check task_title again.
             c_date = datetime.strptime(c['assignment_date'], '%Y-%m-%d').date()
             if not (fallback_start_dt <= c_date <= window_end_dt):
                 continue
