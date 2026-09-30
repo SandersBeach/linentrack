@@ -759,6 +759,43 @@
 </div>
 
 <script>
+// ── Sign-in session & device ID ───────────────────────────────────────────────
+// The server keeps the sign-in in a private cookie. This adds this device's ID
+// to every /api request (for PIN lockout), and if the server says the sign-in
+// has ended, returns to the PIN screen instead of leaving a half-working app.
+const _SBR_DEVICE_ID = (() => {
+  try {
+    let d = localStorage.getItem('sbr_device_id') || '';
+    if (!d) {
+      d = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)));
+      d = d.replace(/[^A-Za-z0-9_-]/g, '');
+      localStorage.setItem('sbr_device_id', d);
+    }
+    return d;
+  } catch (e) { return ''; }
+})();
+const _nativeFetch = window.fetch.bind(window);
+let _sessionEndHandled = false;
+window.fetch = async function (input, init) {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  const isApi = url.startsWith('/api/') || url.startsWith(location.origin + '/api/');
+  if (isApi && _SBR_DEVICE_ID) {
+    init = Object.assign({}, init || {});
+    const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+    h.set('X-Device-Id', _SBR_DEVICE_ID);
+    init.headers = h;
+  }
+  const res = await _nativeFetch(input, init);
+  if (isApi && res.status === 401 && res.headers.get('X-Session-Required') === '1' && role && !_sessionEndHandled) {
+    _sessionEndHandled = true;
+    setTimeout(() => {
+      logout();
+      const err = document.getElementById('login-err');
+      if (err) err.textContent = 'Your sign-in ended — please enter your PIN again.';
+    }, 0);
+  }
+  return res;
+};
 // ── State ──────────────────────────────────────────────────────────────────────
 // ── Auto-update detection ────────────────────────────────────────────────────
 // No hardcoded version string to keep in sync — this just remembers whatever
@@ -875,6 +912,7 @@ const TABS = {
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
   housekeeping_orders: ['orders', 'amenities_inventory', 'cleaning_inventory'],
+  linen_inventory: ['linen_inventory'],
   admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'cancelled_reservations', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
@@ -890,6 +928,7 @@ const TAB_LABELS = {
   amenities_inventory: 'Amenities',
   cleaning_inventory: 'Cleaning Supplies',
   orders: 'Housekeeping Orders',
+  linen_inventory: 'Linen Inventory',
   maint_orders: 'Maintenance Orders',
   forecast: 'Forecast',
   store: 'SBR Store',
@@ -929,7 +968,8 @@ async function submitPin() {
   try {
     const r = await fetch('/api/staff/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ pin: pinVal }) });
     const data = await r.json();
-    if (!r.ok || !data.success) { document.getElementById('login-err').textContent = 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
+    if (!r.ok || !data.success) { document.getElementById('login-err').textContent = r.status === 423 ? data.error : 'Wrong PIN — try again'; pinVal = ''; updateDots(); return; }
+    _sessionEndHandled = false;
     role = data.role;
     userRoles = data.roles && data.roles.length ? data.roles : (role ? [role] : []);
     _currentPin = pinVal;
@@ -939,7 +979,7 @@ async function submitPin() {
     document.getElementById('login').style.display = 'none';
     document.getElementById('app').classList.add('on');
     document.getElementById('app').style.display = '';
-    const ROLE_ICONS = { admin:'Admin', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', warehouse:'Warehouse', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders' };
+    const ROLE_ICONS = { admin:'Admin', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', warehouse:'Warehouse', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders', linen_inventory:'Linen Inventory' };
     document.getElementById('role-label').textContent = userRoles.map(r => ROLE_ICONS[r] || r).join(' + ');
     buildTabs();
     const defaultView = sessionStorage.getItem('defaultView');
@@ -968,6 +1008,8 @@ function setLoginGreeting() {
 window.addEventListener('load', setLoginGreeting);
 
 function logout() {
+  // End the server-side sign-in too, so the cookie can't be reused.
+  if (role) _nativeFetch('/api/staff/logout', { method: 'POST' }).catch(() => {});
   role = null; userRoles = []; pinVal = ''; _currentPin = ''; _currentStaffName = ''; _currentStaffId = null; _currentStaffEmail = '';
   updateDots();
   stopWarehouseAlertPolling();
@@ -992,7 +1034,7 @@ function buildTabs() {
   // Which role's tabs come first shouldn't depend on checkbox display order —
   // always prioritize Admin (broadest view) then Manager (dashboard-first
   // role) ahead of any operational role someone might also have checked.
-  const ROLE_PRIORITY = ['admin', 'manager', 'warehouse', 'maintenance', 'coordinator', 'inspector', 'housekeeping_orders'];
+  const ROLE_PRIORITY = ['admin', 'manager', 'warehouse', 'maintenance', 'coordinator', 'inspector', 'housekeeping_orders', 'linen_inventory'];
   const orderedRoles = [...userRoles].sort((a, b) => {
     const ai = ROLE_PRIORITY.indexOf(a); const bi = ROLE_PRIORITY.indexOf(b);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
@@ -1212,11 +1254,11 @@ function closeNav() { document.getElementById('app').classList.remove('nav-open'
 // linen-and-amenities operation; Maintenance is loaners and maintenance supply.
 // Anything unlisted (Admin, Store) falls below both.
 const CATEGORIES = [
-  { key: 'Housekeeping', modules: ['Warehouse', 'Linen', 'Inventory Counts', 'Orders', 'Forecast'] },
+  { key: 'Housekeeping', modules: ['Warehouse', 'Linen', 'Inventory Counts', 'Linen Inventory', 'Orders', 'Forecast'] },
   { key: 'Maintenance', modules: ['Loaners', 'Supply', 'Counts', 'Orders'] },
   { key: 'Admin', modules: ['Admin'] }
 ];
-const MODULE_CATEGORY = { Warehouse: 'Housekeeping', Linen: 'Housekeeping', 'Inventory Counts': 'Housekeeping', Forecast: 'Housekeeping', Loaners: 'Maintenance', Supply: 'Maintenance', Counts: 'Maintenance', Admin: 'Admin' };
+const MODULE_CATEGORY = { Warehouse: 'Housekeeping', Linen: 'Housekeeping', 'Linen Inventory': 'Housekeeping', 'Inventory Counts': 'Housekeeping', Forecast: 'Housekeeping', Loaners: 'Maintenance', Supply: 'Maintenance', Counts: 'Maintenance', Admin: 'Admin' };
 const TAB_CATEGORY = { orders: 'Housekeeping', maint_orders: 'Maintenance' };
 const MODULE_NAMES = {
   warehouse_home: 'Warehouse',
@@ -1235,6 +1277,7 @@ const MODULE_NAMES = {
   amenities_inventory: 'Inventory Counts',
   cleaning_inventory: 'Inventory Counts',
   orders: 'Orders',
+  linen_inventory: 'Linen Inventory',
   maint_orders: 'Orders',
   forecast: 'Forecast',
   store: 'Inventory Counts',
@@ -1273,6 +1316,7 @@ function showTab(t) {
     amenities_inventory: renderAmenitiesInventory,
     cleaning_inventory: renderCleaningInventory,
     orders: renderHousekeepingOrders,
+    linen_inventory: renderLinenInventory,
     maint_orders: renderMaintenanceOrders,
     forecast: renderForecast,
     store: renderStore,
@@ -2068,7 +2112,7 @@ async function renderSettings(gen) {
   const cleanerEmailSetting = await fetch('/api/settings/cleaner-emails-enabled').then(r => r.json()).catch(()=>({enabled:false}));
   const invReminderSetting = await fetch('/api/settings/inventory-reminder').then(r => r.json()).catch(()=>({enabled:true,day:2}));
   if (_stale(gen)) return;
-  let html = `<div class="card"><div class="card-title">PINs</div><div class="form-row"><div><label>Warehouse PIN</label><input type="password" id="wpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Admin PIN</label><input type="password" id="apin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Maintenance PIN</label><input type="password" id="mpin" placeholder="New PIN (4 digits)" maxlength="4" /></div><div><label>Coordinator PIN</label><input type="password" id="cpin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><div class="form-row"><div><label>Inspector PIN</label><input type="password" id="ipin" placeholder="New PIN (4 digits)" maxlength="4" /></div></div><button class="btn btn-primary" onclick="savePins()">Save PINs</button><div id="pin-msg" style="font-size:12px;color:var(--teal);margin-top:8px"></div></div>
+  let html = `<div class="card"><div class="card-title">Sign-in security</div><p style="font-size:13px;color:var(--gray-700);margin:0 0 12px">There are no shared PINs — everyone signs in with their own PIN (add or change them under <strong>Staff &amp; PINs</strong> below). 3 wrong staff PINs in a row locks that device until it's unlocked here.</p><div id="security-body">Loading…</div></div>
     <div class="section-header"><h2>Homes & Bags</h2></div>
     <div class="card"><div class="card-title">Add home</div>
     <div class="form-row"><div><label>Home name</label><input type="text" id="new-home-name" placeholder="e.g. Pelican Cottage" oninput="suggestNewHomeTagCount()" /></div><div><label>Code</label><input type="text" id="new-home-code" placeholder="e.g. HOME-21" /></div></div>
@@ -2259,11 +2303,234 @@ async function renderSettings(gen) {
     <textarea id="wg-standing-notes" rows="6" style="width:100%;font-family:inherit;font-size:14px;padding:10px;border:1px solid var(--gray-200);border-radius:var(--radius-sm)"></textarea>
     <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="saveWarehouseStandingNotes()">Save standing notes</button>
     </div>`;
+  if (userRoles.includes('linen_inventory')) {
+    html += `<div class="section-header" style="margin-top:1rem"><h2>Linen Inventory</h2></div>
+    <div class="card"><div class="card-title">Linen catalog</div>
+    <p style="font-size:13px;color:var(--gray-700);margin-bottom:1rem">Par levels, supplier and unit cost used by the Linen Inventory screen. 3 par is set per item, not calculated. Unchecking Active hides an item from Linen Inventory without deleting its history.</p>
+    <div id="linen-catalog-body">Loading…</div></div>`;
+  }
   document.getElementById('main-content').innerHTML = html;
+  loadSecuritySettings();
+  if (userRoles.includes('linen_inventory')) loadLinenCatalogSettings();
   loadCleanerAliases();
   renderManageFormulas();
   loadDaysOffSettingsSection();
   loadWarehouseGoalsSettings();
+}
+
+// ── Settings → Sign-in security ─────────────────────────────────────────
+const _secEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const _secWhen = iso => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+
+async function loadSecuritySettings() {
+  const area = document.getElementById('security-body');
+  if (!area) return;
+  let d;
+  try {
+    const r = await fetch('/api/security/status');
+    d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Could not load');
+  } catch (e) { area.innerHTML = `<div style="font-size:13px;color:var(--gray-400)">${_secEsc(e.message)}</div>`; return; }
+  const row = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--gray-100);font-size:13px';
+  let html = '';
+  if (d.new_device_lockdown_since) {
+    html += `<div style="background:var(--coral-light);border:1px solid var(--coral);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px">
+      <strong>Sign-in from new devices is paused</strong> (since ${_secWhen(d.new_device_lockdown_since)}) after repeated wrong PINs from devices that have never signed in. Devices that have signed in before still work.
+      <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="resumeNewDeviceSignIn()">Allow new devices again</button></div></div>`;
+  }
+  html += `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400);margin:4px 0">Locked devices</div>`;
+  html += d.locked_devices.length ? d.locked_devices.map(l => `<div style="${row}">
+      <div><div style="font-weight:500">${l.last_name ? 'Device last used by ' + _secEsc(l.last_name) : 'Device that has never signed in'}</div>
+      <div style="font-size:11px;color:var(--gray-400)">${l.kind === 'cleaner' ? 'Cleaner PIN' : 'Staff PIN'} · ${_secEsc(l.reason || '')} · locked ${_secWhen(l.locked_at)}${l.unlock_at ? ' · unlocks by itself ' + _secWhen(l.unlock_at) : ''}</div></div>
+      <button class="btn btn-ghost btn-sm" onclick="unlockDevice(${l.id})">Unlock</button></div>`).join('')
+    : `<div style="font-size:13px;color:var(--gray-400);padding:4px 0 8px">None. ${d.failed_signins_7d} wrong PIN${d.failed_signins_7d === 1 ? '' : 's'} in the last 7 days.</div>`;
+  html += `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400);margin:14px 0 4px">Sign-in check · ${d.enforce ? 'enforced' : 'report-only'}</div>`;
+  html += `<p style="font-size:12px;color:var(--gray-700);margin:0 0 6px">${d.enforce
+    ? 'Requests without a sign-in are blocked. Anything listed below was blocked.'
+    : 'Nothing is blocked yet. Anything listed below <strong>would</strong> be blocked once enforced. It should stay empty during normal use (after everyone has signed in once since the update).'}${d.would_block_since ? ' Since ' + _secWhen(d.would_block_since) + '.' : ''}</p>`;
+  html += d.would_block.length ? d.would_block.map(w => `<div style="${row}">
+      <div style="min-width:0"><div style="font-family:monospace;font-size:12px;word-break:break-all">${_secEsc(w.method)} ${_secEsc(w.rule)}</div>
+      <div style="font-size:11px;color:var(--gray-400)">${w.count}× · last ${_secWhen(w.last_seen)}${w.last_referer ? ' · from ' + _secEsc(w.last_referer.replace(location.origin, '')) : ''}</div></div></div>`).join('')
+      + `<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="clearWouldBlock()">Clear list</button></div>`
+    : `<div style="font-size:13px;color:var(--gray-400);padding:4px 0">Nothing so far.</div>`;
+  area.innerHTML = html;
+}
+
+async function _securityPost(url, body, okMsg) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const data = await r.json().catch(() => ({}));
+  notify(r.ok ? okMsg : (data.error || 'Something went wrong'), r.ok ? 'ok' : 'error');
+  loadSecuritySettings();
+}
+function unlockDevice(id) { _securityPost('/api/security/unlock', { lockout_id: id }, 'Device unlocked'); }
+function resumeNewDeviceSignIn() {
+  if (!confirm('Allow sign-in from new devices again? Only do this if you know why the wrong PINs happened, or you\'re comfortable it was harmless.')) return;
+  _securityPost('/api/security/new-devices/resume', {}, 'New devices can sign in again');
+}
+function clearWouldBlock() { _securityPost('/api/security/would-block/clear', {}, 'List cleared'); }
+
+// ── Linen Inventory (Phases 1–3 + Reorder status) ──────────────────────
+// Read-only estimate: latest quarterly count + tagged purchases − Damage Log.
+// Nothing here writes to packing, bags or supply stock.
+let _linenData = null;
+const _LINEN_STATUS = {
+  order: { label: 'Order now', bg: 'var(--coral-light)', fg: 'var(--coral-dark)' },
+  watch: { label: 'Watch', bg: 'var(--amber-light)', fg: 'var(--amber)' },
+  ok: { label: 'OK', bg: 'var(--teal-light)', fg: 'var(--teal-dark)' },
+  untracked: { label: 'No count yet', bg: 'var(--gray-100)', fg: 'var(--gray-400)' }
+};
+const _linenEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const _linenNum = n => (n == null ? '—' : Number(n).toLocaleString());
+const _linenMoney = n => '$' + Math.round(Number(n) || 0).toLocaleString();
+const _linenDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); };
+
+async function renderLinenInventory(gen) {
+  let data;
+  try {
+    const r = await fetch(`/api/linen/summary?pin=${encodeURIComponent(_currentPin)}`);
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not load');
+  } catch (e) {
+    if (_stale(gen)) return;
+    document.getElementById('main-content').innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`;
+    return;
+  }
+  if (_stale(gen)) return;
+  _linenData = data;
+  const items = data.items;
+  const tracked = items.filter(i => i.status !== 'untracked');
+  const n = s => items.filter(i => i.status === s).length;
+  const dmgValue = items.reduce((s, i) => s + i.damage_value, 0);
+  const since = tracked.map(i => i.count_date).sort()[0];
+  const p = data.periods[0];
+  const cats = [...new Set(items.map(i => i.category).filter(Boolean))];
+  const sups = [...new Set(items.map(i => i.supplier).filter(Boolean))].sort();
+
+  const banner = p ? `
+    <div class="card" style="background:var(--teal-dark);border-color:var(--teal-dark);color:#fff">
+      <div class="card-title" style="color:rgba(255,255,255,0.6)">${_linenDate(p.start_date)} – ${_linenDate(p.end_date)} · closed period reconciliation</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
+        ${[
+          ['Starting count', _linenNum(p.starting_count), '#fff'],
+          ['+ Purchased', '+' + _linenNum(p.purchased), 'var(--teal-mid)'],
+          ['− Logged damage', '−' + _linenNum(p.damaged), 'var(--amber-light)'],
+          ['Ending count', _linenNum(p.ending_count), '#fff'],
+          ['Unaccounted loss', _linenMoney(p.unaccounted_value), 'var(--coral-light)']
+        ].map(([l, v, c]) => `<div><div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:3px">${l}</div><div style="font-family:var(--font-display);font-size:28px;line-height:1;color:${c}">${v}</div></div>`).join('')}
+      </div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:10px">${_linenNum(p.unaccounted_units)} units not accounted for by purchases or logged damage.</div>
+    </div>` : '';
+
+  const unmatched = data.unmatched_damage.length ? `
+    <div class="card" style="border-color:var(--amber);background:var(--amber-light)">
+      <div style="font-size:13px;color:var(--gray-900)"><strong>Damage Log items not in the linen catalog:</strong>
+      ${data.unmatched_damage.map(u => `${_linenEsc(u.item_name)} (${u.qty})`).join(', ')}.
+      These aren't subtracted from any item below.</div>
+    </div>` : '';
+
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="bed-double"></i> Linen Inventory</div>
+    ${banner}
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+      <div class="stat"><div class="stat-num" style="color:var(--coral-dark)">${n('order')}</div><div class="stat-lbl">Order now · below 1 par</div></div>
+      <div class="stat"><div class="stat-num" style="color:var(--amber)">${n('watch')}</div><div class="stat-lbl">Watch · 1–2.5 par</div></div>
+      <div class="stat"><div class="stat-num">${n('ok')}</div><div class="stat-lbl">OK</div></div>
+      <div class="stat"><div class="stat-num">${_linenMoney(dmgValue)}</div><div class="stat-lbl">Damage value since ${since ? _linenDate(since) : 'count'}</div></div>
+    </div>
+    ${unmatched}
+    <div class="subtab-bar"><button class="subtab active">Reorder status</button></div>
+    <div class="card">
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Est. on hand = last count + purchases − logged damage. Order when it drops below <strong>1 par</strong>; reorder brings it back to <strong>3 par</strong>. Rags come out of damaged linen, so they're shown for reference but not subtracted again.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input id="lin-q" placeholder="Search items…" oninput="renderLinenReorderRows()" style="flex:1;min-width:140px;margin:0">
+        <select id="lin-cat" onchange="renderLinenReorderRows()" style="width:auto;margin:0"><option value="">All categories</option>${cats.map(c => `<option>${_linenEsc(c)}</option>`).join('')}</select>
+        <select id="lin-sup" onchange="renderLinenReorderRows()" style="width:auto;margin:0"><option value="">All suppliers</option>${sups.map(s => `<option>${_linenEsc(s)}</option>`).join('')}</select>
+        <select id="lin-stat" onchange="renderLinenReorderRows()" style="width:auto;margin:0"><option value="">All statuses</option><option value="order">Order now</option><option value="watch">Watch</option><option value="ok">OK</option><option value="untracked">No count yet</option></select>
+      </div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:860px">
+        <thead><tr style="text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400)">
+          <th style="padding:8px 6px">Item</th><th style="padding:8px 6px">Supplier</th>
+          <th style="padding:8px 6px;text-align:right">1 par</th><th style="padding:8px 6px;text-align:right">3 par</th>
+          <th style="padding:8px 6px;text-align:right">Last count</th><th style="padding:8px 6px;text-align:right">Purchased</th>
+          <th style="padding:8px 6px;text-align:right">Damaged</th><th style="padding:8px 6px;text-align:right">Of which rags</th>
+          <th style="padding:8px 6px;text-align:right">Est. on hand</th><th style="padding:8px 6px;text-align:right">Coverage</th>
+          <th style="padding:8px 6px">Status</th><th style="padding:8px 6px;text-align:right">Reorder qty</th>
+        </tr></thead>
+        <tbody id="lin-rows"></tbody>
+      </table></div>
+      <div style="font-size:11px;color:var(--gray-400);margin-top:10px">Items with no 1 par set always show OK. Purchases count once housekeeping order lines are tagged as linen.</div>
+    </div>`;
+  renderLinenReorderRows();
+}
+
+function renderLinenReorderRows() {
+  const body = document.getElementById('lin-rows');
+  if (!body || !_linenData) return;
+  const q = (document.getElementById('lin-q')?.value || '').toLowerCase();
+  const cat = document.getElementById('lin-cat')?.value || '';
+  const sup = document.getElementById('lin-sup')?.value || '';
+  const st = document.getElementById('lin-stat')?.value || '';
+  const rows = _linenData.items.filter(i =>
+    (!q || i.name.toLowerCase().includes(q)) && (!cat || i.category === cat) &&
+    (!sup || i.supplier === sup) && (!st || i.status === st));
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="12" class="empty">No items match.</td></tr>`; return; }
+  const td = 'padding:9px 6px;border-top:1px solid var(--gray-100)';
+  body.innerHTML = rows.map(i => {
+    const s = _LINEN_STATUS[i.status];
+    return `<tr>
+      <td style="${td};font-weight:500">${_linenEsc(i.name)}</td>
+      <td style="${td};color:var(--gray-700)">${_linenEsc(i.supplier || '—')}</td>
+      <td style="${td};text-align:right">${i.par1 || '—'}</td>
+      <td style="${td};text-align:right">${i.par3 || '—'}</td>
+      <td style="${td};text-align:right" title="${i.count_date ? 'Counted ' + _linenDate(i.count_date) : ''}">${_linenNum(i.baseline)}</td>
+      <td style="${td};text-align:right;color:${i.purchased ? 'var(--teal-dark)' : 'var(--gray-400)'}">${i.purchased ? '+' + _linenNum(i.purchased) : '0'}</td>
+      <td style="${td};text-align:right;color:${i.damaged ? 'var(--coral-dark)' : 'var(--gray-400)'}">${i.damaged ? '−' + _linenNum(i.damaged) : '0'}</td>
+      <td style="${td};text-align:right;color:var(--gray-400)">${i.rags || '0'}</td>
+      <td style="${td};text-align:right;font-weight:600">${_linenNum(i.est_on_hand)}</td>
+      <td style="${td};text-align:right">${i.coverage == null ? '—' : i.coverage.toFixed(1) + '×'}</td>
+      <td style="${td}"><span class="badge" style="background:${s.bg};color:${s.fg}">${s.label}</span></td>
+      <td style="${td};text-align:right;font-weight:${i.reorder_qty ? 600 : 400};color:${i.reorder_qty && i.status === 'order' ? 'var(--coral-dark)' : 'inherit'}">${i.reorder_qty ? _linenNum(i.reorder_qty) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Settings → Linen catalog (only rendered for linen_inventory role holders)
+async function loadLinenCatalogSettings() {
+  const area = document.getElementById('linen-catalog-body');
+  if (!area) return;
+  let data;
+  try {
+    const r = await fetch(`/api/linen/items?pin=${encodeURIComponent(_currentPin)}`);
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Could not load');
+  } catch (e) { area.innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`; return; }
+  const inp = (id, f, v, w, type) => `<input type="${type || 'number'}" min="0" ${type ? '' : 'step="any"'} id="lc-${f}-${id}" value="${_linenEsc(v == null ? '' : v)}" style="width:${w};margin:0;padding:6px 8px;font-size:13px">`;
+  area.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:720px">
+    <thead><tr style="text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400)">
+      <th style="padding:6px">Item</th><th style="padding:6px">Supplier</th><th style="padding:6px">1 par</th><th style="padding:6px">3 par</th><th style="padding:6px">Unit cost</th><th style="padding:6px">Active</th><th></th>
+    </tr></thead><tbody>
+    ${data.items.map(i => `<tr style="border-top:1px solid var(--gray-100)">
+      <td style="padding:6px"><div style="font-weight:500">${_linenEsc(i.name)}</div><div style="font-size:11px;color:var(--gray-400)">Damage Log: ${_linenEsc(i.damage_log_name || '—')}</div></td>
+      <td style="padding:6px">${inp(i.id, 'supplier', i.supplier, '150px', 'text')}</td>
+      <td style="padding:6px">${inp(i.id, 'par1', i.par1, '80px')}</td>
+      <td style="padding:6px">${inp(i.id, 'par3', i.par3, '80px')}</td>
+      <td style="padding:6px">${inp(i.id, 'unit_cost', i.unit_cost, '80px')}</td>
+      <td style="padding:6px"><input type="checkbox" id="lc-active-${i.id}" ${i.active ? 'checked' : ''} style="width:auto;margin:0"></td>
+      <td style="padding:6px"><button class="btn btn-ghost btn-sm" onclick="saveLinenCatalogItem(${i.id})">Save</button></td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+async function saveLinenCatalogItem(id) {
+  const v = f => document.getElementById(`lc-${f}-${id}`)?.value;
+  const body = {
+    pin: _currentPin, staff_name: _currentStaffName,
+    supplier: v('supplier'), par1: v('par1'), par3: v('par3'), unit_cost: v('unit_cost'),
+    active: document.getElementById(`lc-active-${id}`)?.checked ? 1 : 0
+  };
+  const r = await fetch(`/api/linen/items/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await r.json().catch(() => ({}));
+  notify(r.ok ? 'Linen item saved' : (data.error || 'Save failed'), r.ok ? 'ok' : 'error');
 }
 
 let _warehouseGoalsCache = null;
@@ -2464,12 +2731,6 @@ async function recalculateAmenityThresholds() {
   } catch(e) {
     notify('Connection error'); btn.textContent='Recalculate Thresholds'; btn.disabled=false;
   }
-}
-async function savePins() {
-  const w=document.getElementById('wpin')?.value; const a=document.getElementById('apin')?.value; const m=document.getElementById('mpin')?.value; const c=document.getElementById('cpin')?.value;
-  if((w&&w.length!==4)||(a&&a.length!==4)||(m&&m.length!==4)||(c&&c.length!==4)){notify('PINs must be exactly 4 digits');return;}
-  await fetch('/api/settings/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({warehouse_pin:w||undefined,admin_pin:a||undefined,maintenance_pin:m||undefined,coordinator_pin:c||undefined,staff_name:_currentStaffName})});
-  document.getElementById('pin-msg').textContent='PINs updated!'; setTimeout(()=>{if(document.getElementById('pin-msg'))document.getElementById('pin-msg').textContent='';},2000);
 }
 let _fivePlusBedroomNames = null;
 async function suggestNewHomeTagCount() {
@@ -6909,8 +7170,8 @@ async function loadStaffList() {
     staff = await fetch('/api/staff').then(r=>r.json());
   }
   if (!staff.length) { area.innerHTML = '<div class="empty">No staff members found. Click Reset to Master List to seed.</div>'; return; }
-  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders' };
-  const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector','housekeeping_orders'];
+  const ROLE_LABELS = { admin:'Admin', warehouse:'Warehouse', maintenance:'Maintenance', coordinator:'Coordinator', inspector:'Inspector', manager:'Manager', store_manager:'Store Manager', housekeeping_orders:'Housekeeping Orders', linen_inventory:'Linen Inventory' };
+  const roleOrder = ['admin','warehouse','maintenance','coordinator','inspector','housekeeping_orders','linen_inventory'];
   const byRole = {};
   staff.forEach(s => {
     (s.role||'').split(',').map(r=>r.trim()).filter(Boolean).forEach(r => {
@@ -6942,7 +7203,8 @@ function roleCheckboxes(selectedRoles) {
     {v:'admin', l:'Admin'}, {v:'manager', l:'Manager (productivity dashboard)'},
     {v:'warehouse', l:'Warehouse'}, {v:'maintenance', l:'Maintenance'},
     {v:'coordinator', l:'Coordinator'}, {v:'store_manager', l:'Store Manager'},
-    {v:'inspector', l:'Inspector'}, {v:'housekeeping_orders', l:'Housekeeping Orders (place/receive/history — housekeeping only)'}
+    {v:'inspector', l:'Inspector'}, {v:'housekeeping_orders', l:'Housekeeping Orders (place/receive/history — housekeeping only)'},
+    {v:'linen_inventory', l:'Linen Inventory (reorder status, loss & linen catalog)'}
   ];
   return roles.map(r => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;margin-bottom:6px;color:var(--gray-900)"><input type="checkbox" class="role-checkbox" value="${r.v}" ${selectedRoles.includes(r.v)?'checked':''} style="width:auto;margin:0"> ${r.l}</label>`).join('');
 }
