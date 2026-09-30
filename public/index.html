@@ -908,12 +908,12 @@ const TABS = {
   warehouse: ['warehouse_home', 'pickup_today', 'pack_list', 'daily_tasks', 'damage_log', 'bundles_needed', 'pack_flags', 'scan', 'overdue', 'status', 'homes', 'weekly_inventory', 'orders', 'cleaner_codes', 'store'],
   maintenance: ['loaners', 'supply_scan', 'inventory_count', 'maint_orders'],
   inspector: ['weekly_inventory', 'store'],
-  manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency', 'cancelled_reservations'],
+  manager: ['admin_dashboard', 'pack_productivity', 'pack_emergency', 'cancelled_reservations', 'linen_count'],
   store_manager: ['store'],
   coordinator: ['inventory_count', 'maint_orders'],
   housekeeping_orders: ['orders', 'amenities_inventory', 'cleaning_inventory'],
-  linen_inventory: ['linen_inventory'],
-  admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'cancelled_reservations', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
+  linen_inventory: ['linen_inventory', 'linen_count'],
+  admin: ['admin_dashboard', 'pack_list', 'pickup_today', 'daily_tasks', 'damage_log', 'bundles_needed', 'missing_cleans', 'pack_flags', 'pack_emergency', 'pack_productivity', 'cancelled_reservations', 'scan', 'overdue', 'status', 'homes', 'log', 'cleaners', 'amenities_inventory', 'cleaning_inventory', 'linen_count', 'store', 'orders', 'forecast', 'loaners', 'supply_scan', 'inventory_count', 'maint_orders', 'settings']
 };
 const TAB_LABELS = {
   warehouse_home: 'Daily Priorities',
@@ -929,6 +929,7 @@ const TAB_LABELS = {
   cleaning_inventory: 'Cleaning Supplies',
   orders: 'Housekeeping Orders',
   linen_inventory: 'Linen Inventory',
+  linen_count: 'Linen Count',
   maint_orders: 'Maintenance Orders',
   forecast: 'Forecast',
   store: 'SBR Store',
@@ -1278,6 +1279,7 @@ const MODULE_NAMES = {
   cleaning_inventory: 'Inventory Counts',
   orders: 'Orders',
   linen_inventory: 'Linen Inventory',
+  linen_count: 'Inventory Counts',
   maint_orders: 'Orders',
   forecast: 'Forecast',
   store: 'Inventory Counts',
@@ -1317,6 +1319,7 @@ function showTab(t) {
     cleaning_inventory: renderCleaningInventory,
     orders: renderHousekeepingOrders,
     linen_inventory: renderLinenInventory,
+    linen_count: renderLinenCount,
     maint_orders: renderMaintenanceOrders,
     forecast: renderForecast,
     store: renderStore,
@@ -2369,20 +2372,62 @@ function resumeNewDeviceSignIn() {
 }
 function clearWouldBlock() { _securityPost('/api/security/would-block/clear', {}, 'List cleared'); }
 
-// ── Linen Inventory (Phases 1–3 + Reorder status) ──────────────────────
-// Read-only estimate: latest quarterly count + tagged purchases − Damage Log.
+// ── Linen Inventory ─────────────────────────────────────────────────────
+// Read-only estimate: latest count + tagged purchases − logged damage.
 // Nothing here writes to packing, bags or supply stock.
 let _linenData = null;
+let _linenDetail = null;
+let _linenSubtab = 'reorder';
+let _linenPeriodIdx = 0;
+let _linenTagFilter = 'untagged';
+const _linenCharts = {};
 const _LINEN_STATUS = {
   order: { label: 'Order now', bg: 'var(--coral-light)', fg: 'var(--coral-dark)' },
   watch: { label: 'Watch', bg: 'var(--amber-light)', fg: 'var(--amber)' },
   ok: { label: 'OK', bg: 'var(--teal-light)', fg: 'var(--teal-dark)' },
   untracked: { label: 'No count yet', bg: 'var(--gray-100)', fg: 'var(--gray-400)' }
 };
+const _LINEN_SUBTABS = [
+  ['reorder', 'Reorder status'], ['loss', 'Loss tracker'], ['discard', 'Discard log'],
+  ['purchases', 'Purchase log'], ['tag', 'Tag purchases'], ['baseline', 'Baseline']
+];
 const _linenEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const _linenNum = n => (n == null ? '—' : Number(n).toLocaleString());
 const _linenMoney = n => '$' + Math.round(Number(n) || 0).toLocaleString();
-const _linenDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); };
+const _linenDate = d => { if (!d) return ''; const [y, m, dd] = d.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); };
+const _linenTd = 'padding:9px 6px;border-top:1px solid var(--gray-100)';
+const _linenTh = 'padding:8px 6px';
+const _linenThead = cols => `<thead><tr style="text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400)">${cols.map(c => `<th style="${_linenTh}${c[1] ? ';text-align:right' : ''}">${c[0]}</th>`).join('')}</tr></thead>`;
+const _linenTable = (minW, head, body, tbodyId) => `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:${minW}px">${head}<tbody${tbodyId ? ` id="${tbodyId}"` : ''}>${body}</tbody></table></div>`;
+
+// Chart.js loads only when a chart tab is opened (UMD build from cdnjs).
+let _chartJsPromise = null;
+function _loadChartJs() {
+  if (window.Chart) return Promise.resolve();
+  if (!_chartJsPromise) _chartJsPromise = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    sc.onload = res; sc.onerror = () => { _chartJsPromise = null; rej(new Error('Chart library did not load')); };
+    document.head.appendChild(sc);
+  });
+  return _chartJsPromise;
+}
+async function _linenBarChart(id, labels, values, horizontal) {
+  const el = document.getElementById(id);
+  if (!el || !labels.length) return;
+  try { await _loadChartJs(); } catch (e) { el.parentElement.innerHTML = '<div style="font-size:12px;color:var(--gray-400)">Chart unavailable offline.</div>'; return; }
+  if (!document.getElementById(id)) return;
+  if (_linenCharts[id]) _linenCharts[id].destroy();
+  _linenCharts[id] = new Chart(el, {
+    type: 'bar',
+    data: { labels, datasets: [{ data: values, backgroundColor: 'rgba(196,112,90,0.18)', borderColor: '#C4705A', borderWidth: 1.5 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: horizontal ? 'y' : 'x',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + Math.round(c.raw).toLocaleString() } } },
+      scales: { [horizontal ? 'x' : 'y']: { beginAtZero: true, ticks: { callback: v => '$' + v } } }
+    }
+  });
+}
 
 async function renderLinenInventory(gen) {
   let data;
@@ -2391,24 +2436,22 @@ async function renderLinenInventory(gen) {
     data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Could not load');
   } catch (e) {
-    if (_stale(gen)) return;
+    if (gen !== undefined && _stale(gen)) return;
     document.getElementById('main-content').innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`;
     return;
   }
-  if (_stale(gen)) return;
+  if (gen !== undefined && _stale(gen)) return;
   _linenData = data;
-  const items = data.items;
-  const tracked = items.filter(i => i.status !== 'untracked');
-  const n = s => items.filter(i => i.status === s).length;
-  const dmgValue = items.reduce((s, i) => s + i.damage_value, 0);
-  const since = tracked.map(i => i.count_date).sort()[0];
-  const p = data.periods[0];
-  const cats = [...new Set(items.map(i => i.category).filter(Boolean))];
-  const sups = [...new Set(items.map(i => i.supplier).filter(Boolean))].sort();
+  _linenDetail = null;
+  _renderLinenShell();
+}
 
+function _renderLinenShell() {
+  const data = _linenData;
+  const p = data.periods[0];
   const banner = p ? `
     <div class="card" style="background:var(--teal-dark);border-color:var(--teal-dark);color:#fff">
-      <div class="card-title" style="color:rgba(255,255,255,0.6)">${_linenDate(p.start_date)} – ${_linenDate(p.end_date)} · closed period reconciliation</div>
+      <div class="card-title" style="color:rgba(255,255,255,0.6)">${_linenDate(p.start_date)} – ${_linenDate(p.end_date)} · last closed period</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">
         ${[
           ['Starting count', _linenNum(p.starting_count), '#fff'],
@@ -2420,25 +2463,69 @@ async function renderLinenInventory(gen) {
       </div>
       <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:10px">${_linenNum(p.unaccounted_units)} units not accounted for by purchases or logged damage.</div>
     </div>` : '';
-
   const unmatched = data.unmatched_damage.length ? `
     <div class="card" style="border-color:var(--amber);background:var(--amber-light)">
       <div style="font-size:13px;color:var(--gray-900)"><strong>Damage Log items not in the linen catalog:</strong>
       ${data.unmatched_damage.map(u => `${_linenEsc(u.item_name)} (${u.qty})`).join(', ')}.
-      These aren't subtracted from any item below.</div>
+      These aren't subtracted from any item.</div>
     </div>` : '';
-
+  const counting = data.count_in_progress ? `
+    <div class="card" style="border-color:var(--teal);background:var(--teal-light)"><div style="font-size:13px">
+      <strong>A linen count is in progress.</strong> Numbers here update once it's finished.</div></div>` : '';
   document.getElementById('main-content').innerHTML = `
     <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="bed-double"></i> Linen Inventory</div>
-    ${banner}
+    ${banner}${counting}${unmatched}
+    <div class="subtab-bar" style="overflow-x:auto">${_LINEN_SUBTABS.map(([k, l]) =>
+      `<button class="subtab ${_linenSubtab === k ? 'active' : ''}" onclick="linenSubtab('${k}')" style="white-space:nowrap">${l}</button>`).join('')}</div>
+    <div id="linen-body"></div>`;
+  _renderLinenBody();
+}
+
+function linenSubtab(k) {
+  _linenSubtab = k;
+  document.querySelectorAll('.subtab-bar .subtab').forEach((b, i) => b.classList.toggle('active', _LINEN_SUBTABS[i] && _LINEN_SUBTABS[i][0] === k));
+  _renderLinenBody();
+}
+
+async function _ensureLinenDetail() {
+  if (_linenDetail) return _linenDetail;
+  const r = await fetch(`/api/linen/detail?pin=${encodeURIComponent(_currentPin)}`);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Could not load');
+  _linenDetail = d;
+  return d;
+}
+
+async function _renderLinenBody() {
+  const body = document.getElementById('linen-body');
+  if (!body) return;
+  if (_linenSubtab === 'reorder') return _renderLinenReorder(body);
+  if (_linenSubtab === 'tag') return _renderLinenTag(body);
+  body.innerHTML = '<div class="card" style="font-size:13px;color:var(--gray-400)">Loading…</div>';
+  let d;
+  try { d = await _ensureLinenDetail(); } catch (e) { body.innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`; return; }
+  if (!document.getElementById('linen-body')) return;
+  if (_linenSubtab === 'loss') _renderLinenLoss(body, d);
+  else if (_linenSubtab === 'discard') _renderLinenDiscard(body, d);
+  else if (_linenSubtab === 'purchases') _renderLinenPurchases(body, d);
+  else if (_linenSubtab === 'baseline') _renderLinenBaseline(body, d);
+}
+
+// Reorder status
+function _renderLinenReorder(body) {
+  const items = _linenData.items;
+  const n = s => items.filter(i => i.status === s).length;
+  const dmgValue = items.reduce((s, i) => s + i.damage_value, 0);
+  const since = items.filter(i => i.count_date).map(i => i.count_date).sort()[0];
+  const cats = [...new Set(items.map(i => i.category).filter(Boolean))];
+  const sups = [...new Set(items.map(i => i.supplier).filter(Boolean))].sort();
+  body.innerHTML = `
     <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
       <div class="stat"><div class="stat-num" style="color:var(--coral-dark)">${n('order')}</div><div class="stat-lbl">Order now · below 1 par</div></div>
       <div class="stat"><div class="stat-num" style="color:var(--amber)">${n('watch')}</div><div class="stat-lbl">Watch · 1–2.5 par</div></div>
       <div class="stat"><div class="stat-num">${n('ok')}</div><div class="stat-lbl">OK</div></div>
       <div class="stat"><div class="stat-num">${_linenMoney(dmgValue)}</div><div class="stat-lbl">Damage value since ${since ? _linenDate(since) : 'count'}</div></div>
     </div>
-    ${unmatched}
-    <div class="subtab-bar"><button class="subtab active">Reorder status</button></div>
     <div class="card">
       <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Est. on hand = last count + purchases − logged damage. Order when it drops below <strong>1 par</strong>; reorder brings it back to <strong>3 par</strong>. Rags come out of damaged linen, so they're shown for reference but not subtracted again.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -2447,25 +2534,18 @@ async function renderLinenInventory(gen) {
         <select id="lin-sup" onchange="renderLinenReorderRows()" style="width:auto;margin:0"><option value="">All suppliers</option>${sups.map(s => `<option>${_linenEsc(s)}</option>`).join('')}</select>
         <select id="lin-stat" onchange="renderLinenReorderRows()" style="width:auto;margin:0"><option value="">All statuses</option><option value="order">Order now</option><option value="watch">Watch</option><option value="ok">OK</option><option value="untracked">No count yet</option></select>
       </div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:860px">
-        <thead><tr style="text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400)">
-          <th style="padding:8px 6px">Item</th><th style="padding:8px 6px">Supplier</th>
-          <th style="padding:8px 6px;text-align:right">1 par</th><th style="padding:8px 6px;text-align:right">3 par</th>
-          <th style="padding:8px 6px;text-align:right">Last count</th><th style="padding:8px 6px;text-align:right">Purchased</th>
-          <th style="padding:8px 6px;text-align:right">Damaged</th><th style="padding:8px 6px;text-align:right">Of which rags</th>
-          <th style="padding:8px 6px;text-align:right">Est. on hand</th><th style="padding:8px 6px;text-align:right">Coverage</th>
-          <th style="padding:8px 6px">Status</th><th style="padding:8px 6px;text-align:right">Reorder qty</th>
-        </tr></thead>
-        <tbody id="lin-rows"></tbody>
-      </table></div>
-      <div style="font-size:11px;color:var(--gray-400);margin-top:10px">Items with no 1 par set always show OK. Purchases count once housekeeping order lines are tagged as linen.</div>
+      ${_linenTable(860, _linenThead([['Item'], ['Supplier'], ['1 par', 1], ['3 par', 1], ['Last count', 1], ['Purchased', 1], ['Damaged', 1], ['Of which rags', 1], ['Est. on hand', 1], ['Coverage', 1], ['Status'], ['Reorder qty', 1]]), '', 'lin-rows')}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <div style="font-size:11px;color:var(--gray-400)">Items with no 1 par set always show OK. Every Monday, Sarah Elizabeth gets an email listing anything at Order now (only when there is something).</div>
+        <button class="btn btn-ghost btn-sm" onclick="emailLinenReorderNow()">Email Sarah this list now</button>
+      </div>
     </div>`;
   renderLinenReorderRows();
 }
 
 function renderLinenReorderRows() {
-  const body = document.getElementById('lin-rows');
-  if (!body || !_linenData) return;
+  const tbody = document.getElementById('lin-rows');
+  if (!tbody || !_linenData) return;
   const q = (document.getElementById('lin-q')?.value || '').toLowerCase();
   const cat = document.getElementById('lin-cat')?.value || '';
   const sup = document.getElementById('lin-sup')?.value || '';
@@ -2473,9 +2553,9 @@ function renderLinenReorderRows() {
   const rows = _linenData.items.filter(i =>
     (!q || i.name.toLowerCase().includes(q)) && (!cat || i.category === cat) &&
     (!sup || i.supplier === sup) && (!st || i.status === st));
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="12" class="empty">No items match.</td></tr>`; return; }
-  const td = 'padding:9px 6px;border-top:1px solid var(--gray-100)';
-  body.innerHTML = rows.map(i => {
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="12" class="empty">No items match.</td></tr>`; return; }
+  const td = _linenTd;
+  tbody.innerHTML = rows.map(i => {
     const s = _LINEN_STATUS[i.status];
     return `<tr>
       <td style="${td};font-weight:500">${_linenEsc(i.name)}</td>
@@ -2492,6 +2572,358 @@ function renderLinenReorderRows() {
       <td style="${td};text-align:right;font-weight:${i.reorder_qty ? 600 : 400};color:${i.reorder_qty && i.status === 'order' ? 'var(--coral-dark)' : 'inherit'}">${i.reorder_qty ? _linenNum(i.reorder_qty) : '—'}</td>
     </tr>`;
   }).join('');
+}
+
+async function emailLinenReorderNow() {
+  const r = await fetch('/api/linen/reorder-email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { notify(d.error || 'Could not send', 'error'); return; }
+  notify(d.sent ? `Emailed Sarah ${d.items} item${d.items === 1 ? '' : 's'} to reorder` : 'Nothing is below 1 par, so no email was sent', 'ok');
+}
+
+// Loss tracker
+function _renderLinenLoss(body, d) {
+  if (!d.periods.length) { body.innerHTML = '<div class="card"><div class="empty">No closed periods yet.</div></div>'; return; }
+  if (_linenPeriodIdx >= d.periods.length) _linenPeriodIdx = 0;
+  const p = d.periods[_linenPeriodIdx];
+  const rows = p.items.map(r => {
+    const exp = (r.starting_count || 0) + (r.purchased || 0) - (r.damaged || 0);
+    const loss = Math.max(0, r.unaccounted_units || 0);
+    return { ...r, exp, loss, lossV: loss * (r.unit_cost || 0), pct: exp > 0 ? Math.round(loss / exp * 100) : 0 };
+  }).sort((a, b) => b.lossV - a.lossV || a.name.localeCompare(b.name));
+  const td = _linenTd;
+  body.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div class="card-title" style="margin:0">Unaccounted loss · ${_linenDate(p.start_date)} – ${_linenDate(p.end_date)}</div>
+        ${d.periods.length > 1 ? `<select onchange="_linenPeriodIdx=+this.value;_renderLinenBody()" style="width:auto;margin:0">${d.periods.map((x, i) => `<option value="${i}" ${i === _linenPeriodIdx ? 'selected' : ''}>${_linenDate(x.start_date)} – ${_linenDate(x.end_date)}</option>`).join('')}</select>` : ''}
+      </div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Starting count + purchases − logged damage = expected. Expected − the next count = unaccounted loss. Each item's current period runs from its last count and closes at the next linen count.</p>
+      ${_linenTable(820, _linenThead([['Item'], ['Start count', 1], ['+ Purchased', 1], ['− Damaged', 1], ['Expected', 1], ['Counted', 1], ['Gap (units)', 1], ['Gap ($)', 1], ['% shrink', 1], ['Unit cost', 1]]),
+        rows.map(r => `<tr style="${r.loss ? 'background:rgba(196,112,90,0.06)' : ''}">
+          <td style="${td};font-weight:500">${_linenEsc(r.name)}</td>
+          <td style="${td};text-align:right">${_linenNum(r.starting_count)}</td>
+          <td style="${td};text-align:right;color:${r.purchased ? 'var(--teal-dark)' : 'var(--gray-400)'}">${r.purchased ? '+' + _linenNum(r.purchased) : '0'}</td>
+          <td style="${td};text-align:right;color:${r.damaged ? 'var(--amber)' : 'var(--gray-400)'}">${r.damaged ? '−' + _linenNum(r.damaged) : '0'}</td>
+          <td style="${td};text-align:right">${_linenNum(r.exp)}</td>
+          <td style="${td};text-align:right">${_linenNum(r.ending_count)}</td>
+          <td style="${td};text-align:right;font-weight:600;color:${r.loss ? 'var(--coral-dark)' : 'var(--teal-dark)'}">${r.loss ? '−' + _linenNum(r.loss) : (r.unaccounted_units < 0 ? '+' + _linenNum(-r.unaccounted_units) : '0')}</td>
+          <td style="${td};text-align:right;font-weight:600;color:${r.loss ? 'var(--coral-dark)' : 'var(--gray-400)'}">${r.loss ? '−' + _linenMoney(r.lossV) : '$0'}</td>
+          <td style="${td};text-align:right;color:${r.pct > 10 ? 'var(--coral-dark)' : r.pct > 5 ? 'var(--amber)' : 'var(--gray-400)'}">${r.pct}%</td>
+          <td style="${td};text-align:right;color:var(--gray-400)">$${(r.unit_cost || 0).toFixed(2)}</td>
+        </tr>`).join(''))}
+      <div style="font-size:11px;color:var(--gray-400);margin-top:8px">A "+" gap means more was counted than expected (a surplus). Only shortfalls count toward the loss total.</div>
+    </div>
+    <div class="card"><div class="card-title">Unaccounted loss by item (top 10)</div><div style="position:relative;height:260px"><canvas id="linen-loss-chart"></canvas></div></div>`;
+  const top = rows.filter(r => r.loss).slice(0, 10);
+  _linenBarChart('linen-loss-chart', top.map(r => r.name.length > 22 ? r.name.slice(0, 20) + '…' : r.name), top.map(r => Math.round(r.lossV)), true);
+}
+
+// Discard log
+function _renderLinenDiscard(body, d) {
+  const rows = d.discards;
+  const td = _linenTd;
+  const byMonth = {};
+  rows.filter(r => !r.rags).forEach(r => { const k = r.date.slice(0, 7); byMonth[k] = (byMonth[k] || 0) + r.value; });
+  const months = Object.keys(byMonth).sort();
+  const total = rows.filter(r => !r.rags).reduce((s, r) => s + r.value, 0);
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">Discard log · current period</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Linen logged as damaged in the Damage Log since each item's last count. These are subtracted from est. on hand. Rows marked <em>became rags</em> are already inside the damaged numbers and aren't subtracted again.</p>
+      ${rows.length ? _linenTable(720, _linenThead([['Date'], ['Item'], ['Category'], ['Qty', 1], ['Unit cost', 1], ['Value', 1], ['Logged by']]),
+        rows.map(r => `<tr style="${r.rags ? 'color:var(--gray-400)' : ''}">
+          <td style="${td};font-size:12px;color:var(--gray-400)">${_linenDate(r.date)}</td>
+          <td style="${td};font-weight:500">${_linenEsc(r.item)}${r.rags ? ' <span class="badge" style="background:var(--gray-100);color:var(--gray-700)">became rags</span>' : ''}</td>
+          <td style="${td};color:var(--gray-400)">${_linenEsc(r.category || '')}</td>
+          <td style="${td};text-align:right">${_linenNum(r.qty)}</td>
+          <td style="${td};text-align:right">$${r.unit_cost.toFixed(2)}</td>
+          <td style="${td};text-align:right;font-weight:600">${r.rags ? '—' : '$' + r.value.toFixed(2)}</td>
+          <td style="${td};color:var(--gray-700)">${_linenEsc(r.staff_name || '')}</td>
+        </tr>`).join('')) + `<div style="font-size:13px;margin-top:10px;text-align:right">Total damage value: <strong>${_linenMoney(total)}</strong></div>`
+      : '<div class="empty">No linen damage logged yet this period.</div>'}
+    </div>
+    ${months.length ? `<div class="card"><div class="card-title">Damage value by month</div><div style="position:relative;height:200px"><canvas id="linen-dmg-chart"></canvas></div></div>` : ''}`;
+  if (months.length) _linenBarChart('linen-dmg-chart', months.map(m => { const [y, mo] = m.split('-'); return new Date(+y, +mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }); }), months.map(m => Math.round(byMonth[m])), false);
+}
+
+// Purchase log
+function _renderLinenPurchases(body, d) {
+  const rows = d.purchases.filter(r => r.in_current_period);
+  const td = _linenTd;
+  const total = rows.reduce((s, r) => s + r.qty * r.unit_cost, 0);
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">Purchase log · current period</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Received housekeeping order lines tagged as linen. Received quantities are added to est. on hand. Missing something? Tag it under <a href="#" onclick="linenSubtab('tag');return false">Tag purchases</a>.</p>
+      ${rows.length ? _linenTable(760, _linenThead([['Received'], ['Item'], ['Order line'], ['Qty', 1], ['Price paid', 1], ['Est. value', 1], ['Vendor'], ['Received by']]),
+        rows.map(r => `<tr>
+          <td style="${td};font-size:12px;color:var(--gray-400)">${_linenDate(r.date)}</td>
+          <td style="${td};font-weight:500">${_linenEsc(r.item)}</td>
+          <td style="${td};color:var(--gray-700)">${_linenEsc(r.line_name)}</td>
+          <td style="${td};text-align:right;color:var(--teal-dark)">+${_linenNum(r.qty)}</td>
+          <td style="${td};text-align:right">${r.price != null ? '$' + r.price.toFixed(2) : '—'}</td>
+          <td style="${td};text-align:right">${_linenMoney(r.qty * r.unit_cost)}</td>
+          <td style="${td}">${_linenEsc(r.vendor || '—')}</td>
+          <td style="${td};color:var(--gray-700)">${_linenEsc(r.received_by || '')}</td>
+        </tr>`).join('')) + `<div style="font-size:11px;color:var(--gray-400);margin-top:8px">Est. value uses each item's catalog unit cost. Price paid is whatever was entered on the order line.</div><div style="font-size:13px;margin-top:6px;text-align:right">Est. total: <strong>${_linenMoney(total)}</strong></div>`
+      : '<div class="empty">No linen purchases tagged yet this period.</div>'}
+    </div>`;
+}
+
+// Tag purchases (Phase 4)
+let _linenTagLines = null, _linenOptions = null;
+async function _renderLinenTag(body) {
+  body.innerHTML = '<div class="card" style="font-size:13px;color:var(--gray-400)">Loading…</div>';
+  try {
+    const [lr, opts] = await Promise.all([
+      fetch(`/api/linen/order-lines?pin=${encodeURIComponent(_currentPin)}`).then(r => r.json()),
+      fetch('/api/linen/item-options').then(r => r.json())
+    ]);
+    if (lr.error) throw new Error(lr.error);
+    _linenTagLines = lr.lines; _linenOptions = opts;
+  } catch (e) { body.innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`; return; }
+  _drawLinenTag();
+}
+function _drawLinenTag() {
+  const body = document.getElementById('linen-body');
+  if (!body || !_linenTagLines) return;
+  const lines = _linenTagFilter === 'untagged' ? _linenTagLines.filter(l => !l.matched_linen_item_id) : _linenTagLines;
+  const td = _linenTd;
+  const tagged = _linenTagLines.filter(l => l.matched_linen_item_id).length;
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">Tag linen purchases</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Received housekeeping order lines since ${_linenDate(LINEN_BASELINE_DATE_UI)}. Pick the linen item for any line that was linen; leave everything else blank. New orders can be tagged right on the Place Order form. Tagging changes no stock numbers.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px">
+        <select onchange="_linenTagFilter=this.value;_drawLinenTag()" style="width:auto;margin:0">
+          <option value="untagged" ${_linenTagFilter === 'untagged' ? 'selected' : ''}>Not tagged as linen</option>
+          <option value="all" ${_linenTagFilter === 'all' ? 'selected' : ''}>All lines</option>
+        </select>
+        <span id="linen-tag-count" style="color:var(--gray-400)">${tagged} of ${_linenTagLines.length} lines tagged as linen</span>
+      </div>
+      ${lines.length ? _linenTable(720, _linenThead([['Received'], ['Order line'], ['Qty received', 1], ['Vendor'], ['Linen item']]),
+        lines.map(l => `<tr>
+          <td style="${td};font-size:12px;color:var(--gray-400)">${_linenDate(l.received_at)}</td>
+          <td style="${td};font-weight:500">${_linenEsc(l.item_name)}</td>
+          <td style="${td};text-align:right">${_linenNum(l.received_units)} ${_linenEsc(l.unit_label || '')}</td>
+          <td style="${td}">${_linenEsc(l.vendor || '—')}</td>
+          <td style="${td}"><select onchange="tagLinenLine(${l.id}, this.value)" style="margin:0;min-width:180px">
+            <option value="">— Not linen —</option>
+            ${_linenOptions.map(o => `<option value="${o.id}" ${l.matched_linen_item_id === o.id ? 'selected' : ''}>${_linenEsc(o.name)}</option>`).join('')}
+          </select></td>
+        </tr>`).join(''))
+      : `<div class="empty">${_linenTagFilter === 'untagged' ? 'Every received line is tagged or marked not linen… or there are none yet.' : 'No received housekeeping orders since the baseline.'}</div>`}
+    </div>`;
+}
+const LINEN_BASELINE_DATE_UI = '2026-09-20';
+async function tagLinenLine(lineId, linenId) {
+  const r = await fetch(`/api/linen/order-lines/${lineId}/tag`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, linen_item_id: linenId || null }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { notify(d.error || 'Could not save', 'error'); return; }
+  const line = _linenTagLines.find(l => l.id === lineId);
+  if (line) line.matched_linen_item_id = linenId ? +linenId : null;
+  const cnt = document.getElementById('linen-tag-count');
+  if (cnt) cnt.textContent = `${_linenTagLines.filter(l => l.matched_linen_item_id).length} of ${_linenTagLines.length} lines tagged as linen`;
+  notify(linenId ? 'Tagged as linen' : 'Marked not linen', 'ok');
+  _linenDetail = null;
+  try { const s = await fetch(`/api/linen/summary?pin=${encodeURIComponent(_currentPin)}`).then(x => x.json()); if (s.items) _linenData = s; } catch (e) {}
+}
+
+// Baseline
+function _renderLinenBaseline(body, d) {
+  const td = _linenTd;
+  const items = _linenData.items;
+  const latest = d.count_dates[0];
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-title">Current baseline</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:12px">Each item's most recent physical count, which est. on hand builds from. It resets at each linen count. Par levels and costs are edited in Settings → Linen catalog.</p>
+      ${_linenTable(820, _linenThead([['Item'], ['Category'], ['Supplier'], ['Counted'], ['Count', 1], ['1 par', 1], ['3 par', 1], ['Unit cost', 1], ['Est. on hand', 1], ['Coverage', 1]]),
+        items.map(i => `<tr>
+          <td style="${td};font-weight:500">${_linenEsc(i.name)}</td>
+          <td style="${td};color:var(--gray-400)">${_linenEsc(i.category || '')}</td>
+          <td style="${td};color:var(--gray-700)">${_linenEsc(i.supplier || '—')}</td>
+          <td style="${td};font-size:12px;color:var(--gray-400)">${i.count_date ? _linenDate(i.count_date) : 'Not counted'}</td>
+          <td style="${td};text-align:right">${_linenNum(i.baseline)}</td>
+          <td style="${td};text-align:right">${i.par1 || '—'}</td>
+          <td style="${td};text-align:right">${i.par3 || '—'}</td>
+          <td style="${td};text-align:right">$${i.unit_cost.toFixed(2)}</td>
+          <td style="${td};text-align:right;font-weight:600">${_linenNum(i.est_on_hand)}</td>
+          <td style="${td};text-align:right">${i.coverage == null ? '—' : i.coverage.toFixed(1) + '×'}</td>
+        </tr>`).join(''))}
+    </div>
+    <div class="card">
+      <div class="card-title">Count history</div>
+      ${d.count_dates.map((c, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--gray-100);font-size:13px">
+        <div><div style="font-weight:500">${_linenDate(c.count_date)}</div><div style="font-size:11px;color:var(--gray-400)">${c.items} items · ${_linenNum(c.units)} units · ${_linenEsc(c.counted_by || '')}</div></div>
+        ${idx === 0 && d.count_dates.length > 1 ? `<button class="btn btn-ghost btn-sm" onclick="undoLinenCount('${c.count_date}')">Undo this count</button>` : ''}
+      </div>`).join('')}
+      ${d.count_dates.length > 1 ? '<div style="font-size:11px;color:var(--gray-400);margin-top:8px">Undo removes the most recent count and the period it closed, so it can be redone. Earlier counts can\'t be undone.</div>' : ''}
+    </div>`;
+}
+
+async function undoLinenCount(day) {
+  if (!await confirmModal(`Undo the ${_linenDate(day)} linen count? Its numbers and the loss report it created will be removed, and the previous period reopens.`, { confirmLabel: 'Undo count', cancelLabel: 'Keep it', danger: true })) return;
+  const r = await fetch('/api/linen/count/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, count_date: day }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { notify(d.error || 'Could not undo', 'error'); return; }
+  notify('Count undone', 'ok');
+  _linenSubtab = 'baseline';
+  renderLinenInventory();
+}
+
+// ── Linen Count (quarterly, blind) ──────────────────────────────────────
+// Counters see item names only; expected numbers never reach this screen.
+// Every entry saves to the server as a draft, so a refresh or a different
+// iPad picks up where the count left off.
+let _linenCount = null;          // { items, counts, draft meta }
+let _linenCountPending = {};     // changes not yet saved
+let _linenCountTimer = null;
+
+async function renderLinenCount(gen) {
+  let d;
+  try {
+    const r = await fetch(`/api/linen/count?pin=${encodeURIComponent(_currentPin)}`);
+    d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Could not load');
+  } catch (e) {
+    if (gen !== undefined && _stale(gen)) return;
+    document.getElementById('main-content').innerHTML = `<div class="empty">${_linenEsc(e.message)}</div>`;
+    return;
+  }
+  if (gen !== undefined && _stale(gen)) return;
+  _linenCount = { items: d.items, counts: d.draft ? d.draft.counts : {}, draft: d.draft, last: d.last_count_date, today: d.today };
+  _linenCountPending = {};
+  if (!d.draft) return _renderLinenCountStart();
+  _renderLinenCountSheet();
+}
+
+function _renderLinenCountStart() {
+  const c = _linenCount;
+  const doneToday = c.last === c.today;
+  document.getElementById('main-content').innerHTML = `
+    <div style="font-size:15px;font-weight:600;margin-bottom:1rem"><i class="ic" data-lucide="clipboard-list"></i> Linen Count</div>
+    <div class="card">
+      <div class="card-title">Quarterly linen count</div>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:10px">Count every linen item on hand and enter the totals. Your entries save as you go, so you can stop and pick up later, even on a different iPad.</p>
+      <p style="font-size:13px;color:var(--gray-700);margin-bottom:16px">Last count: <strong>${c.last ? _linenDate(c.last) : 'none yet'}</strong> · ${c.items.length} items</p>
+      ${doneToday ? '<div style="font-size:13px;color:var(--teal-dark)">A linen count was already finished today.</div>'
+        : '<button class="btn btn-primary btn-full" onclick="startLinenCount()">Start linen count</button>'}
+    </div>`;
+}
+
+async function startLinenCount() {
+  const r = await fetch('/api/linen/count/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, changes: {} }) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); notify(d.error || 'Could not start', 'error'); return; }
+  renderLinenCount();
+}
+
+function _renderLinenCountSheet() {
+  const c = _linenCount;
+  const total = c.items.length;
+  const counted = c.items.filter(i => c.counts.hasOwnProperty(String(i.id))).length;
+  const pct = total ? Math.round(counted / total * 100) : 0;
+  const cats = [...new Set(c.items.map(i => i.category || 'Other'))];
+  const who = c.draft && c.draft.started_by ? `Started by ${_linenEsc(c.draft.started_by)}${c.draft.started_at ? ' · ' + _linenEsc(c.draft.started_at.slice(5, 16)) : ''}` : '';
+  document.getElementById('main-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-size:15px;font-weight:600"><i class="ic" data-lucide="clipboard-list"></i> Linen Count — in progress</div>
+      <span class="badge badge-count" id="lc-done">${counted}/${total} done</span>
+    </div>
+    <div class="card">
+      <div class="count-progress"><div class="count-progress-bar" id="lc-bar" style="width:${pct}%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--gray-400);margin-bottom:1rem"><span>${who}</span><span id="lc-save">All entries saved</span></div>
+      ${cats.map(cat => `
+        <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--gray-400);margin:12px 0 4px">${_linenEsc(cat)}</div>
+        ${c.items.filter(i => (i.category || 'Other') === cat).map(i => {
+          const v = c.counts[String(i.id)];
+          return `<div class="count-row"><div class="count-row-left"><div style="font-size:13px;font-weight:500">${_linenEsc(i.name)}</div></div>
+            <div class="count-row-right"><input class="count-input" type="number" inputmode="numeric" min="0" id="lc-${i.id}" value="${v == null ? '' : v}" oninput="linenCountInput(${i.id}, this.value)"></div></div>`;
+        }).join('')}`).join('')}
+      <div style="margin-top:1.25rem">
+        <label style="margin-bottom:4px">Notes (optional)</label>
+        <textarea id="lc-notes" rows="2" placeholder="Anything worth knowing about this count…" style="width:100%;resize:vertical"></textarea>
+      </div>
+      <div style="font-size:11px;color:var(--gray-400);margin-top:8px">Leave an item blank only if it wasn't counted. Enter 0 if there are none.</div>
+      <div style="display:flex;gap:8px;margin-top:1.25rem">
+        <button class="btn btn-ghost" onclick="cancelLinenCount()">Cancel count</button>
+        <button class="btn btn-primary btn-full" onclick="finishLinenCount()">Finish count</button>
+      </div>
+    </div>`;
+}
+
+function linenCountInput(id, val) {
+  const key = String(id);
+  const q = parseInt(val, 10);
+  if (val === '' || isNaN(q) || q < 0) { delete _linenCount.counts[key]; _linenCountPending[key] = null; }
+  else { _linenCount.counts[key] = q; _linenCountPending[key] = q; }
+  const total = _linenCount.items.length;
+  const counted = _linenCount.items.filter(i => _linenCount.counts.hasOwnProperty(String(i.id))).length;
+  const bar = document.getElementById('lc-bar'); if (bar) bar.style.width = (total ? Math.round(counted / total * 100) : 0) + '%';
+  const done = document.getElementById('lc-done'); if (done) done.textContent = `${counted}/${total} done`;
+  const st = document.getElementById('lc-save'); if (st) st.textContent = 'Saving…';
+  clearTimeout(_linenCountTimer);
+  _linenCountTimer = setTimeout(saveLinenCountDraft, 800);
+}
+
+async function saveLinenCountDraft() {
+  const changes = _linenCountPending;
+  if (!Object.keys(changes).length) return true;
+  _linenCountPending = {};
+  try {
+    const r = await fetch('/api/linen/count/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, changes }) });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    // Pick up anything another iPad entered, without touching the field being typed in.
+    const active = document.activeElement && document.activeElement.id;
+    Object.entries(d.counts || {}).forEach(([k, v]) => {
+      if (!(k in _linenCountPending)) {
+        _linenCount.counts[k] = v;
+        const el = document.getElementById('lc-' + k);
+        if (el && el.id !== active && el.value !== String(v)) el.value = v;
+      }
+    });
+    const st = document.getElementById('lc-save'); if (st) st.textContent = 'All entries saved';
+    return true;
+  } catch (e) {
+    Object.assign(changes, _linenCountPending); _linenCountPending = changes;
+    const st = document.getElementById('lc-save'); if (st) st.textContent = 'Not saved — check connection';
+    return false;
+  }
+}
+
+async function cancelLinenCount() {
+  if (!await confirmModal('Cancel this linen count? Everything entered so far will be cleared, for everyone.', { confirmLabel: 'Cancel count', cancelLabel: 'Keep counting', danger: true })) return;
+  clearTimeout(_linenCountTimer); _linenCountPending = {};
+  await fetch('/api/linen/count/draft', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName }) });
+  renderLinenCount();
+}
+
+async function finishLinenCount() {
+  clearTimeout(_linenCountTimer);
+  if (!await saveLinenCountDraft()) { notify('Could not save the latest entries — check the connection and try again.', 'error'); return; }
+  const c = _linenCount;
+  const blank = c.items.filter(i => !c.counts.hasOwnProperty(String(i.id))).length;
+  const msg = blank
+    ? `${blank} item${blank === 1 ? ' is' : 's are'} still blank. Blank items keep their previous count and aren't included in this count. Finish anyway?`
+    : 'Finish the linen count? This can\'t be edited afterward.';
+  if (!await confirmModal(msg, { confirmLabel: 'Finish count', cancelLabel: 'Keep counting' })) return;
+  const r = await fetch('/api/linen/count/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: _currentPin, staff_name: _currentStaffName, counts: c.counts, notes: document.getElementById('lc-notes')?.value || '' }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { notify(d.error || 'Could not finish the count', 'error'); return; }
+  if (d.show_results && _availableTabs.includes('linen_inventory')) {
+    notify(`Linen count finished — ${d.items_counted} items`, 'ok');
+    _linenSubtab = 'loss'; _linenPeriodIdx = 0;
+    showTab('linen_inventory');
+    return;
+  }
+  document.getElementById('main-content').innerHTML = `
+    <div class="card" style="text-align:center;padding:2rem 1rem">
+      <div style="font-size:32px;margin-bottom:8px"><i class="ic" data-lucide="check-circle"></i></div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:6px">Linen count finished</div>
+      <div style="font-size:13px;color:var(--gray-700)">${d.items_counted} items counted. Thank you!</div>
+    </div>`;
 }
 
 // Settings → Linen catalog (only rendered for linen_inventory role holders)
@@ -4096,6 +4528,11 @@ async function renderPlaceOrderForm() {
   const endpoint = _ordersModuleFilter === 'housekeeping' ? '/api/hk-supplies' : '/api/supplies';
   const inventoryItems = await fetch(endpoint).then(r=>r.json());
   window._orderInventoryItems = inventoryItems;
+  // Linen items for the optional "Linen item" tag (housekeeping orders only).
+  window._orderLinenOptions = [];
+  if (_ordersModuleFilter === 'housekeeping') {
+    try { const lo = await fetch('/api/linen/item-options').then(r => r.json()); if (Array.isArray(lo)) window._orderLinenOptions = lo; } catch (e) {}
+  }
 
   if (!_placeOrderItems.length) {
     _placeOrderItems.push({ item_name:'', matched_supply_id:'', cases_ordered:1, units_per_case:1, unit_label:'units', price:'' });
@@ -4181,6 +4618,11 @@ function renderOrderItemRows() {
         <option value="">— New / unmatched item —</option>
         ${items.map(it=>`<option value="${it.id}" ${row.matched_supply_id==it.id?'selected':''}>${it.name} (${it.unit})</option>`).join('')}
       </select>
+      ${(window._orderLinenOptions || []).length ? `<label>Linen item (optional — counts toward Linen Inventory when received)</label>
+      <select onchange="_placeOrderItems[${idx}].matched_linen_item_id=this.value">
+        <option value="">— Not linen —</option>
+        ${window._orderLinenOptions.map(o=>`<option value="${o.id}" ${row.matched_linen_item_id==o.id?'selected':''}>${o.name}</option>`).join('')}
+      </select>` : ''}
       <label>Item name</label>
       <input type="text" value="${row.item_name}" oninput="updateOrderItem(${idx},'item_name',this.value)" placeholder="e.g. Palmolive Dish Soap 3oz">
       <div class="form-row">
@@ -4265,6 +4707,7 @@ async function submitPlaceOrder() {
     items: validItems.map(it => ({
       item_name: it.item_name.trim(),
       matched_supply_id: it.matched_supply_id ? parseInt(it.matched_supply_id) : null,
+      matched_linen_item_id: it.matched_linen_item_id ? parseInt(it.matched_linen_item_id) : null,
       cases_ordered: parseFloat(it.cases_ordered) || 1,
       units_per_case: parseFloat(it.units_per_case) || 1,
       unit_label: it.unit_label.trim() || 'units',
