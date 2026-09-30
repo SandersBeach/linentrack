@@ -4270,11 +4270,16 @@ def create_order():
         matched_id = item.get('matched_supply_id')
         unit_label = item.get('unit_label','units').strip() or 'units'
         price = item.get('price')
+        # Optional linen tag (housekeeping only) — counts toward Linen
+        # Inventory "Purchased" once received. Changes no stock number.
+        linen_id = item.get('matched_linen_item_id') if module == 'housekeeping' else None
+        try: linen_id = int(linen_id) if linen_id not in (None, '', 0, '0') else None
+        except (TypeError, ValueError): linen_id = None
         cur.execute(
             """INSERT INTO supply_order_items
-               (order_id,item_name,matched_supply_id,matched_supply_table,cases_ordered,units_per_case,expected_units,unit_label,price)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (order_id, name, matched_id, table if matched_id else None, cases, units_per_case, expected, unit_label, price)
+               (order_id,item_name,matched_supply_id,matched_supply_table,cases_ordered,units_per_case,expected_units,unit_label,price,matched_linen_item_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (order_id, name, matched_id, table if matched_id else None, cases, units_per_case, expected, unit_label, price, linen_id)
         )
     conn.commit(); cur.close(); conn.close()
     log_audit('OrdersCentral', 'Placed order', data.get('vendor','').strip() or module, ordered_by, f'{len(items)} item(s)')
@@ -8384,9 +8389,15 @@ def background_overdue_loop():
                 print(f"[Overdue Scheduler] Weekly forecast emailed to Sarah: {result['shortfalls']} shortfalls", flush=True)
         except Exception as e:
             print(f"[Overdue Scheduler] Weekly forecast check failed: {e}", flush=True)
+        try:
+            result = run_linen_reorder_email_check()
+            if result['sent']:
+                print(f"[Overdue Scheduler] Linen reorder list emailed to Sarah: {result['items']} item(s)", flush=True)
+        except Exception as e:
+            print(f"[Overdue Scheduler] Linen reorder email check failed: {e}", flush=True)
         time.sleep(OVERDUE_CHECK_INTERVAL_SECONDS)
 
-# ── Linen Inventory (Phases 1–3) ──────────────────────────────────────────────
+# ── Linen Inventory ──────────────────────────────────────────────
 # Replaces Sabrina's standalone SBR Linen Dashboard. Linen is NOT live stock:
 # nothing here runs at pack time, and nothing here writes to any existing table.
 #   Est. on hand  = latest count + purchased − damaged   (since that count date)
@@ -8394,8 +8405,8 @@ def background_overdue_loop():
 #   Rags          = damage_log_saved.saved_qty — a SUBSET of damaged, info only,
 #                   never subtracted a second time
 #   Purchased     = received housekeeping order lines tagged with a linen item
-#                   (supply_order_items.matched_linen_item_id — the tagging UI is
-#                   Phase 4, so this reads 0 until lines are tagged)
+#                   (supply_order_items.matched_linen_item_id — set on the
+#                   Place Order form or Linen Inventory → Tag purchases)
 # Access is the 'linen_inventory' role only (Sarah Elizabeth, Kristin, Sabrina),
 # not every admin, and never the legacy shared PINs.
 
@@ -8537,6 +8548,15 @@ def init_linen_inventory():
         # Phase 4 tag column — nullable, nothing reads or writes it except the
         # linen summary, so existing orders are untouched.
         cur.execute("ALTER TABLE supply_order_items ADD COLUMN IF NOT EXISTS matched_linen_item_id INTEGER")
+        # Phase 6: one shared in-progress count draft, and when each count
+        # "happened" (see _linen_movements).
+        cur.execute("""CREATE TABLE IF NOT EXISTS linen_count_drafts (
+                           id INTEGER PRIMARY KEY DEFAULT 1,
+                           counts TEXT NOT NULL DEFAULT '{}',
+                           started_by TEXT, started_at TEXT,
+                           updated_by TEXT, updated_at TEXT,
+                           CONSTRAINT linen_count_single_draft CHECK (id = 1))""")
+        cur.execute("ALTER TABLE linen_counts ADD COLUMN IF NOT EXISTS as_of TEXT")
         conn.commit()
 
         cur.execute("SELECT COUNT(*) FROM linen_items")
@@ -8563,6 +8583,9 @@ def init_linen_inventory():
                 n += 1
             conn.commit()
             print(f'[Linen Inventory] Loaded Sept 20, 2026 baseline for {n} items', flush=True)
+        # Counts without an as_of (the Sept 20 baseline) count from the start of their day.
+        cur.execute("UPDATE linen_counts SET as_of = count_date || ' 00:00:00' WHERE as_of IS NULL")
+        conn.commit()
 
         cur.execute("SELECT COUNT(*) FROM linen_periods")
         if cur.fetchone()[0] == 0:
@@ -8610,42 +8633,60 @@ def _linen_status(est, par1):
     return 'ok'
 
 
-@app.route('/api/linen/summary', methods=['GET'])
-def linen_summary():
-    """Per item: latest count, purchased/damaged/rags since that count date,
-    est. on hand, coverage, status and reorder qty — plus closed periods and
-    any Damage Log names that don't match a catalog item."""
-    if not has_linen_access(request.args.get('pin')):
-        return jsonify({'error': 'Linen Inventory access required'}), 403
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+def _linen_purchase_where():
+    """Received housekeeping order lines tagged as linen. Shared so the summary,
+    purchase log and period close all count purchases the same way."""
+    return ("FROM supply_order_items i JOIN supply_orders o ON o.id = i.order_id "
+            "WHERE i.matched_linen_item_id IS NOT NULL AND o.module = 'housekeeping' "
+            "AND o.status = 'Received' AND i.received_units IS NOT NULL")
+
+
+# When a Damage Log row "happened": the moment it was entered, if entered on
+# the day it's logged for; a row backdated to an earlier day counts from the
+# start of that day. Lets a count split same-day activity into before/after.
+_DMG_WHEN = "(CASE WHEN SUBSTRING(logged_at,1,10)=log_date THEN logged_at ELSE log_date || ' 00:00:00' END)"
+
+
+def _linen_movements(cur, item, since, until=None):
+    """(purchased, damaged, rags) for one catalog item from the `since`
+    timestamp (inclusive) up to `until` (exclusive, or open-ended). Timestamps
+    are a count's as_of moment, so anything received or logged before a count
+    finished belongs to the period that count closes, never both."""
+    damaged = rags = 0
+    upper = f" AND {_DMG_WHEN} < %s" if until else ""
+    if item['damage_log_name']:
+        args = (item['damage_log_name'], since) + ((until,) if until else ())
+        cur.execute(f"SELECT COALESCE(SUM(damaged_qty),0) AS q FROM damage_log WHERE item_name=%s AND {_DMG_WHEN}>=%s" + upper, args)
+        damaged = int(cur.fetchone()['q'])
+        cur.execute(f"SELECT COALESCE(SUM(saved_qty),0) AS q FROM damage_log_saved WHERE item_name=%s AND {_DMG_WHEN}>=%s" + upper, args)
+        rags = int(cur.fetchone()['q'])
+    pupper = " AND o.received_at < %s" if until else ""
+    cur.execute("SELECT COALESCE(SUM(i.received_units),0) AS q " + _linen_purchase_where()
+                + " AND i.matched_linen_item_id=%s AND o.received_at >= %s" + pupper,
+                (item['id'], since) + ((until,) if until else ()))
+    purchased = int(cur.fetchone()['q'])
+    return purchased, damaged, rags
+
+
+def _linen_latest_counts(cur):
+    cur.execute("""SELECT DISTINCT ON (linen_item_id) linen_item_id, count_date, qty,
+                          COALESCE(as_of, count_date || ' 00:00:00') AS as_of
+                   FROM linen_counts ORDER BY linen_item_id, count_date DESC, id DESC""")
+    return {r['linen_item_id']: r for r in cur.fetchall()}
+
+
+def _linen_status_rows(cur):
+    """Per active item: latest count, movements since it, est. on hand, status."""
     cur.execute("SELECT * FROM linen_items WHERE active=1 ORDER BY sort_order, name")
     items = [dict(r) for r in cur.fetchall()]
-
-    # Each item's own most recent count (so an item counted later — e.g. the
-    # three added without a Sept 20 count — starts from its own date).
-    cur.execute("""SELECT DISTINCT ON (linen_item_id) linen_item_id, count_date, qty
-                   FROM linen_counts ORDER BY linen_item_id, count_date DESC, id DESC""")
-    counts = {r['linen_item_id']: r for r in cur.fetchall()}
-
+    counts = _linen_latest_counts(cur)
     out = []
     for it in items:
         c = counts.get(it['id'])
         since = c['count_date'] if c else None
-        damaged = rags = purchased = 0
-        if since and it['damage_log_name']:
-            cur.execute("SELECT COALESCE(SUM(damaged_qty),0) AS q FROM damage_log WHERE item_name=%s AND log_date>=%s",
-                        (it['damage_log_name'], since))
-            damaged = int(cur.fetchone()['q'])
-            cur.execute("SELECT COALESCE(SUM(saved_qty),0) AS q FROM damage_log_saved WHERE item_name=%s AND log_date>=%s",
-                        (it['damage_log_name'], since))
-            rags = int(cur.fetchone()['q'])
-        if since:
-            cur.execute("""SELECT COALESCE(SUM(i.received_units),0) AS q
-                           FROM supply_order_items i JOIN supply_orders o ON o.id=i.order_id
-                           WHERE i.matched_linen_item_id=%s AND o.module='housekeeping'
-                             AND o.status='Received' AND SUBSTRING(o.received_at,1,10)>=%s""",
-                        (it['id'], since))
-            purchased = int(cur.fetchone()['q'])
+        purchased = damaged = rags = 0
+        if c:
+            purchased, damaged, rags = _linen_movements(cur, it, c['as_of'])
         par1 = int(it['par1'] or 0); par3 = int(it['par3'] or 0)
         cost = float(it['unit_cost'] or 0)
         est = max(0, c['qty'] + purchased - damaged) if c else None
@@ -8660,14 +8701,39 @@ def linen_summary():
             'reorder_qty': max(0, par3 - est) if (est is not None and par1) else 0,
             'damage_value': round(damaged * cost, 2),
         })
+    return out
 
+
+def _linen_periods(cur, with_items=False):
     cur.execute("SELECT * FROM linen_periods ORDER BY end_date DESC, id DESC")
     periods = []
     for p in cur.fetchall():
         p = dict(p)
         p['unaccounted_value'] = float(p['unaccounted_value'] or 0)
+        if with_items:
+            cur.execute("""SELECT pi.*, li.name, li.category FROM linen_period_items pi
+                           JOIN linen_items li ON li.id = pi.linen_item_id
+                           WHERE pi.period_id=%s ORDER BY li.sort_order, li.name""", (p['id'],))
+            p['items'] = []
+            for r in cur.fetchall():
+                r = dict(r)
+                r['unit_cost'] = float(r['unit_cost'] or 0)
+                r['unaccounted_value'] = float(r['unaccounted_value'] or 0)
+                p['items'].append(r)
         periods.append(p)
+    return periods
 
+
+@app.route('/api/linen/summary', methods=['GET'])
+def linen_summary():
+    """Per item: latest count, purchased/damaged/rags since that count date,
+    est. on hand, coverage, status and reorder qty — plus closed periods and
+    any Damage Log names that don't match a catalog item."""
+    if not has_linen_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    out = _linen_status_rows(cur)
+    periods = _linen_periods(cur)
     # Damage Log names since the earliest current count that no catalog item
     # claims — surfaced so nothing is silently left out of the math.
     earliest = min([o['count_date'] for o in out if o['count_date']] or [LINEN_BASELINE_DATE])
@@ -8676,8 +8742,379 @@ def linen_summary():
     cur.execute("""SELECT item_name, SUM(damaged_qty) AS qty FROM damage_log
                    WHERE log_date>=%s GROUP BY item_name ORDER BY item_name""", (earliest,))
     unmatched = [{'item_name': r['item_name'], 'qty': int(r['qty'])} for r in cur.fetchall() if r['item_name'] not in known]
+    cur.execute("SELECT COUNT(*) AS n FROM linen_count_drafts")
+    draft_open = cur.fetchone()['n'] > 0
     cur.close(); conn.close()
-    return jsonify({'items': out, 'periods': periods, 'unmatched_damage': unmatched, 'as_of': today_central()})
+    return jsonify({'items': out, 'periods': periods, 'unmatched_damage': unmatched,
+                    'as_of': today_central(), 'count_in_progress': draft_open})
+
+
+# ── Phase 5: Loss tracker, Discard log, Purchase log, Baseline ────────────────
+
+@app.route('/api/linen/detail', methods=['GET'])
+def linen_detail():
+    """Everything the four detail tabs need, in one call."""
+    if not has_linen_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    periods = _linen_periods(cur, with_items=True)
+    counts = _linen_latest_counts(cur)
+    cur.execute("SELECT * FROM linen_items WHERE active=1 ORDER BY sort_order, name")
+    items = [dict(r) for r in cur.fetchall()]
+    by_dmg = {i['damage_log_name']: i for i in items if i['damage_log_name']}
+
+    # Discards: every Damage Log row for a catalog item since that item's own
+    # latest count (the rows that feed "Damaged" on Reorder status).
+    discards = []
+    for i in items:
+        c = counts.get(i['id'])
+        if not c or not i['damage_log_name']: continue
+        cur.execute(f"""SELECT log_date, damaged_qty, staff_name FROM damage_log
+                       WHERE item_name=%s AND {_DMG_WHEN}>=%s AND damaged_qty>0""", (i['damage_log_name'], c['as_of']))
+        for r in cur.fetchall():
+            discards.append({'date': r['log_date'], 'item': i['name'], 'category': i['category'],
+                             'qty': int(r['damaged_qty']), 'unit_cost': float(i['unit_cost'] or 0),
+                             'value': round(int(r['damaged_qty']) * float(i['unit_cost'] or 0), 2),
+                             'staff_name': r['staff_name']})
+        cur.execute(f"""SELECT log_date, saved_qty FROM damage_log_saved
+                       WHERE item_name=%s AND {_DMG_WHEN}>=%s AND saved_qty>0""", (i['damage_log_name'], c['as_of']))
+        for r in cur.fetchall():
+            discards.append({'date': r['log_date'], 'item': i['name'], 'category': i['category'],
+                             'qty': int(r['saved_qty']), 'rags': True, 'unit_cost': float(i['unit_cost'] or 0),
+                             'value': 0, 'staff_name': ''})
+    discards.sort(key=lambda d: (d['date'], d['item']), reverse=True)
+
+    # Purchases: tagged, received housekeeping order lines since each item's count.
+    cur.execute("""SELECT i.id AS line_id, i.item_name, i.received_units, i.price, i.unit_label,
+                          i.matched_linen_item_id, o.id AS order_id, o.vendor, o.received_at, o.received_by
+                   """ + _linen_purchase_where() + " ORDER BY o.received_at DESC, i.id")
+    by_id = {i['id']: i for i in items}
+    purchases = []
+    for r in cur.fetchall():
+        it = by_id.get(r['matched_linen_item_id'])
+        c = counts.get(r['matched_linen_item_id'])
+        if not it: continue
+        day = (r['received_at'] or '')[:10]
+        purchases.append({'date': day, 'item': it['name'], 'category': it['category'],
+                          'qty': int(r['received_units'] or 0), 'line_name': r['item_name'],
+                          'price': float(r['price']) if r['price'] is not None else None,
+                          'unit_cost': float(it['unit_cost'] or 0), 'vendor': r['vendor'],
+                          'order_id': r['order_id'], 'received_by': r['received_by'],
+                          'in_current_period': bool(c and (r['received_at'] or '') >= c['as_of'])})
+
+    # Baseline: every count date on record.
+    cur.execute("""SELECT count_date, COUNT(*) AS items, SUM(qty) AS units, MAX(counted_by) AS counted_by
+                   FROM linen_counts GROUP BY count_date ORDER BY count_date DESC""")
+    count_dates = [dict(r) for r in cur.fetchall()]
+    for d in count_dates: d['units'] = int(d['units'] or 0)
+    cur.close(); conn.close()
+    return jsonify({'periods': periods, 'discards': discards, 'purchases': purchases,
+                    'count_dates': count_dates})
+
+
+# ── Phase 4: tag housekeeping order lines as linen ────────────────────────────
+
+@app.route('/api/linen/item-options', methods=['GET'])
+def linen_item_options():
+    """Just id + name of active linen items, for the optional "Linen item"
+    dropdown on the Place Order and Tag purchases screens."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name FROM linen_items WHERE active=1 ORDER BY sort_order, name")
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify(rows)
+
+
+@app.route('/api/linen/order-lines', methods=['GET'])
+def linen_order_lines():
+    """Received housekeeping order lines since the Sept 20 baseline, tagged or
+    not, so linen purchases can be tagged (or a wrong tag fixed)."""
+    if not has_linen_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    since = request.args.get('since') or LINEN_BASELINE_DATE
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT i.id, i.item_name, i.received_units, i.expected_units, i.unit_label, i.price,
+                          i.matched_linen_item_id, o.id AS order_id, o.vendor, o.received_at, o.ordered_by
+                   FROM supply_order_items i JOIN supply_orders o ON o.id = i.order_id
+                   WHERE o.module='housekeeping' AND o.status='Received'
+                     AND SUBSTRING(o.received_at,1,10) >= %s
+                   ORDER BY o.received_at DESC, i.id""", (since,))
+    rows = []
+    for r in cur.fetchall():
+        r = dict(r)
+        if r['price'] is not None: r['price'] = float(r['price'])
+        rows.append(r)
+    cur.close(); conn.close()
+    return jsonify({'lines': rows, 'since': since})
+
+
+@app.route('/api/linen/order-lines/<int:line_id>/tag', methods=['POST'])
+def linen_tag_order_line(line_id):
+    data = request.json or {}
+    if not has_linen_access(data.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    lid = data.get('linen_item_id')
+    lid = int(lid) if lid not in (None, '', 0, '0') else None
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if lid is not None:
+        cur.execute("SELECT name FROM linen_items WHERE id=%s", (lid,))
+        li = cur.fetchone()
+        if not li: cur.close(); conn.close(); return jsonify({'error': 'Unknown linen item'}), 400
+    cur.execute("""UPDATE supply_order_items i SET matched_linen_item_id=%s
+                   FROM supply_orders o WHERE o.id=i.order_id AND o.module='housekeeping' AND i.id=%s
+                   RETURNING i.item_name""", (lid, line_id))
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    if not row: return jsonify({'error': 'Order line not found'}), 404
+    log_audit('LinenInventory', 'Tagged order line' if lid else 'Untagged order line',
+              row['item_name'], resolve_performer(data), li['name'] if lid else '')
+    return jsonify({'success': True})
+
+
+# ── Phase 6: quarterly linen count ────────────────────────────────────────────
+# Blind: the counter sees item names only. Expected numbers never leave the
+# server; only linen_inventory role holders see the results. A draft is saved
+# as people count, so a refresh or switching iPads doesn't lose progress.
+
+LINEN_COUNT_ROLES = {'manager', 'admin', 'linen_inventory'}  # not warehouse — they don't do the linen count
+
+
+def has_linen_count_access(pin):
+    if not pin: return False
+    staff = check_staff_pin(str(pin))
+    return bool(LINEN_COUNT_ROLES & set(staff_role_list(staff)))
+
+
+def _clean_counts(raw):
+    out = {}
+    for k, v in (raw or {}).items():
+        if v in (None, ''): continue
+        try:
+            q = int(v); kid = int(k)
+        except (TypeError, ValueError):
+            continue
+        if q >= 0: out[str(kid)] = q
+    return out
+
+
+@app.route('/api/linen/count', methods=['GET'])
+def linen_count_state():
+    if not has_linen_count_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen count access required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name, category FROM linen_items WHERE active=1 ORDER BY sort_order, name")
+    items = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT * FROM linen_count_drafts WHERE id=1")
+    d = cur.fetchone()
+    cur.execute("SELECT MAX(count_date) AS d FROM linen_counts")
+    last = cur.fetchone()['d']
+    cur.close(); conn.close()
+    draft = None
+    if d:
+        draft = {'counts': json.loads(d['counts'] or '{}'), 'started_by': d['started_by'], 'started_at': d['started_at'],
+                 'updated_by': d['updated_by'], 'updated_at': d['updated_at']}
+    return jsonify({'items': items, 'draft': draft, 'last_count_date': last, 'today': today_central()})
+
+
+@app.route('/api/linen/count/draft', methods=['POST'])
+def linen_count_save_draft():
+    data = request.json or {}
+    if not has_linen_count_access(data.get('pin')):
+        return jsonify({'error': 'Linen count access required'}), 403
+    # Merges only the fields that changed ({item_id: qty, or null to clear}),
+    # so two people counting different closets at once don't overwrite each
+    # other. Row-locked so simultaneous saves apply one after the other.
+    who = resolve_performer(data); ts = now_central()
+    changes = data.get('changes') or {}
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO linen_count_drafts (id, counts, started_by, started_at, updated_by, updated_at)
+                   VALUES (1,'{}',%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING""", (who, ts, who, ts))
+    cur.execute("SELECT counts FROM linen_count_drafts WHERE id=1 FOR UPDATE")
+    counts = json.loads(cur.fetchone()[0] or '{}')
+    for k, v in changes.items():
+        try: kid = str(int(k))
+        except (TypeError, ValueError): continue
+        if v in (None, ''):
+            counts.pop(kid, None)
+        else:
+            try: q = int(v)
+            except (TypeError, ValueError): continue
+            if q >= 0: counts[kid] = q
+    cur.execute("UPDATE linen_count_drafts SET counts=%s, updated_by=%s, updated_at=%s WHERE id=1",
+                (json.dumps(counts), who, ts))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({'success': True, 'saved_at': ts, 'counts': counts})
+
+
+@app.route('/api/linen/count/draft', methods=['DELETE'])
+def linen_count_discard_draft():
+    data = request.json or {}
+    if not has_linen_count_access(data.get('pin')):
+        return jsonify({'error': 'Linen count access required'}), 403
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM linen_count_drafts WHERE id=1")
+    conn.commit(); cur.close(); conn.close()
+    log_audit('LinenInventory', 'Cancelled linen count', '', resolve_performer(data))
+    return jsonify({'success': True})
+
+
+@app.route('/api/linen/count/submit', methods=['POST'])
+def linen_count_submit():
+    """Finish the quarterly count: record each counted item, close its period
+    (unaccounted loss = last count + purchases − damage − this count), and
+    start the next period from today. Items left blank keep their old period."""
+    data = request.json or {}
+    pin = data.get('pin')
+    if not has_linen_count_access(pin):
+        return jsonify({'error': 'Linen count access required'}), 403
+    who = resolve_performer(data); ts = now_central(); today = today_central()
+    notes = (data.get('notes') or '').strip() or None
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # The saved draft is the full picture (it merges everyone's entries);
+    # anything this browser sends is layered on top in case its last save
+    # hadn't landed yet.
+    cur.execute("SELECT counts FROM linen_count_drafts WHERE id=1")
+    d = cur.fetchone()
+    counts = _clean_counts(json.loads(d['counts']) if d else {})
+    counts.update(_clean_counts(data.get('counts')))
+    if not counts:
+        cur.close(); conn.close()
+        return jsonify({'error': 'Enter at least one count before finishing.'}), 400
+    cur.execute("SELECT 1 FROM linen_counts WHERE count_date=%s LIMIT 1", (today,))
+    if cur.fetchone():
+        cur.close(); conn.close()
+        return jsonify({'error': 'A linen count was already finished today. If it needs redoing, ask Kristin or Sabrina to undo it first.'}), 409
+    cur.execute("SELECT * FROM linen_items WHERE active=1")
+    items = {str(r['id']): dict(r) for r in cur.fetchall()}
+    latest = _linen_latest_counts(cur)
+    rows = []
+    for sid, qty in counts.items():
+        it = items.get(sid)
+        if not it: continue
+        prev = latest.get(it['id'])
+        cur.execute("INSERT INTO linen_counts (count_date, linen_item_id, qty, counted_by, created_at, as_of) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (today, it['id'], qty, who, ts, ts))
+        if prev and prev['count_date'] < today:
+            p, d, rg = _linen_movements(cur, it, prev['as_of'], ts)
+            gap = (prev['qty'] + p - d) - qty
+            cost = float(it['unit_cost'] or 0)
+            rows.append((it['id'], prev['count_date'], prev['qty'], p, d, rg, qty, gap, cost))
+    period_id = None
+    if rows:
+        tot_loss = sum(max(0, r[7]) for r in rows)
+        tot_val = sum(max(0, r[7]) * r[8] for r in rows)
+        cur.execute("""INSERT INTO linen_periods (start_date,end_date,starting_count,purchased,damaged,rags,
+                          ending_count,unaccounted_units,unaccounted_value,closed_at,notes)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                    (min(r[1] for r in rows), today, sum(r[2] for r in rows), sum(r[3] for r in rows),
+                     sum(r[4] for r in rows), sum(r[5] for r in rows), sum(r[6] for r in rows),
+                     tot_loss, round(tot_val, 2), ts, f'Counted by {who}' + (f' — {notes}' if notes else '')))
+        period_id = cur.fetchone()['id']
+        for (iid, _s, base, p, d, rg, qty, gap, cost) in rows:
+            cur.execute("""INSERT INTO linen_period_items (period_id,linen_item_id,starting_count,purchased,damaged,
+                              rags,ending_count,unaccounted_units,unit_cost,unaccounted_value)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (period_id, iid, base, p, d, rg, qty, gap, cost, round(max(0, gap) * cost, 2)))
+    cur.execute("DELETE FROM linen_count_drafts WHERE id=1")
+    conn.commit(); cur.close(); conn.close()
+    log_audit('LinenInventory', 'Finished linen count', f'{len(counts)} items', who, notes or '')
+    return jsonify({'success': True, 'items_counted': len(counts), 'period_id': period_id,
+                    'show_results': has_linen_access(pin)})
+
+
+@app.route('/api/linen/count/undo', methods=['POST'])
+def linen_count_undo():
+    """Undo the most recent count (a mistake, or counted on the wrong day):
+    removes that date's counts and the period it closed, so the previous
+    period is open again. Only the latest count can be undone."""
+    data = request.json or {}
+    if not has_linen_access(data.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    day = (data.get('count_date') or '').strip()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT MAX(count_date) FROM linen_counts")
+    latest = cur.fetchone()[0]
+    if not day or day != latest:
+        cur.close(); conn.close(); return jsonify({'error': 'Only the most recent count can be undone.'}), 400
+    cur.execute("SELECT COUNT(DISTINCT count_date) FROM linen_counts")
+    if cur.fetchone()[0] <= 1:
+        cur.close(); conn.close(); return jsonify({'error': "The Sept 20 baseline can't be undone."}), 400
+    cur.execute("DELETE FROM linen_period_items WHERE period_id IN (SELECT id FROM linen_periods WHERE end_date=%s)", (day,))
+    cur.execute("DELETE FROM linen_periods WHERE end_date=%s", (day,))
+    cur.execute("DELETE FROM linen_counts WHERE count_date=%s", (day,))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('LinenInventory', 'Undid linen count', day, resolve_performer(data))
+    return jsonify({'success': True})
+
+
+# ── Phase 7: Monday reorder email to Sarah Elizabeth ──────────────────────────
+
+LINEN_REORDER_EMAIL_DAY = 0  # Monday (Python weekday(): Monday=0 … Sunday=6)
+
+
+def send_linen_reorder_email():
+    """Email Sarah Elizabeth the items below 1 par with reorder quantities.
+    Returns (sent, n_items). Sends nothing when no item is below 1 par."""
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    rows = [r for r in _linen_status_rows(cur) if r['status'] == 'order']
+    cur.close(); conn.close()
+    if not rows: return False, 0
+    rows.sort(key=lambda r: (r['supplier'] or 'zzz', r['name']))
+    total = sum(r['reorder_qty'] * r['unit_cost'] for r in rows)
+    lines = [f"- {r['name']}: {r['est_on_hand']:,} on hand (1 par {r['par1']:,}) → order {r['reorder_qty']:,}"
+             f" from {r['supplier'] or 'supplier not set'}" for r in rows]
+    body = ("These linen items are below 1 par. Reorder quantities bring each back to 3 par.\n\n"
+            + "\n".join(lines) + f"\n\nEstimated cost: ${total:,.0f}\n\nFull details: SandersCentral → Linen Inventory")
+    td = 'padding:8px 10px;border-bottom:1px solid #eee;font-size:13px'
+    html = (f"<div style=\"font-family:Arial,sans-serif;color:#1a1a18;max-width:640px\">"
+            f"<h2 style=\"font-size:18px;color:#3a4e5d;margin:0 0 8px\">Linen to reorder</h2>"
+            f"<p style=\"font-size:13px;color:#444;margin:0 0 16px\">These items are below 1 par. "
+            f"Reorder quantities bring each back to 3 par.</p>"
+            f"<table style=\"border-collapse:collapse;width:100%\"><tr style=\"text-align:left;font-size:11px;color:#888;text-transform:uppercase\">"
+            f"<th style=\"{td}\">Item</th><th style=\"{td}\">Supplier</th><th style=\"{td};text-align:right\">On hand</th>"
+            f"<th style=\"{td};text-align:right\">1 par</th><th style=\"{td};text-align:right\">Order</th></tr>"
+            + "".join(f"<tr><td style=\"{td};font-weight:600\">{r['name']}</td><td style=\"{td}\">{r['supplier'] or '—'}</td>"
+                      f"<td style=\"{td};text-align:right\">{r['est_on_hand']:,}</td><td style=\"{td};text-align:right\">{r['par1']:,}</td>"
+                      f"<td style=\"{td};text-align:right;font-weight:600;color:#a32d2d\">{r['reorder_qty']:,}</td></tr>" for r in rows)
+            + f"</table><p style=\"font-size:13px;margin:16px 0 4px\">Estimated cost: <strong>${total:,.0f}</strong></p>"
+            f"<p style=\"font-size:12px;color:#888;margin:0\">On hand is estimated from the last linen count, plus tagged purchases, "
+            f"minus linen logged as damaged. Full details in SandersCentral → Linen Inventory.</p></div>")
+    subject = f"Linen to reorder — {len(rows)} item{'s' if len(rows) != 1 else ''} below 1 par"
+    send_email(subject, body, to=SARAH_EMAIL, html_body=html)
+    return True, len(rows)
+
+
+def run_linen_reorder_email_check(force=False):
+    """Once per week on Monday, only if at least one item is below 1 par.
+    Same once-a-week guard as the forecast email (daily_alert_log)."""
+    now = datetime.now(pytz.utc).astimezone(CENTRAL)
+    if not force and now.weekday() != LINEN_REORDER_EMAIL_DAY:
+        return {'sent': False, 'reason': 'not reorder email day'}
+    week_key = now.strftime('%G-W%V')
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT 1 FROM daily_alert_log WHERE alert_type='linen_reorder' AND log_date=%s", (week_key,))
+    if cur.fetchone() and not force:
+        cur.close(); conn.close()
+        return {'sent': False, 'reason': 'already checked this week'}
+    cur.close(); conn.close()
+    sent, n = send_linen_reorder_email()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO daily_alert_log (alert_type,log_date,sent_at) VALUES ('linen_reorder',%s,%s) ON CONFLICT DO NOTHING",
+                (week_key, now_central()))
+    conn.commit(); cur.close(); conn.close()
+    if sent: log_audit('LinenInventory', 'Emailed Sarah linen reorder list', f'{n} item(s)', 'System')
+    return {'sent': sent, 'items': n}
+
+
+@app.route('/api/linen/reorder-email/send', methods=['POST'])
+def linen_reorder_email_now():
+    """"Email Sarah now" button on Reorder status."""
+    data = request.json or {}
+    if not has_linen_access(data.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    sent, n = send_linen_reorder_email()
+    if sent: log_audit('LinenInventory', 'Emailed Sarah linen reorder list', f'{n} item(s)', resolve_performer(data))
+    return jsonify({'success': True, 'sent': sent, 'items': n})
 
 
 @app.route('/api/linen/items', methods=['GET'])
