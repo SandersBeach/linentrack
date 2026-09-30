@@ -84,10 +84,24 @@
     <div class="topbar-logo">SANDERS BEACH RENTALS <span>· PO Approvals</span></div>
   </div>
   <div style="flex:1"></div>
-  <button class="refresh-btn" onclick="loadRequests()">↻ Refresh</button>
+  <span id="signed-in-as" style="font-size:12px;color:var(--gray-700);margin-right:12px;display:none"></span>
+  <button class="refresh-btn" id="signout-btn" onclick="signOut()" style="display:none;margin-right:8px">Sign out</button>
+  <button class="refresh-btn" id="refresh-btn" onclick="loadRequests()" style="display:none">↻ Refresh</button>
 </div>
 
-<div class="content">
+<div class="content" id="signin-area" style="max-width:360px;display:none">
+  <div style="background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:24px;margin-top:24px">
+    <h3 style="font-size:16px;margin-bottom:6px">Sign in to review requests</h3>
+    <div style="font-size:13px;color:var(--gray-700);margin-bottom:16px">Enter your own SandersCentral PIN.</div>
+    <input id="signin-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="PIN"
+      onkeydown="if(event.key==='Enter')signIn()"
+      style="width:100%;padding:12px;font-size:18px;letter-spacing:0.3em;border:1px solid var(--gray-200);border-radius:var(--radius-sm);font-family:var(--font)">
+    <div id="signin-err" style="color:var(--coral);font-size:13px;min-height:18px;margin:8px 0"></div>
+    <button class="btn btn-teal" style="width:100%" onclick="signIn()">Sign in</button>
+  </div>
+</div>
+
+<div class="content" id="main-area" style="display:none">
   <div id="stats-area"></div>
   <div class="filter-row" id="filter-row">
     <button class="filter-btn active" onclick="setFilter('Pending')" id="f-Pending">⏳ Pending</button>
@@ -105,12 +119,7 @@
     <div class="modal-sub" id="modal-sub"></div>
     <input type="hidden" id="modal-req-id">
     <input type="hidden" id="modal-action">
-    <label>Your name</label>
-    <select id="modal-approver">
-      <option value="">Select your name...</option>
-      <option value="Sabrina Renshaw">Sabrina Renshaw</option>
-      <option value="Sarah Jordan">Sarah Jordan</option>
-    </select>
+    <div id="modal-approver" style="font-size:13px;color:var(--gray-700);margin:10px 0 4px"></div>
     <label>Notes (optional)</label>
     <textarea id="modal-notes" placeholder="Add any notes for the employee..."></textarea>
     <div class="modal-actions">
@@ -121,12 +130,88 @@
 </div>
 
 <script>
+// Device ID for sign-in lockout (per device, not per person). Added to
+// every /api request so the server can recognize this phone or iPad.
+(function () {
+  let dev = '';
+  try {
+    dev = localStorage.getItem('sbr_device_id') || '';
+    if (!dev) {
+      dev = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)));
+      dev = dev.replace(/[^A-Za-z0-9_-]/g, '');
+      localStorage.setItem('sbr_device_id', dev);
+    }
+  } catch (e) {}
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (dev && (url.startsWith('/api/') || url.startsWith(location.origin + '/api/'))) {
+      init = Object.assign({}, init || {});
+      const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+      h.set('X-Device-Id', dev);
+      init.headers = h;
+    }
+    return nativeFetch(input, init);
+  };
+})();
+
 let _requests = [];
 let _filter = 'Pending';
+let _me = null;
+let _refreshTimer = null;
+
+// Approvers sign in with their own PIN. The server decides who is approving
+// from that sign-in — there is no name to pick.
+function showSignIn(msg) {
+  _me = null;
+  if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+  document.getElementById('main-area').style.display = 'none';
+  document.getElementById('signin-area').style.display = '';
+  ['signed-in-as', 'signout-btn', 'refresh-btn'].forEach(id => document.getElementById(id).style.display = 'none');
+  document.getElementById('signin-err').textContent = msg || '';
+  const pin = document.getElementById('signin-pin'); pin.value = ''; setTimeout(() => pin.focus(), 50);
+}
+
+function showMain(me) {
+  _me = me;
+  document.getElementById('signin-area').style.display = 'none';
+  document.getElementById('main-area').style.display = '';
+  const who = document.getElementById('signed-in-as');
+  who.textContent = 'Signed in as ' + me.name; who.style.display = '';
+  document.getElementById('signout-btn').style.display = '';
+  document.getElementById('refresh-btn').style.display = '';
+  loadRequests();
+  if (!_refreshTimer) _refreshTimer = setInterval(loadRequests, 60000);
+}
+
+async function signIn() {
+  const pin = document.getElementById('signin-pin').value.trim();
+  if (!pin) return;
+  try {
+    const res = await fetch('/api/staff/auth', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ pin }) });
+    const data = await res.json();
+    if (!res.ok || !data.success) { showSignIn(res.status === 423 ? data.error : 'Wrong PIN — try again.'); return; }
+    showMain({ name: data.name });
+  } catch (e) { showSignIn('Connection error — please try again.'); }
+}
+
+async function signOut() {
+  try { await fetch('/api/staff/logout', { method: 'POST' }); } catch (e) {}
+  showSignIn('');
+}
+
+async function checkSignedIn() {
+  try {
+    const res = await fetch('/api/staff/me');
+    if (res.ok) { const data = await res.json(); if (data.name) { showMain(data); return; } }
+  } catch (e) {}
+  showSignIn('');
+}
 
 async function loadRequests() {
   try {
     const res = await fetch('/api/po-requests');
+    if (res.status === 401) { showSignIn('Please sign in again.'); return; }
     _requests = await res.json();
     renderStats();
     renderRequests();
@@ -237,16 +322,12 @@ function openDecide(id, action, vendor, amount, stage) {
   document.getElementById('modal-title').textContent = action==='Approved' ? '✅ Approve Request' : '❌ Deny Request';
   const stageNote = stage === 'chuck' ? ' — Level 1 (Chuck Howard)' : '';
   document.getElementById('modal-sub').textContent = `${vendor} — $${parseFloat(amount).toFixed(2)}${stageNote}`;
-  const approverSel = document.getElementById('modal-approver');
-  approverSel.innerHTML = stage === 'chuck'
-    ? '<option value="">Select your name...</option><option value="Chuck Howard">Chuck Howard</option>'
-    : '<option value="">Select your name...</option><option value="Sabrina Renshaw">Sabrina Renshaw</option><option value="Sarah Jordan">Sarah Jordan</option>';
-  approverSel.value = '';
+  document.getElementById('modal-approver').textContent = 'Deciding as ' + (_me ? _me.name : '');
   document.getElementById('modal-notes').value = '';
   document.getElementById('modal-confirm-btn').textContent = action==='Approved' ? 'Confirm Approval' : 'Confirm Denial';
   document.getElementById('modal-confirm-btn').style.background = action==='Approved' ? 'var(--green)' : 'var(--coral)';
   document.getElementById('modal-decide').style.display = 'flex';
-  setTimeout(()=>document.getElementById('modal-approver').focus(), 100);
+  setTimeout(()=>document.getElementById('modal-notes').focus(), 100);
 }
 
 function closeModal() { document.getElementById('modal-decide').style.display='none'; }
@@ -254,18 +335,17 @@ function closeModal() { document.getElementById('modal-decide').style.display='n
 async function confirmDecision() {
   const id = document.getElementById('modal-req-id').value;
   const status = document.getElementById('modal-action').value;
-  const approver_name = document.getElementById('modal-approver').value.trim();
   const notes = document.getElementById('modal-notes').value.trim();
-  if (!approver_name) { alert('Please select your name.'); return; }
   const btn = document.getElementById('modal-confirm-btn');
   btn.textContent = 'Sending...'; btn.disabled = true;
   try {
     const res = await fetch(`/api/po-requests/${id}/decide`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({status, approver_name, notes})
+      body: JSON.stringify({status, notes})
     });
     const data = await res.json();
+    if (data.session_required) { closeModal(); btn.disabled=false; showSignIn('Please sign in again.'); return; }
     if (data.error) { alert(data.error); btn.textContent='Confirm'; btn.disabled=false; return; }
     closeModal();
     await loadRequests();
@@ -275,10 +355,8 @@ async function confirmDecision() {
   }
 }
 
-// Load on start
-loadRequests();
-// Auto-refresh every 60 seconds
-setInterval(loadRequests, 60000);
+// Start: reuse an existing sign-in if there is one, otherwise ask for a PIN.
+checkSignedIn();
 </script>
 </body>
 </html>
