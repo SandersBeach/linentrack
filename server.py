@@ -1,5 +1,5 @@
 import os, json, qrcode, io, base64, random, string, urllib.request, threading, time, csv, secrets, hashlib, re
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response, g
 from datetime import datetime, timedelta
 import psycopg2
 import psycopg2.extras
@@ -38,10 +38,10 @@ _SBR_LOGO_BOLD_IMG = ImageReader(_sbr_logo_bold_buf)
 app = Flask(__name__, static_folder='public', static_url_path='')
 CENTRAL = pytz.timezone('America/Chicago')
 
-WAREHOUSE_PIN    = os.environ.get('WAREHOUSE_PIN',    '1234')
-ADMIN_PIN        = os.environ.get('ADMIN_PIN',        '9999')
-MAINTENANCE_PIN  = os.environ.get('MAINTENANCE_PIN',  '5678')
-COORDINATOR_PIN  = os.environ.get('COORDINATOR_PIN',  '2468')
+# Shared role PINs (Warehouse/Admin/Maintenance/Coordinator) are retired.
+# Only PINs assigned to a person (Staff members) or a cleaner can sign in.
+# The WAREHOUSE_PIN / ADMIN_PIN / MAINTENANCE_PIN / COORDINATOR_PIN Railway
+# variables are no longer read and can be deleted.
 
 ALERT_EMAIL          = 'accountingdepartment@sandersbeachrentals.com'
 HOUSEKEEPING_MANAGER = 'cassie@sandersbeachrentals.com'
@@ -112,15 +112,13 @@ def log_audit(area, action, item='', performed_by='', details=''):
 def resolve_performer(data):
     """Given a request body, figure out who's doing this action. Prefers an
     explicit staff_name (sent by logged-in individual-PIN sessions). Falls back
-    to resolving admin_pin/pin against individual staff, then legacy shared PINs."""
+    to resolving admin_pin/pin against individual staff."""
     if data.get('staff_name'):
         return data['staff_name']
     pin = str(data.get('admin_pin') or data.get('pin') or '')
     if pin:
         staff = check_staff_pin(pin)
         if staff: return staff['name']
-        role = check_pin(pin)
-        if role: return role.capitalize()
     return 'Unknown'
 
 def staff_role_list(staff):
@@ -129,7 +127,7 @@ def staff_role_list(staff):
     if not staff or not staff.get('role'): return []
     return [r.strip() for r in staff['role'].split(',') if r.strip()]
 
-VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager', 'store_manager', 'housekeeping_orders'}
+VALID_ROLES = {'warehouse', 'maintenance', 'coordinator', 'inspector', 'admin', 'manager', 'store_manager', 'housekeeping_orders', 'linen_inventory'}
 
 # Which order module(s) each non-admin role may place orders for. Admin can
 # always place either module regardless of this map. A role not listed here
@@ -155,10 +153,8 @@ def validate_role_string(role_str):
     return ','.join(cleaned), None
 
 def is_admin_pin(pin):
-    """True if this PIN is the legacy shared admin PIN OR belongs to an
-    individual staff member whose role list includes 'admin'. Use this
-    (not check_pin alone) for every admin-gated route."""
-    if check_pin(pin) == 'admin': return True
+    """True if this PIN belongs to an active staff member whose role list
+    includes 'admin'. Use this for every admin-gated route."""
     staff = check_staff_pin(pin)
     return 'admin' in staff_role_list(staff)
 
@@ -166,22 +162,21 @@ def is_manager_or_admin_pin(pin):
     """True for admin OR manager — used for actions Cassie should be able to
     do (like cancelling a reservation) that warehouse/other roles should not."""
     if is_admin_pin(pin): return True
-    if check_pin(pin) == 'manager': return True
     staff = check_staff_pin(pin)
     return 'manager' in staff_role_list(staff)
 
 def resolve_roles(pin):
-    """Return the effective list of roles for a PIN — checks individual staff
-    first (may hold multiple roles), then falls back to the single legacy
-    shared-PIN role. Always returns a list, even if empty."""
-    staff = check_staff_pin(pin)
-    if staff: return staff_role_list(staff)
-    legacy = check_pin(pin)
-    return [legacy] if legacy else []
+    """Return the effective list of roles for a staff member's PIN (may hold
+    multiple roles). Always returns a list, even if empty."""
+    return staff_role_list(check_staff_pin(pin))
 
-_DB_URL = (os.environ.get('DATABASE_URL') or
-           os.environ.get('DATABASE_PUBLIC_URL') or
-           'postgresql://postgres:vPzxJamFkEIxprlqLqPLdUgYFDkTZicQ@acela.proxy.rlwy.net:57535/railway')
+# The database address comes only from Railway. There is deliberately no
+# built-in fallback: if the variable is missing, stop with a clear message
+# rather than connect somewhere unexpected.
+_DB_URL = os.environ.get('DATABASE_URL') or os.environ.get('DATABASE_PUBLIC_URL')
+if not _DB_URL:
+    raise SystemExit('[STARTUP] DATABASE_URL is not set. In Railway, open this service -> Variables '
+                     'and add DATABASE_URL (a reference to the Postgres service), then Deploy Changes.')
 
 def get_db():
     db_url = _DB_URL
@@ -194,9 +189,8 @@ def generate_cleaner_pin(conn):
     cur = conn.cursor()
     while True:
         pin = ''.join(random.choices(string.digits, k=5))
-        # Make sure it doesn't collide with staff PINs or other cleaner PINs
-        if pin in (WAREHOUSE_PIN, ADMIN_PIN, MAINTENANCE_PIN, COORDINATOR_PIN):
-            continue
+        # Cleaner PINs are 5 digits and staff PINs 4, so only other
+        # cleaners can collide.
         cur.execute("SELECT COUNT(*) FROM cleaners WHERE pin=%s", (pin,))
         if cur.fetchone()[0] == 0:
             cur.close()
@@ -1181,14 +1175,6 @@ def init_db():
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def check_pin(pin):
-    p = str(pin)
-    if p == ADMIN_PIN: return 'admin'
-    if p == MAINTENANCE_PIN: return 'maintenance'
-    if p == WAREHOUSE_PIN: return 'warehouse'
-    if p == COORDINATOR_PIN: return 'coordinator'
-    return None
-
 def send_email(subject, body, to=ALERT_EMAIL, html_body=None):
     print(f'[EMAIL ATTEMPT] {subject} | key_present={bool(SENDGRID_API_KEY)} | from={FROM_EMAIL}', flush=True)
     if not SENDGRID_API_KEY:
@@ -1445,14 +1431,520 @@ def warehouse_display(): return _no_cache_html('warehouse-display.html')
 @app.route('/cleaner-checkin')
 def cleaner_checkin_page(): return _no_cache_html('checkin.html')
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
+# ── Sign-in security ─────────────────────────────────────────────────────────
+# 1. Sessions: signing in with a personal PIN (staff) or cleaner PIN issues a
+#    private, random session key in an HttpOnly cookie. The database stores
+#    only a hash of it. Staff sessions end after 24h without activity, or on
+#    sign-out; deactivating a staff member ends theirs within a minute.
+# 2. Gate: every /api request must carry a valid staff session, except the
+#    short OPEN list below (sign-in itself, and the cleaner/warehouse pages
+#    that check their own PIN or session). AUTH_ENFORCE (Railway variable)
+#    decides what happens to a request without one:
+#      unset / false → REPORT-ONLY: it's allowed, and logged in Settings →
+#                      Sign-in security so we can see anything legitimate
+#                      that would have been blocked.
+#      true          → blocked with 401, and the app returns to sign-in.
+# 3. Lockout (always on):
+#      staff PIN   — 3 wrong in a row on one device locks that device until an
+#                    admin unlocks it (Settings → Sign-in security). Kristin
+#                    gets an email.
+#      cleaner PIN — 5 wrong in a row on one device locks it for 15 minutes.
+#      new devices — a device that has never signed in successfully is
+#                    "new". If new devices rack up 10 wrong PINs in total
+#                    (staff + cleaner), sign-in from ALL new devices pauses
+#                    until an admin re-enables it, and Kristin gets an email.
+#                    Devices that have signed in before are unaffected, so a
+#                    guessing script can't shut out the team.
+#    IP addresses aren't used: on Railway every visitor can show up with the
+#    same edge IP, so an IP rule could lock out everyone at once.
 
-@app.route('/api/auth', methods=['POST'])
-def auth():
-    data = request.json or {}
-    role = check_pin(str(data.get('pin','')))
-    if role: return jsonify({'success':True,'role':role})
-    return jsonify({'success':False}), 401
+AUTH_ENFORCE = os.environ.get('AUTH_ENFORCE', '').strip().lower() in ('1', 'true', 'yes', 'on')
+STAFF_SESSION_IDLE_HOURS = 24
+CLEANER_SESSION_HOURS = 12
+STAFF_LOCK_AFTER = 3
+CLEANER_LOCK_AFTER = 5
+CLEANER_LOCK_MINUTES = 15
+NEW_DEVICE_FAILURE_LIMIT = 10
+_STAFF_COOKIE = 'sbr_session'
+_CLEANER_COOKIE = 'sbr_cleaner'
+
+# Routes reachable with no staff session. Each one either IS a sign-in, or
+# checks its own credential (cleaner PIN, check-in session, webhook secret).
+AUTH_OPEN_RULES = {
+    '/api/app-version',
+    '/api/staff/auth',
+    '/api/staff/logout',
+    '/api/staff/me',                            # answers only "who am I" (401 if nobody)
+    '/api/cleaner-auth',                        # pickup page sign-in (cleaner PIN)
+    '/api/bag/<path:bag_id>/pickup',            # checks cleaner PIN itself
+    '/api/warehouse-checkin/current-token',     # warehouse TV display (rotating QR)
+    '/api/warehouse-checkin/start-session',     # checks QR token + cleaner PIN
+    '/api/warehouse-checkin/checkin-bag',       # checks check-in session
+    '/api/breezeway/webhook/<secret>',          # checks webhook secret
+}
+# Reachable with a staff session OR that cleaner's own session.
+AUTH_CLEANER_RULES = {
+    '/api/cleaner/<int:cleaner_id>/out-bags',
+    '/api/cleaner/<int:cleaner_id>/staged-bags',
+}
+
+
+def _utcnow():
+    return datetime.utcnow()
+
+
+def _hash_token(tok):
+    return hashlib.sha256(tok.encode()).hexdigest()
+
+
+def init_security_tables():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS staff_sessions (
+            token_hash TEXT PRIMARY KEY,
+            staff_id INTEGER NOT NULL,
+            device_id TEXT,
+            created_at TIMESTAMP NOT NULL,
+            last_seen TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS staff_sessions_staff_idx ON staff_sessions(staff_id);
+        CREATE TABLE IF NOT EXISTS cleaner_sessions (
+            token_hash TEXT PRIMARY KEY,
+            cleaner_id INTEGER NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS login_devices (
+            device_id TEXT PRIMARY KEY,
+            first_success TIMESTAMP,
+            last_success TIMESTAMP,
+            last_name TEXT,
+            last_kind TEXT
+        );
+        CREATE TABLE IF NOT EXISTS login_failures (
+            id SERIAL PRIMARY KEY,
+            kind TEXT NOT NULL,
+            device_id TEXT,
+            known INTEGER NOT NULL DEFAULT 0,
+            ts TIMESTAMP NOT NULL,
+            user_agent TEXT
+        );
+        CREATE INDEX IF NOT EXISTS login_failures_dev_idx ON login_failures(device_id, kind, ts);
+        CREATE TABLE IF NOT EXISTS device_lockouts (
+            id SERIAL PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            locked_at TIMESTAMP NOT NULL,
+            unlock_at TIMESTAMP,
+            reason TEXT,
+            cleared_at TIMESTAMP,
+            cleared_by TEXT
+        );
+        CREATE TABLE IF NOT EXISTS security_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+        CREATE TABLE IF NOT EXISTS auth_would_block (
+            method TEXT NOT NULL,
+            rule TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            first_seen TIMESTAMP,
+            last_seen TIMESTAMP,
+            last_referer TEXT,
+            last_user_agent TEXT,
+            PRIMARY KEY (method, rule)
+        );
+    """)
+    cur.execute("DELETE FROM staff_sessions WHERE expires_at < %s", (_utcnow(),))
+    cur.execute("DELETE FROM cleaner_sessions WHERE expires_at < %s", (_utcnow(),))
+    cur.execute("DELETE FROM login_failures WHERE ts < %s", (_utcnow() - timedelta(days=90),))
+    conn.commit(); cur.close(); conn.close()
+    print(f"[Security] Sign-in checks {'ENFORCED' if AUTH_ENFORCE else 'in REPORT-ONLY mode'}", flush=True)
+
+
+# ── Cookies & sessions ────────────────────────────────────────────────────────
+
+def _cookie_secure():
+    return request.is_secure or request.headers.get('X-Forwarded-Proto', '').lower() == 'https'
+
+
+def _set_cookie(resp, name, token):
+    resp.set_cookie(name, token, httponly=True, secure=_cookie_secure(), samesite='Strict', path='/')
+
+
+_session_cache = {}  # token_hash -> (staff dict or None, cached_until)
+_SESSION_CACHE_SECONDS = 60
+
+
+def create_staff_session(resp, staff):
+    tok = secrets.token_urlsafe(32)
+    now = _utcnow()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""INSERT INTO staff_sessions (token_hash, staff_id, device_id, created_at, last_seen, expires_at)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (_hash_token(tok), staff['id'], _device_id(), now, now, now + timedelta(hours=STAFF_SESSION_IDLE_HOURS)))
+    conn.commit(); cur.close(); conn.close()
+    _set_cookie(resp, _STAFF_COOKIE, tok)
+
+
+def current_staff():
+    """The signed-in staff member for this request (dict with id, name, email,
+    roles), or None. Cached per request and briefly across requests."""
+    if 'auth_staff' in g: return g.auth_staff
+    g.auth_staff = None
+    tok = request.cookies.get(_STAFF_COOKIE)
+    if not tok: return None
+    h = _hash_token(tok)
+    now = _utcnow()
+    hit = _session_cache.get(h)
+    if hit and hit[1] > now:
+        g.auth_staff = hit[0]
+        return g.auth_staff
+    staff = None
+    try:
+        conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""SELECT s.last_seen, m.id, m.name, m.email, m.role
+                       FROM staff_sessions s JOIN staff_members m ON m.id = s.staff_id
+                       WHERE s.token_hash=%s AND s.expires_at > %s AND m.active=1""", (h, now))
+        row = cur.fetchone()
+        if row:
+            staff = {'id': row['id'], 'name': row['name'], 'email': row['email'] or '',
+                     'roles': staff_role_list(row)}
+            if not staff['roles']:
+                staff = None
+            elif (now - row['last_seen']).total_seconds() > 600:
+                # Sliding expiry: active sessions keep renewing.
+                cur.execute("UPDATE staff_sessions SET last_seen=%s, expires_at=%s WHERE token_hash=%s",
+                            (now, now + timedelta(hours=STAFF_SESSION_IDLE_HOURS), h))
+                conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Security] session lookup failed: {e}', flush=True)
+        return None
+    _session_cache[h] = (staff, now + timedelta(seconds=_SESSION_CACHE_SECONDS))
+    if len(_session_cache) > 5000: _session_cache.clear()
+    g.auth_staff = staff
+    return staff
+
+
+def end_staff_session(resp):
+    tok = request.cookies.get(_STAFF_COOKIE)
+    if tok:
+        h = _hash_token(tok)
+        _session_cache.pop(h, None)
+        try:
+            conn = get_db(); cur = conn.cursor()
+            cur.execute("DELETE FROM staff_sessions WHERE token_hash=%s", (h,))
+            conn.commit(); cur.close(); conn.close()
+        except Exception as e:
+            print(f'[Security] sign-out cleanup failed: {e}', flush=True)
+    resp.delete_cookie(_STAFF_COOKIE, path='/', samesite='Strict', secure=_cookie_secure(), httponly=True)
+
+
+def create_cleaner_session(resp, cleaner_id):
+    tok = secrets.token_urlsafe(32)
+    now = _utcnow()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO cleaner_sessions (token_hash, cleaner_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
+                (_hash_token(tok), cleaner_id, now, now + timedelta(hours=CLEANER_SESSION_HOURS)))
+    conn.commit(); cur.close(); conn.close()
+    _set_cookie(resp, _CLEANER_COOKIE, tok)
+
+
+def current_cleaner_id():
+    tok = request.cookies.get(_CLEANER_COOKIE)
+    if not tok: return None
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""SELECT c.id FROM cleaner_sessions s JOIN cleaners c ON c.id = s.cleaner_id
+                       WHERE s.token_hash=%s AND s.expires_at > %s AND c.active=1""",
+                    (_hash_token(tok), _utcnow()))
+        row = cur.fetchone(); cur.close(); conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        print(f'[Security] cleaner session lookup failed: {e}', flush=True)
+        return None
+
+
+# ── The gate ──────────────────────────────────────────────────────────────────
+
+_would_block_last = {}  # (method, rule) -> [last_written, pending_count]
+
+
+def _record_would_block(method, rule):
+    key = (method, rule)
+    now = _utcnow()
+    entry = _would_block_last.setdefault(key, [None, 0])
+    entry[1] += 1
+    if entry[0] and (now - entry[0]).total_seconds() < 30:
+        return  # batch bursts (e.g. polling) into one write every 30s
+    n, entry[0], entry[1] = entry[1], now, 0
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""INSERT INTO auth_would_block (method, rule, count, first_seen, last_seen, last_referer, last_user_agent)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (method, rule) DO UPDATE SET count = auth_would_block.count + EXCLUDED.count,
+                         last_seen = EXCLUDED.last_seen, last_referer = EXCLUDED.last_referer,
+                         last_user_agent = EXCLUDED.last_user_agent""",
+                    (method, rule, n, now, now, (request.referrer or '')[:300],
+                     (request.headers.get('User-Agent') or '')[:300]))
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Security] would-block log failed: {e}', flush=True)
+
+
+@app.before_request
+def _auth_gate():
+    if not request.path.startswith('/api/'): return None
+    rule = request.url_rule.rule if request.url_rule else None
+    if rule is None or rule in AUTH_OPEN_RULES: return None
+    if current_staff(): return None
+    if rule in AUTH_CLEANER_RULES:
+        cid = current_cleaner_id()
+        if cid is not None and cid == (request.view_args or {}).get('cleaner_id'): return None
+    _record_would_block(request.method, rule)
+    if not AUTH_ENFORCE: return None
+    resp = jsonify({'error': 'Please sign in again.', 'session_required': True})
+    resp.status_code = 401
+    resp.headers['X-Session-Required'] = '1'
+    return resp
+
+
+# ── Lockout ───────────────────────────────────────────────────────────────────
+
+def _device_id():
+    d = (request.headers.get('X-Device-Id') or '').strip()
+    return d[:64] if d and re.fullmatch(r'[A-Za-z0-9_-]{8,64}', d) else None
+
+
+def _get_state(cur, key):
+    cur.execute("SELECT value FROM security_state WHERE key=%s", (key,))
+    r = cur.fetchone()
+    return r[0] if r else None
+
+
+def _set_state(cur, key, value):
+    cur.execute("""INSERT INTO security_state (key, value) VALUES (%s,%s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""", (key, value))
+
+
+def _device_known(cur, dev):
+    if not dev: return False
+    cur.execute("SELECT 1 FROM login_devices WHERE device_id=%s AND last_success IS NOT NULL", (dev,))
+    return cur.fetchone() is not None
+
+
+def sign_in_blocked(kind):
+    """Call BEFORE checking a PIN. Returns an error response if this device
+    (or all new devices) is locked, else None."""
+    dev = _device_id(); now = _utcnow()
+    try:
+        conn = get_db(); cur = conn.cursor()
+        known = _device_known(cur, dev)
+        if not known and _get_state(cur, 'new_device_lockdown_since'):
+            cur.close(); conn.close()
+            msg = ('Sign-in from new devices is paused for security. '
+                   + ('Please ask the warehouse or an admin for help.' if kind == 'cleaner'
+                      else 'Ask an admin to turn it back on in Settings → Sign-in security.'))
+            return jsonify({'error': msg, 'locked': True}), 423
+        if dev:
+            cur.execute("""SELECT unlock_at FROM device_lockouts
+                           WHERE device_id=%s AND kind=%s AND cleared_at IS NULL
+                             AND (unlock_at IS NULL OR unlock_at > %s)
+                           ORDER BY locked_at DESC LIMIT 1""", (dev, kind, now))
+            row = cur.fetchone()
+            if row:
+                cur.close(); conn.close()
+                if row[0] is None:
+                    msg = 'Too many wrong PINs — this device is locked. Ask an admin to unlock it in Settings → Sign-in security.'
+                else:
+                    mins = max(1, int((row[0] - now).total_seconds() // 60) + 1)
+                    msg = f'Too many wrong PINs. Please wait {mins} minute{"s" if mins != 1 else ""} and try again, or ask the warehouse for help.'
+                return jsonify({'error': msg, 'locked': True}), 423
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Security] lock check failed: {e}', flush=True)
+    return None
+
+
+def sign_in_failed(kind):
+    """Call after a wrong PIN. Records it and applies the lockout rules."""
+    dev = _device_id(); now = _utcnow()
+    alerts = []
+    try:
+        conn = get_db(); cur = conn.cursor()
+        known = _device_known(cur, dev)
+        cur.execute("INSERT INTO login_failures (kind, device_id, known, ts, user_agent) VALUES (%s,%s,%s,%s,%s)",
+                    (kind, dev, 1 if known else 0, now, (request.headers.get('User-Agent') or '')[:300]))
+        if dev:
+            # Consecutive failures since this device's last success or last unlock.
+            cur.execute("""SELECT GREATEST(
+                               COALESCE((SELECT last_success FROM login_devices WHERE device_id=%s), 'epoch'::timestamp),
+                               COALESCE((SELECT MAX(COALESCE(cleared_at, unlock_at)) FROM device_lockouts
+                                         WHERE device_id=%s AND kind=%s), 'epoch'::timestamp))""", (dev, dev, kind))
+            since = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM login_failures WHERE device_id=%s AND kind=%s AND ts > %s", (dev, kind, since))
+            streak = cur.fetchone()[0]
+            limit = STAFF_LOCK_AFTER if kind == 'staff' else CLEANER_LOCK_AFTER
+            if streak >= limit:
+                unlock_at = None if kind == 'staff' else now + timedelta(minutes=CLEANER_LOCK_MINUTES)
+                cur.execute("""INSERT INTO device_lockouts (device_id, kind, locked_at, unlock_at, reason)
+                               VALUES (%s,%s,%s,%s,%s)""",
+                            (dev, kind, now, unlock_at, f'{streak} wrong {kind} PINs in a row'))
+                if kind == 'staff':
+                    cur.execute("SELECT last_name FROM login_devices WHERE device_id=%s", (dev,))
+                    r = cur.fetchone()
+                    who = f"last used by {r[0]}" if r and r[0] else "a device that hasn't signed in before"
+                    alerts.append(('SandersCentral: a device was locked after 3 wrong PINs',
+                                   f"A device ({who}) entered {streak} wrong staff PINs in a row and is now locked.\n\n"
+                                   "If this was a staff member mistyping, unlock it in SandersCentral → Settings → "
+                                   "Sign-in security. If nobody on the team recognizes it, leave it locked."))
+        if not known:
+            reset = _get_state(cur, 'new_device_count_reset_at')
+            since = max(datetime.strptime(reset, '%Y-%m-%d %H:%M:%S') if reset else datetime(1970, 1, 1),
+                        now - timedelta(hours=24))
+            cur.execute("SELECT COUNT(*) FROM login_failures WHERE known=0 AND ts > %s", (since,))
+            if cur.fetchone()[0] >= NEW_DEVICE_FAILURE_LIMIT and not _get_state(cur, 'new_device_lockdown_since'):
+                _set_state(cur, 'new_device_lockdown_since', now.strftime('%Y-%m-%d %H:%M:%S'))
+                alerts.append(('SandersCentral: sign-in from new devices paused',
+                               f"Devices that have never signed in before entered {NEW_DEVICE_FAILURE_LIMIT} wrong PINs "
+                               "within 24 hours, so sign-in from new devices is paused. Staff and cleaners on devices "
+                               "they've used before are not affected.\n\nOnce you're comfortable it's safe, turn it "
+                               "back on in SandersCentral → Settings → Sign-in security."))
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Security] failure record failed: {e}', flush=True)
+    for subject, body in alerts:
+        try: send_email(subject, body, to=KRISTIN_EMAIL)
+        except Exception as e: print(f'[Security] alert email failed: {e}', flush=True)
+
+
+def sign_in_succeeded(kind, name):
+    dev = _device_id()
+    if not dev: return
+    now = _utcnow()
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""INSERT INTO login_devices (device_id, first_success, last_success, last_name, last_kind)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT (device_id) DO UPDATE SET last_success = EXCLUDED.last_success,
+                         last_name = EXCLUDED.last_name, last_kind = EXCLUDED.last_kind""",
+                    (dev, now, now, name, kind))
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Security] device record failed: {e}', flush=True)
+
+
+def check_cleaner_pin_guarded(pin):
+    """Cleaner PIN check with lockout. Returns (cleaner_row, error_response)."""
+    blocked = sign_in_blocked('cleaner')
+    if blocked: return None, blocked
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, name, email FROM cleaners WHERE pin=%s AND active=1", (str(pin),))
+    cleaner = cur.fetchone(); cur.close(); conn.close()
+    if not cleaner:
+        sign_in_failed('cleaner')
+        return None, (jsonify({'success': False, 'error': 'Invalid PIN'}), 401)
+    sign_in_succeeded('cleaner', cleaner['name'])
+    return cleaner, None
+
+
+# ── Admin: Settings → Sign-in security ────────────────────────────────────────
+
+def _security_admin():
+    s = current_staff()
+    return s if s and 'admin' in s['roles'] else None
+
+
+@app.route('/api/security/status', methods=['GET'])
+def security_status():
+    if not _security_admin(): return jsonify({'error': 'Admin sign-in required'}), 403
+    now = _utcnow()
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""SELECT l.id, l.kind, l.locked_at, l.unlock_at, l.reason, d.last_name
+                   FROM device_lockouts l LEFT JOIN login_devices d ON d.device_id = l.device_id
+                   WHERE l.cleared_at IS NULL AND (l.unlock_at IS NULL OR l.unlock_at > %s)
+                   ORDER BY l.locked_at DESC""", (now,))
+    locks = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT method, rule, count, first_seen, last_seen, last_referer, last_user_agent FROM auth_would_block ORDER BY last_seen DESC")
+    wb = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT value FROM security_state WHERE key='new_device_lockdown_since'")
+    r = cur.fetchone()
+    cur.execute("SELECT value FROM security_state WHERE key='would_block_cleared_at'")
+    r2 = cur.fetchone()
+    cur.execute("SELECT COUNT(*) AS n FROM login_failures WHERE ts > %s", (now - timedelta(days=7),))
+    fails7 = cur.fetchone()['n']
+    cur.close(); conn.close()
+    iso = lambda d: d.strftime('%Y-%m-%dT%H:%M:%SZ') if d else None
+    for l in locks:
+        l['locked_at'] = iso(l['locked_at']); l['unlock_at'] = iso(l['unlock_at'])
+    for w in wb:
+        w['first_seen'] = iso(w['first_seen']); w['last_seen'] = iso(w['last_seen'])
+    lockdown = r['value'] if r else None
+    return jsonify({
+        'enforce': AUTH_ENFORCE,
+        'new_device_lockdown_since': (lockdown.replace(' ', 'T') + 'Z') if lockdown else None,
+        'would_block_since': (r2['value'].replace(' ', 'T') + 'Z') if r2 and r2['value'] else None,
+        'locked_devices': locks, 'would_block': wb, 'failed_signins_7d': fails7,
+    })
+
+
+@app.route('/api/security/unlock', methods=['POST'])
+def security_unlock():
+    admin = _security_admin()
+    if not admin: return jsonify({'error': 'Admin sign-in required'}), 403
+    lid = (request.json or {}).get('lockout_id')
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE device_lockouts SET cleared_at=%s, cleared_by=%s WHERE id=%s AND cleared_at IS NULL RETURNING device_id",
+                (_utcnow(), admin['name'], lid))
+    row = cur.fetchone(); conn.commit(); cur.close(); conn.close()
+    if not row: return jsonify({'error': 'Already unlocked'}), 404
+    log_audit('Security', 'Unlocked device', f'lockout #{lid}', admin['name'])
+    return jsonify({'success': True})
+
+
+@app.route('/api/security/new-devices/resume', methods=['POST'])
+def security_resume_new_devices():
+    admin = _security_admin()
+    if not admin: return jsonify({'error': 'Admin sign-in required'}), 403
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM security_state WHERE key='new_device_lockdown_since'")
+    _set_state(cur, 'new_device_count_reset_at', _utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    conn.commit(); cur.close(); conn.close()
+    log_audit('Security', 'Resumed sign-in from new devices', '', admin['name'])
+    return jsonify({'success': True})
+
+
+@app.route('/api/security/would-block/clear', methods=['POST'])
+def security_clear_would_block():
+    admin = _security_admin()
+    if not admin: return jsonify({'error': 'Admin sign-in required'}), 403
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM auth_would_block")
+    _set_state(cur, 'would_block_cleared_at', _utcnow().strftime('%Y-%m-%d %H:%M:%S'))
+    conn.commit(); cur.close(); conn.close()
+    _would_block_last.clear()
+    log_audit('Security', 'Cleared would-block report', '', admin['name'])
+    return jsonify({'success': True})
+
+
+@app.route('/api/staff/me', methods=['GET'])
+def staff_me():
+    """Who is signed in on this browser (used by the PO approvals page)."""
+    me = current_staff()
+    if not me: return jsonify({'error': 'Not signed in'}), 401
+    return jsonify({'name': me['name'], 'roles': me['roles'], 'id': me['id']})
+
+
+@app.route('/api/staff/logout', methods=['POST'])
+def staff_logout():
+    resp = jsonify({'success': True})
+    end_staff_session(resp)
+    return resp
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
 
 @app.route('/api/cleaner-auth', methods=['POST'])
 def cleaner_auth():
@@ -1460,24 +1952,11 @@ def cleaner_auth():
     data = request.json or {}
     pin = str(data.get('pin', '')).strip()
     if not pin: return jsonify({'success':False,'error':'PIN required'}), 400
-    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,name,email FROM cleaners WHERE pin=%s AND active=1", (pin,))
-    cleaner = cur.fetchone(); cur.close(); conn.close()
-    if not cleaner: return jsonify({'success':False,'error':'Invalid PIN'}), 401
-    return jsonify({'success':True,'cleaner':{'id':cleaner['id'],'name':cleaner['name'],'email':cleaner['email']}})
-
-@app.route('/api/settings/pins', methods=['POST'])
-def save_pins():
-    data = request.json or {}
-    global WAREHOUSE_PIN, ADMIN_PIN, MAINTENANCE_PIN, COORDINATOR_PIN
-    changed = []
-    if data.get('warehouse_pin'): WAREHOUSE_PIN = data['warehouse_pin']; changed.append('Warehouse')
-    if data.get('admin_pin'): ADMIN_PIN = data['admin_pin']; changed.append('Admin')
-    if data.get('maintenance_pin'): MAINTENANCE_PIN = data['maintenance_pin']; changed.append('Maintenance')
-    if data.get('coordinator_pin'): COORDINATOR_PIN = data['coordinator_pin']; changed.append('Coordinator')
-    if changed:
-        log_audit('Settings', 'Changed shared PIN(s)', ', '.join(changed), resolve_performer(data))
-    return jsonify({'success':True})
+    cleaner, err = check_cleaner_pin_guarded(pin)
+    if err: return err
+    resp = jsonify({'success':True,'cleaner':{'id':cleaner['id'],'name':cleaner['name'],'email':cleaner['email']}})
+    create_cleaner_session(resp, cleaner['id'])
+    return resp
 
 # ── Homes ─────────────────────────────────────────────────────────────────────
 
@@ -2021,11 +2500,10 @@ def pickup_bag(bag_id):
     """Cleaner scans to confirm pickup (status: staged → out). 24hr timer starts here."""
     data=request.json or {}
     cleaner_pin=str(data.get('cleaner_pin',''))
+    # Verify cleaner PIN (with lockout)
+    cleaner, err = check_cleaner_pin_guarded(cleaner_pin)
+    if err: return err
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    # Verify cleaner PIN
-    cur.execute("SELECT id,name FROM cleaners WHERE pin=%s AND active=1",(cleaner_pin,))
-    cleaner=cur.fetchone()
-    if not cleaner: cur.close(); conn.close(); return jsonify({'error':'Invalid PIN'}),401
     cur.execute("SELECT b.*,h.name AS home_name FROM bags b JOIN homes h ON h.id=b.home_id WHERE b.id=%s",(bag_id.upper(),))
     bag=cur.fetchone()
     if not bag: cur.close(); conn.close(); return jsonify({'error':'Bag not found'}),404
@@ -2206,17 +2684,17 @@ def warehouse_start_session():
         return jsonify({'error': 'Self check-in is temporarily paused — please have warehouse staff check your bags in.'}), 403
     if not is_valid_warehouse_token(token):
         return jsonify({'error': 'This code has expired. Please scan the screen in the warehouse again.'}), 401
+    cleaner, err = check_cleaner_pin_guarded(cleaner_pin)
+    if err: return err
     conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id,name FROM cleaners WHERE pin=%s AND active=1", (cleaner_pin,))
-    cleaner = cur.fetchone()
-    if not cleaner:
-        cur.close(); conn.close(); return jsonify({'error': 'Invalid PIN'}), 401
     now_str = now_central()
     expires_str = (datetime.strptime(now_str, '%Y-%m-%d %H:%M:%S') + timedelta(minutes=WH_SESSION_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
     cur.execute("INSERT INTO warehouse_checkin_sessions (cleaner_id,started_at,expires_at) VALUES (%s,%s,%s) RETURNING id", (cleaner['id'], now_str, expires_str))
     sid = cur.fetchone()['id']
     conn.commit(); cur.close(); conn.close()
-    return jsonify({'success': True, 'session_id': sid, 'cleaner_id': cleaner['id'], 'cleaner_name': cleaner['name']})
+    resp = jsonify({'success': True, 'session_id': sid, 'cleaner_id': cleaner['id'], 'cleaner_name': cleaner['name']})
+    create_cleaner_session(resp, cleaner['id'])
+    return resp
 
 @app.route('/api/cleaner/<int:cleaner_id>/out-bags', methods=['GET'])
 def get_cleaner_out_bags(cleaner_id):
@@ -3975,21 +4453,23 @@ def check_staff_pin(pin):
 
 @app.route('/api/staff/auth', methods=['POST'])
 def staff_auth():
-    """Authenticate a PIN — checks individual staff PINs first, then falls
-    back to the legacy shared role PINs (admin/warehouse/maintenance/coordinator)
-    so anyone not yet migrated to an individual PIN still works."""
+    """Sign in with a staff member's own PIN. Starts a session (cookie) and
+    applies the device lockout rules. There are no shared PINs."""
     data = request.json or {}
     pin = str(data.get('pin', ''))
-    staff = check_staff_pin(pin)
-    if staff:
-        roles = staff_role_list(staff)
-        if not roles:
-            return jsonify({'error': 'No active role on this account. Please check with your admin.'}), 403
-        return jsonify({'success': True, 'name': staff['name'], 'role': roles[0], 'roles': roles, 'id': staff['id'], 'email': staff.get('email') or ''})
-    legacy_role = check_pin(pin)
-    if legacy_role:
-        return jsonify({'success': True, 'name': legacy_role.capitalize(), 'role': legacy_role, 'roles': [legacy_role], 'is_master': legacy_role == 'admin'})
-    return jsonify({'error': 'Invalid PIN'}), 401
+    blocked = sign_in_blocked('staff')
+    if blocked: return blocked
+    staff = check_staff_pin(pin) if pin else None
+    if not staff:
+        sign_in_failed('staff')
+        return jsonify({'error': 'Invalid PIN'}), 401
+    roles = staff_role_list(staff)
+    if not roles:
+        return jsonify({'error': 'No active role on this account. Please check with your admin.'}), 403
+    sign_in_succeeded('staff', staff['name'])
+    resp = jsonify({'success': True, 'name': staff['name'], 'role': roles[0], 'roles': roles, 'id': staff['id'], 'email': staff.get('email') or ''})
+    create_staff_session(resp, staff)
+    return resp
 
 @app.route('/api/staff', methods=['GET'])
 def get_staff():
@@ -4706,7 +5186,7 @@ for _size in _LINEN_BED_SIZES:
         LINEN_ITEMS.append(f'{_size} {_component}')
 LINEN_ITEMS += [
     'Bath Towels', 'Hand Towels', 'Washcloths', 'Bath Mats', 'Pool Towels',
-    'Blue Linen Bag', 'Kitchen Towels',
+    'Blue Linen Bag', 'Kitchen Towels', 'Pot Holders',
     'King Pillows', 'Standard Pillows', 'King Pillow Protector', 'Standard Pillow Protector',
 ]
 
@@ -5504,9 +5984,19 @@ def decide_po_request(rid):
     data=request.json or {}
     status=data.get('status','')
     if status not in ('Approved','Denied'): return jsonify({'error':'Status must be Approved or Denied'}),400
-    approver_name=data.get('approver_name','').strip()
     notes=data.get('notes','').strip()
-    if not approver_name: return jsonify({'error':'Approver name is required'}),400
+    # The approver is whoever is signed in with their own PIN — never a name
+    # typed or picked on the page. Match on name or email so a small spelling
+    # difference in the staff profile doesn't lock an approver out.
+    me = current_staff()
+    if not me: return jsonify({'error':'Please sign in with your PIN to decide purchase requests.','session_required':True}),401
+    def _is(person_name, person_email):
+        return (me['name'].strip().lower() == person_name.lower()
+                or (me['email'] or '').strip().lower() == person_email.lower())
+    if _is(CHUCK_NAME, CHUCK_EMAIL): approver_name = CHUCK_NAME
+    elif _is(PO_APPROVER_1_NAME, PO_APPROVER_1_EMAIL): approver_name = PO_APPROVER_1_NAME
+    elif _is(PO_APPROVER_2_NAME, PO_APPROVER_2_EMAIL): approver_name = PO_APPROVER_2_NAME
+    else: approver_name = me['name']
     conn=get_db(); cur=conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT * FROM po_requests WHERE id=%s",(rid,)); req=cur.fetchone()
     if not req: cur.close(); conn.close(); return jsonify({'error':'Request not found'}),404
@@ -7896,10 +8386,346 @@ def background_overdue_loop():
             print(f"[Overdue Scheduler] Weekly forecast check failed: {e}", flush=True)
         time.sleep(OVERDUE_CHECK_INTERVAL_SECONDS)
 
+# ── Linen Inventory (Phases 1–3) ──────────────────────────────────────────────
+# Replaces Sabrina's standalone SBR Linen Dashboard. Linen is NOT live stock:
+# nothing here runs at pack time, and nothing here writes to any existing table.
+#   Est. on hand  = latest count + purchased − damaged   (since that count date)
+#   Damaged       = damage_log.damaged_qty (read-only)
+#   Rags          = damage_log_saved.saved_qty — a SUBSET of damaged, info only,
+#                   never subtracted a second time
+#   Purchased     = received housekeeping order lines tagged with a linen item
+#                   (supply_order_items.matched_linen_item_id — the tagging UI is
+#                   Phase 4, so this reads 0 until lines are tagged)
+# Access is the 'linen_inventory' role only (Sarah Elizabeth, Kristin, Sabrina),
+# not every admin, and never the legacy shared PINs.
+
+LINEN_BASELINE_DATE = '2026-09-20'
+LINEN_PRIOR_PERIOD = ('2026-05-06', '2026-09-20')
+
+# (name, category, supplier, sept20_count, par1, par3, unit_cost, damage_log_name)
+# From the 9/28 dashboard. par3 is stored as given, never computed (duvet
+# inserts are one per bed plus a few extras; dish towels are intentionally 5×).
+# Merges per Sabrina/Kristin: "Queen blanket" = Queen Grey Blanket (the empty
+# "Grey blanket" row folds into it); "Twin waffle blanket" folds into Twin blanket.
+# count None = joined the catalog without a Sept 20 count (tracked-only).
+LINEN_ITEMS_SEED = [
+    ('Bath towels',                  'Bath',       '1Concierge',            3764, 1848, 5544,  8, 'Bath Towels'),
+    ('Hand towels',                  'Bath',       '1Concierge',            1613,  742, 2226,  5, 'Hand Towels'),
+    ('Washcloths',                   'Bath',       '1Concierge',            1881, 1232, 3696,  3, 'Washcloths'),
+    ('Bath mats',                    'Bath',       '1Concierge',             692,  308,  924, 12, 'Bath Mats'),
+    ('Pool towels',                  'Bath',       '1Concierge',             385,  187,  560, 14, 'Pool Towels'),
+    ('King duvet cover',             'Bedding',    'California Design Den',  622,  206,  618, 45, 'King Duvet Cover'),
+    ('King flat sheet',              'Bedding',    '1Concierge',             594,  206,  618, 20, 'King Flat Sheet'),
+    ('King fitted sheet',            'Bedding',    '1Concierge',             558,  206,  618, 22, 'King Fitted Sheet'),
+    ('Pillow cases (king)',          'Bedding',    '1Concierge',            2343,  824, 2472,  8, 'King Pillowcase'),
+    ('King blanket',                 'Bedding',    None,                    None,    0,    0,  0, 'King Blanket'),
+    ('Queen/full duvet cover',       'Bedding',    'American Hospitality',   216,   98,  294, 38, 'Queen Duvet Cover'),
+    ('Queen flat sheet',             'Bedding',    '1Concierge',             243,  116,  348, 16, 'Queen Flat Sheet'),
+    ('Queen fitted sheet',           'Bedding',    '1Concierge',             238,  116,  348, 18, 'Queen Fitted Sheet'),
+    ('Pillow cases (standard)',      'Bedding',    '1Concierge',            2200,  940, 2820,  7, 'Queen Pillowcase'),
+    ('Queen grey blanket',           'Bedding',    '1Concierge',              52,   18,   54, 22, 'Queen Grey Blanket'),
+    ('Queen waffle blanket',         'Bedding',    '1Concierge',               0,    0,    0, 28, 'Queen Waffle Blanket'),
+    ('Twin duvet cover',             'Bedding',    'American Hospitality',   544,  246,  738, 32, 'Twin Duvet Cover'),
+    ('Twin flat sheet',              'Bedding',    '1Concierge',             610,  266,  798, 14, 'Twin Flat Sheet'),
+    ('Twin fitted sheet',            'Bedding',    '1Concierge',             544,  266,  798, 18, 'Twin Fitted Sheet'),
+    ('Twin blanket',                 'Bedding',    '1Concierge',              58,   22,   66, 18, 'Twin Blanket'),
+    ('Mattress pad - king',          'Protection', '1Concierge',             206,    0,    0, 28, 'King Mattress Pad'),
+    ('Mattress pad - queen',         'Protection', '1Concierge',             112,    0,    0, 24, 'Queen Mattress Pad'),
+    ('Mattress pad - twin',          'Protection', '1Concierge',             276,    0,    0, 18, 'Twin Mattress Pad'),
+    ('Pillow protectors (king)',     'Protection', '1Concierge',             967,  412, 1236,  6, 'King Pillow Protector'),
+    ('Pillow protectors (standard)', 'Protection', '1Concierge',            1191,  470, 1410,  5, 'Standard Pillow Protector'),
+    ('King duvet insert',            'Protection', '1Concierge',             217,   69,   79, 12, 'King Insert'),
+    ('Queen/full duvet insert',      'Protection', '1Concierge',             114,   33,   43, 10, 'Queen Insert'),
+    ('Twin duvet insert',            'Protection', '1Concierge',             248,   82,   92, 10, 'Twin Insert'),
+    ('King pillows',                 'Protection', None,                    None,    0,    0,  0, 'King Pillows'),
+    ('Standard pillows',             'Protection', None,                    None,    0,    0,  0, 'Standard Pillows'),
+    ('Dish towels',                  'Kitchen',    '1Concierge',             305,  178,  890,  4, 'Kitchen Towels'),
+    ('Pot holders',                  'Kitchen',    '1Concierge',             211,    0,    0,  5, 'Pot Holders'),
+    ('Blue linen bags',              'Laundry',    'Guest Supply',           249,  119,  356,  3, 'Blue Linen Bag'),
+]
+
+# May 6 – Sept 20, 2026 closed period, per item, from the dashboard's
+# reconciliation: (name, may6_count, purchased, damaged, sept20_count, unit_cost).
+# Totals: 19,862 + 7,161 − 1,486 → counted 21,042.
+LINEN_PRIOR_PERIOD_ITEMS = [
+    ('King duvet cover', 443, 200, 58, 622, 45),
+    ('King flat sheet', 396, 204, 37, 594, 20),
+    ('King fitted sheet', 315, 492, 57, 558, 22),
+    ('Pillow cases (king)', 1475, 1008, 105, 2343, 8),
+    ('Pillow protectors (king)', 1042, 0, 0, 967, 6),
+    ('Mattress pad - king', 0, 0, 0, 206, 28),
+    ('King duvet insert', 69, 0, 1, 217, 12),
+    ('Queen/full duvet cover', 217, 64, 21, 216, 38),
+    ('Queen flat sheet', 269, 30, 15, 243, 16),
+    ('Queen fitted sheet', 293, 30, 11, 238, 18),
+    ('Mattress pad - queen', 0, 0, 0, 112, 24),
+    ('Queen/full duvet insert', 33, 0, 2, 114, 10),
+    ('Pillow cases (standard)', 2201, 504, 55, 2200, 7),
+    ('Pillow protectors (standard)', 1275, 0, 0, 1191, 5),
+    ('Queen grey blanket', 34, 0, 13, 52, 22),
+    ('Twin duvet cover', 622, 0, 17, 544, 32),
+    ('Twin flat sheet', 686, 0, 12, 610, 14),
+    ('Twin fitted sheet', 642, 0, 26, 544, 18),
+    ('Twin blanket', 33, 0, 1, 58, 18),
+    ('Mattress pad - twin', 0, 0, 4, 276, 18),
+    ('Twin duvet insert', 82, 0, 2, 248, 10),
+    ('Bath towels', 4666, 0, 140, 3764, 8),
+    ('Hand towels', 1237, 900, 242, 1613, 5),
+    ('Washcloths', 2142, 2600, 393, 1881, 3),
+    ('Bath mats', 915, 0, 86, 692, 12),
+    ('Dish towels', 221, 854, 140, 305, 4),
+    ('Pool towels', 377, 175, 18, 385, 14),
+    ('Blue linen bags', 177, 100, 30, 249, 3),
+]
+
+
+def init_linen_inventory():
+    """New tables + one-time seed. Every step is IF NOT EXISTS / only-if-empty,
+    so re-running on each deploy is harmless and never overwrites edits made
+    in the app. Wrapped so a failure here can never stop the app starting."""
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS linen_items (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                category TEXT,
+                supplier TEXT,
+                par1 INTEGER NOT NULL DEFAULT 0,
+                par3 INTEGER NOT NULL DEFAULT 0,
+                unit_cost NUMERIC(10,2) NOT NULL DEFAULT 0,
+                damage_log_name TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS linen_counts (
+                id SERIAL PRIMARY KEY,
+                count_date TEXT NOT NULL,
+                linen_item_id INTEGER NOT NULL REFERENCES linen_items(id),
+                qty INTEGER NOT NULL,
+                counted_by TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS linen_periods (
+                id SERIAL PRIMARY KEY,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                starting_count INTEGER,
+                purchased INTEGER,
+                damaged INTEGER,
+                rags INTEGER,
+                ending_count INTEGER,
+                unaccounted_units INTEGER,
+                unaccounted_value NUMERIC(12,2),
+                closed_at TEXT,
+                notes TEXT
+            );
+            CREATE TABLE IF NOT EXISTS linen_period_items (
+                id SERIAL PRIMARY KEY,
+                period_id INTEGER NOT NULL REFERENCES linen_periods(id),
+                linen_item_id INTEGER NOT NULL REFERENCES linen_items(id),
+                starting_count INTEGER,
+                purchased INTEGER,
+                damaged INTEGER,
+                rags INTEGER,
+                ending_count INTEGER,
+                unaccounted_units INTEGER,
+                unit_cost NUMERIC(10,2),
+                unaccounted_value NUMERIC(12,2)
+            );
+        """)
+        # Phase 4 tag column — nullable, nothing reads or writes it except the
+        # linen summary, so existing orders are untouched.
+        cur.execute("ALTER TABLE supply_order_items ADD COLUMN IF NOT EXISTS matched_linen_item_id INTEGER")
+        conn.commit()
+
+        cur.execute("SELECT COUNT(*) FROM linen_items")
+        if cur.fetchone()[0] == 0:
+            for i, (name, cat, sup, _cnt, p1, p3, cost, dmg) in enumerate(LINEN_ITEMS_SEED):
+                cur.execute("""INSERT INTO linen_items
+                               (name,category,supplier,par1,par3,unit_cost,damage_log_name,active,sort_order)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,1,%s) ON CONFLICT (name) DO NOTHING""",
+                            (name, cat, sup, p1, p3, cost, dmg, i))
+            conn.commit()
+            print(f'[Linen Inventory] Seeded {len(LINEN_ITEMS_SEED)} catalog items', flush=True)
+
+        cur.execute("SELECT name, id FROM linen_items")
+        ids = dict(cur.fetchall())
+
+        cur.execute("SELECT COUNT(*) FROM linen_counts")
+        if cur.fetchone()[0] == 0:
+            ts = now_central(); n = 0
+            for name, _c, _s, cnt, *_rest in LINEN_ITEMS_SEED:
+                if cnt is None or name not in ids: continue
+                cur.execute("""INSERT INTO linen_counts (count_date,linen_item_id,qty,counted_by,created_at)
+                               VALUES (%s,%s,%s,%s,%s)""",
+                            (LINEN_BASELINE_DATE, ids[name], cnt, 'Sept 20 physical count (dashboard import)', ts))
+                n += 1
+            conn.commit()
+            print(f'[Linen Inventory] Loaded Sept 20, 2026 baseline for {n} items', flush=True)
+
+        cur.execute("SELECT COUNT(*) FROM linen_periods")
+        if cur.fetchone()[0] == 0:
+            tot = {'s': 0, 'p': 0, 'd': 0, 'e': 0, 'gu': 0, 'gv': 0.0}
+            rows = []
+            for name, base, p, d, act, cost in LINEN_PRIOR_PERIOD_ITEMS:
+                if name not in ids: continue
+                gap = (base + p - d) - act          # + = unaccounted loss, − = surplus
+                loss = max(0, gap)                  # dashboard counts losses only
+                rows.append((ids[name], base, p, d, act, gap, cost, loss * cost))
+                tot['s'] += base; tot['p'] += p; tot['d'] += d; tot['e'] += act
+                tot['gu'] += loss; tot['gv'] += loss * cost
+            cur.execute("""INSERT INTO linen_periods
+                           (start_date,end_date,starting_count,purchased,damaged,rags,ending_count,
+                            unaccounted_units,unaccounted_value,closed_at,notes)
+                           VALUES (%s,%s,%s,%s,%s,NULL,%s,%s,%s,%s,%s) RETURNING id""",
+                        (LINEN_PRIOR_PERIOD[0], LINEN_PRIOR_PERIOD[1], tot['s'], tot['p'], tot['d'], tot['e'],
+                         tot['gu'], round(tot['gv'], 2), now_central(),
+                         "Imported from Sabrina's SBR Linen Dashboard (rags not tracked this period)"))
+            pid = cur.fetchone()[0]
+            for r in rows:
+                cur.execute("""INSERT INTO linen_period_items
+                               (period_id,linen_item_id,starting_count,purchased,damaged,rags,ending_count,
+                                unaccounted_units,unit_cost,unaccounted_value)
+                               VALUES (%s,%s,%s,%s,%s,NULL,%s,%s,%s,%s)""", (pid,) + r)
+            conn.commit()
+            print(f'[Linen Inventory] Loaded May 6 – Sept 20 closed period (${tot["gv"]:,.0f} unaccounted)', flush=True)
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f'[Linen Inventory] init skipped: {e}', flush=True)
+
+
+def has_linen_access(pin):
+    """Only individual staff with the linen_inventory role — deliberately not
+    every admin, and never the legacy shared PINs."""
+    if not pin: return False
+    staff = check_staff_pin(str(pin))
+    return 'linen_inventory' in staff_role_list(staff)
+
+
+def _linen_status(est, par1):
+    if not par1 or est is None: return 'ok'
+    if est < par1: return 'order'
+    if est < par1 * 2.5: return 'watch'
+    return 'ok'
+
+
+@app.route('/api/linen/summary', methods=['GET'])
+def linen_summary():
+    """Per item: latest count, purchased/damaged/rags since that count date,
+    est. on hand, coverage, status and reorder qty — plus closed periods and
+    any Damage Log names that don't match a catalog item."""
+    if not has_linen_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM linen_items WHERE active=1 ORDER BY sort_order, name")
+    items = [dict(r) for r in cur.fetchall()]
+
+    # Each item's own most recent count (so an item counted later — e.g. the
+    # three added without a Sept 20 count — starts from its own date).
+    cur.execute("""SELECT DISTINCT ON (linen_item_id) linen_item_id, count_date, qty
+                   FROM linen_counts ORDER BY linen_item_id, count_date DESC, id DESC""")
+    counts = {r['linen_item_id']: r for r in cur.fetchall()}
+
+    out = []
+    for it in items:
+        c = counts.get(it['id'])
+        since = c['count_date'] if c else None
+        damaged = rags = purchased = 0
+        if since and it['damage_log_name']:
+            cur.execute("SELECT COALESCE(SUM(damaged_qty),0) AS q FROM damage_log WHERE item_name=%s AND log_date>=%s",
+                        (it['damage_log_name'], since))
+            damaged = int(cur.fetchone()['q'])
+            cur.execute("SELECT COALESCE(SUM(saved_qty),0) AS q FROM damage_log_saved WHERE item_name=%s AND log_date>=%s",
+                        (it['damage_log_name'], since))
+            rags = int(cur.fetchone()['q'])
+        if since:
+            cur.execute("""SELECT COALESCE(SUM(i.received_units),0) AS q
+                           FROM supply_order_items i JOIN supply_orders o ON o.id=i.order_id
+                           WHERE i.matched_linen_item_id=%s AND o.module='housekeeping'
+                             AND o.status='Received' AND SUBSTRING(o.received_at,1,10)>=%s""",
+                        (it['id'], since))
+            purchased = int(cur.fetchone()['q'])
+        par1 = int(it['par1'] or 0); par3 = int(it['par3'] or 0)
+        cost = float(it['unit_cost'] or 0)
+        est = max(0, c['qty'] + purchased - damaged) if c else None
+        out.append({
+            'id': it['id'], 'name': it['name'], 'category': it['category'], 'supplier': it['supplier'],
+            'par1': par1, 'par3': par3, 'unit_cost': cost, 'damage_log_name': it['damage_log_name'],
+            'count_date': since, 'baseline': c['qty'] if c else None,
+            'purchased': purchased, 'damaged': damaged, 'rags': rags,
+            'est_on_hand': est,
+            'coverage': round(est / par1, 2) if (est is not None and par1) else None,
+            'status': 'untracked' if est is None else _linen_status(est, par1),
+            'reorder_qty': max(0, par3 - est) if (est is not None and par1) else 0,
+            'damage_value': round(damaged * cost, 2),
+        })
+
+    cur.execute("SELECT * FROM linen_periods ORDER BY end_date DESC, id DESC")
+    periods = []
+    for p in cur.fetchall():
+        p = dict(p)
+        p['unaccounted_value'] = float(p['unaccounted_value'] or 0)
+        periods.append(p)
+
+    # Damage Log names since the earliest current count that no catalog item
+    # claims — surfaced so nothing is silently left out of the math.
+    earliest = min([o['count_date'] for o in out if o['count_date']] or [LINEN_BASELINE_DATE])
+    cur.execute("SELECT damage_log_name FROM linen_items WHERE active=1 AND damage_log_name IS NOT NULL")
+    known = {r['damage_log_name'] for r in cur.fetchall()}
+    cur.execute("""SELECT item_name, SUM(damaged_qty) AS qty FROM damage_log
+                   WHERE log_date>=%s GROUP BY item_name ORDER BY item_name""", (earliest,))
+    unmatched = [{'item_name': r['item_name'], 'qty': int(r['qty'])} for r in cur.fetchall() if r['item_name'] not in known]
+    cur.close(); conn.close()
+    return jsonify({'items': out, 'periods': periods, 'unmatched_damage': unmatched, 'as_of': today_central()})
+
+
+@app.route('/api/linen/items', methods=['GET'])
+def linen_items_list():
+    """Full catalog (including inactive) for the Settings editor."""
+    if not has_linen_access(request.args.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    conn = get_db(); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM linen_items ORDER BY sort_order, name")
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    for r in rows: r['unit_cost'] = float(r['unit_cost'] or 0)
+    return jsonify({'items': rows, 'damage_log_names': LINEN_ITEMS})
+
+
+@app.route('/api/linen/items/<int:item_id>', methods=['PUT'])
+def linen_item_update(item_id):
+    """Edit par levels, supplier, cost or active flag for one catalog item."""
+    data = request.json or {}
+    if not has_linen_access(data.get('pin')):
+        return jsonify({'error': 'Linen Inventory access required'}), 403
+    fields, vals = [], []
+    for key, cast in (('par1', int), ('par3', int), ('unit_cost', float), ('active', int)):
+        if key in data and data[key] not in (None, ''):
+            try: v = cast(data[key])
+            except (TypeError, ValueError): return jsonify({'error': f'Invalid {key}'}), 400
+            if v < 0: return jsonify({'error': f'{key} cannot be negative'}), 400
+            fields.append(f'{key}=%s'); vals.append(v)
+    for key in ('supplier', 'category'):
+        if key in data:
+            fields.append(f'{key}=%s'); vals.append((data[key] or '').strip() or None)
+    if not fields: return jsonify({'error': 'Nothing to update'}), 400
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(f"UPDATE linen_items SET {', '.join(fields)} WHERE id=%s RETURNING name", vals + [item_id])
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    if not row: return jsonify({'error': 'Item not found'}), 404
+    log_audit('LinenInventory', 'Edited catalog item', f"{row[0]}: " + ', '.join(f.split('=')[0] for f in fields),
+              resolve_performer(data))
+    return jsonify({'success': True})
+
+
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     init_db()
+    init_security_tables()
+    init_linen_inventory()
     threading.Thread(target=background_overdue_loop, daemon=True).start()
     threading.Thread(target=background_breezeway_loop, daemon=True).start()
     port=int(os.environ.get('PORT',3000))
