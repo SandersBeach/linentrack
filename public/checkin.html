@@ -72,6 +72,30 @@
 </div>
 
 <script>
+// Device ID for sign-in lockout (per device, not per person). Added to
+// every /api request so the server can recognize this phone or iPad.
+(function () {
+  let dev = '';
+  try {
+    dev = localStorage.getItem('sbr_device_id') || '';
+    if (!dev) {
+      dev = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)));
+      dev = dev.replace(/[^A-Za-z0-9_-]/g, '');
+      localStorage.setItem('sbr_device_id', dev);
+    }
+  } catch (e) {}
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (dev && (url.startsWith('/api/') || url.startsWith(location.origin + '/api/'))) {
+      init = Object.assign({}, init || {});
+      const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+      h.set('X-Device-Id', dev);
+      init.headers = h;
+    }
+    return nativeFetch(input, init);
+  };
+})();
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token') || '';
 let session = null; // { session_id, cleaner_id, cleaner_name }
