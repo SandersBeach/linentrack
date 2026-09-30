@@ -187,6 +187,30 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
+// Device ID for sign-in lockout (per device, not per person). Added to
+// every /api request so the server can recognize this phone or iPad.
+(function () {
+  let dev = '';
+  try {
+    dev = localStorage.getItem('sbr_device_id') || '';
+    if (!dev) {
+      dev = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)));
+      dev = dev.replace(/[^A-Za-z0-9_-]/g, '');
+      localStorage.setItem('sbr_device_id', dev);
+    }
+  } catch (e) {}
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (dev && (url.startsWith('/api/') || url.startsWith(location.origin + '/api/'))) {
+      init = Object.assign({}, init || {});
+      const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+      h.set('X-Device-Id', dev);
+      init.headers = h;
+    }
+    return nativeFetch(input, init);
+  };
+})();
 // ── i18n ──────────────────────────────────────────────────────────────────────
 // Language resets to English on every fresh page load (not remembered), since
 // multiple cleaners share one PIN/phone and each person should pick their own.
@@ -198,6 +222,7 @@ const T = {
     pinSubtitle: 'Enter your 5-digit cleaner PIN',
     clear: 'Clear',
     wrongPin: 'Wrong PIN — try again',
+    lockedPin: 'Too many wrong PINs. Please wait a few minutes, or ask the warehouse for help.',
     connError: 'Connection error',
     signOut: 'Sign out',
     scanSectionTitle: 'Scan a bag to confirm pickup',
@@ -243,6 +268,7 @@ const T = {
     pinSubtitle: 'Ingresa tu PIN de 5 dígitos',
     clear: 'Borrar',
     wrongPin: 'PIN incorrecto — inténtalo de nuevo',
+    lockedPin: 'Demasiados PIN incorrectos. Espere unos minutos o pida ayuda en el almacén.',
     connError: 'Error de conexión',
     signOut: 'Cerrar sesión',
     scanSectionTitle: 'Escanea una bolsa para confirmar la recogida',
@@ -349,7 +375,7 @@ async function submitPin() {
     const r = await fetch('/api/cleaner-auth', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({pin:_pin}) });
     const data = await r.json();
     if (!r.ok || !data.success) {
-      document.getElementById('pin-err').textContent = t().wrongPin;
+      document.getElementById('pin-err').textContent = r.status === 423 ? t().lockedPin : t().wrongPin;
       _pin = ''; updateDots(); return;
     }
     _cleaner = data.cleaner;
